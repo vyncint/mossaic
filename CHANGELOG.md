@@ -9,6 +9,8 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-19
+
 ### Added
 
 - **`--today DATE` makes "today" an input.** The tracker read the clock, so its
@@ -16,13 +18,15 @@ listed under a **Changed** or **Removed** heading.
   a calendar and a date. Now it can be told, which is what lets a report be
   reproduced, lets a day that has not arrived be asked what it will owe, and
   lets the tests assert on a report at all. (#2, #3)
-- **`--backfill` commits what the plan is short, and nothing else.** A plain
-  `--write` puts the same flat count on every lit day, including the ones
-  already bright — and adding to the busiest of those raises the year's peak,
-  which is the very thing every letter day is measured against. A shortfall
-  cannot do that: `need` is at most the peak already, so one pass finishes the
-  plan and the target does not move. Needs `--repo`, and `--write` to commit.
-  (#7)
+- **`--backfill` commits what the days already past are short of, and nothing
+  else.** A plain `--write` puts the same flat count on every lit day, including
+  the ones already bright — and adding to the busiest of those raises the year's
+  peak, which is the very thing every letter day is measured against. A shortfall
+  cannot do that: `need` is at most the peak already, so what every other day
+  owes is unchanged afterwards and one pass of arithmetic is enough. Days still to
+  come are deliberately left for an ordinary commit on the day; back-dating is
+  only how you reach the ones that have gone. `--today` is what "past" means.
+  Needs `--repo`, and `--write` to commit. (#7)
 - **`keep-dark`, a day the report now warns about.** A day inside the text block
   that is not part of a letter has to stay empty, and a contribution on it is
   the one loss nothing takes back. The Action gains `today-kind` and
@@ -336,7 +340,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vyncint/mossaic/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vyncint/mossaic/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vyncint/mossaic/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vyncint/mossaic/releases/tag/v0.1.0
