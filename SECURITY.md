@@ -7,6 +7,19 @@ downloads. Bugs that let fetched data escape that boundary (escape sequences
 reaching the terminal unfiltered, or a path being written outside the file you
 named) are treated as security issues.
 
+## Reporting a vulnerability
+
+Use GitHub's private reporting: **Security → Report a vulnerability** on the
+repository ([direct link][report]). It opens a private thread with the
+maintainer; nothing is public until a fix is out. Please do not open a public
+issue for anything you believe is exploitable — for everything else, issues
+are the right place.
+
+You can expect an acknowledgement within a few days. There is no bounty, but
+fixes are released promptly and credited unless you ask otherwise.
+
+[report]: https://github.com/vyncint/mossaic/security/advisories/new
+
 ## Posture
 
 What the project does continuously, enforced by required CI on every change:
@@ -25,6 +38,12 @@ What the project does continuously, enforced by required CI on every change:
   Action pinned to a full commit SHA, checkouts that do not persist
   credentials, a read-only workflow token by default. Accepted findings are
   documented in `.github/zizmor.yml`.
+- **Protected history.** `main` takes only squash-merged pull requests with
+  the `required-green` and `commit-policy` checks green — direct pushes are
+  rejected, the maintainer's included. `v*` tags can only be created by a
+  repository admin, and releases publish through crates.io Trusted Publishing
+  from a `release` environment that deploys from `v*` tags alone, so no
+  registry credential exists to steal.
 
 ## What has been found and fixed
 
