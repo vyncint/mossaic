@@ -1,0 +1,60 @@
+[package]
+name = "mossaic"
+version = "0.1.0"
+edition = "2021"
+# Minimum supported Rust version. Verified by the `msrv` CI job, which reads this
+# field; bumping it is a minor (not patch) change.
+#
+# 1.88 is dictated by ratatui 0.30. Everything else in the tree needs less: the
+# graphics and colour code is plain std.
+rust-version = "1.88"
+description = "Plan and track GitHub contribution art — what today owes to draw your name by December, and whether the year can still be drawn at all"
+keywords = ["github", "contributions", "contribution-art", "sixel", "kitty"]
+categories = ["command-line-utilities", "visualization"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/vyncint/mossaic"
+authors = ["Vyncint Ng <vyncint@icloud.com>"]
+readme = "README.md"
+# The chart is what `cargo run` means; `mossaic-art` and `mossaic-glyphs` are asked for by name.
+default-run = "mossaic"
+# Kept out of the published archive: they serve the repository, not the crate.
+exclude = [".github/*", "action/*", "docs/*", "deny.toml", "rust-toolchain.toml"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+ratatui = "0.30"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# zlib, so a kitty image is a few kilobytes on the wire instead of half a megabyte.
+miniz_oxide = "0.9"
+
+[target.'cfg(unix)'.dependencies]
+# O_NONBLOCK, to read the terminal's capability replies without blocking on a
+# terminal that never answers. One constant, no unsafe.
+libc = "0.2"
+
+[dev-dependencies]
+# The end-to-end suite: the real binary, in a real PTY, asserted on the rendered
+# screen.
+termlens = "0.4.2"
+
+[profile.release]
+lto = true
+strip = true
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+# Nothing here needs it: the terminal probe uses one libc constant, not a call.
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

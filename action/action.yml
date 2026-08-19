@@ -1,0 +1,255 @@
+# mossaic GitHub Action: track a contribution-art plan on a schedule.
+#
+# The action ships inside the mossaic repository itself: when a workflow says
+# `uses: vyncint/mossaic/action@<ref>`, the runner materializes the whole repo
+# at that ref, so the tracker is built from the exact sources the ref pins — no
+# published binaries, no registry, nothing to fetch beyond the action itself.
+#
+# What it does is compare a plan with reality once, and hand the numbers back as
+# outputs. Sending them somewhere — Slack, Discord, email, an issue — is a step
+# you add after it, because every one of those has a maintained action already
+# and none of them belong inside this one. See action/README.md for a workflow
+# you can paste.
+name: mossaic contribution-art tracker
+description: >-
+  Track a GitHub contribution-art plan: how many letter days are bright, what
+  today owes, and whether the text can still be drawn at all.
+branding:
+  icon: grid
+  color: green
+
+inputs:
+  text:
+    description: The text being drawn, e.g. VYNCINT (A-Z, 0-9, space, - and .).
+    required: true
+  user:
+    description: >-
+      Whose contributions to compare against. Defaults to the repository owner.
+    required: false
+    default: ""
+  year:
+    description: Which year's calendar. Defaults to the current year.
+    required: false
+    default: ""
+  start-week:
+    description: >-
+      Left edge of the text, in calendar columns. Leave empty to centre it —
+      but whatever you choose, keep it the same on every run: the plan is these
+      inputs, and changing one compares against a different plan.
+    required: false
+    default: ""
+  top:
+    description: First calendar row used, 0 = Sunday. Default 1, so Mon-Fri.
+    required: false
+    default: "1"
+  background:
+    description: >-
+      Draw the background as a shade instead of leaving it empty: 0 (default,
+      letters against nothing) through 3. The letters stay at level 4, so
+      `background: "1"` draws them on a light green field — which is how you
+      draw art without going dark for most of the year. Keep it fixed for the
+      whole year, exactly like start-week: it is part of the plan, and changing
+      it compares against a different one.
+    required: false
+    default: "0"
+  token:
+    description: >-
+      Token for the contributions query. The default GITHUB_TOKEN reads public
+      contributions; a personal access token with `read:user` is needed for
+      private ones to be counted, exactly as they are on your profile.
+    required: false
+    default: ${{ github.token }}
+  timezone:
+    description: >-
+      The timezone "today" means, e.g. Asia/Ho_Chi_Minh. Runners are UTC, and
+      GitHub shades a day in your profile's timezone — leave this unset and a
+      schedule near midnight will disagree with your own graph by a day.
+    required: false
+    default: UTC
+  fail-on:
+    description: >-
+      When to fail the job: `never` (default), `behind` (today is a letter day
+      and it is short), or `holed` (the text can no longer be drawn cleanly).
+    required: false
+    default: never
+  summary:
+    description: Write the report to the job summary ("true"/"false").
+    required: false
+    default: "true"
+
+outputs:
+  verdict:
+    description: '`drawn`, `reachable`, or `holed`.'
+    value: ${{ steps.track.outputs.verdict }}
+  headline:
+    description: One line fit for a notification title.
+    value: ${{ steps.track.outputs.headline }}
+  markdown:
+    description: The report as markdown — a message body, ready to send.
+    value: ${{ steps.track.outputs.markdown }}
+  json:
+    description: The whole report as JSON, for anything the outputs below miss.
+    value: ${{ steps.track.outputs.json }}
+  bright:
+    description: Letter days already bright enough.
+    value: ${{ steps.track.outputs.bright }}
+  letters:
+    description: Letter days in the text.
+    value: ${{ steps.track.outputs.letters }}
+  owing-days:
+    description: Letter days still short.
+    value: ${{ steps.track.outputs.owing-days }}
+  owing-commits:
+    description: Contributions those days owe between them.
+    value: ${{ steps.track.outputs.owing-commits }}
+  holes:
+    description: Days inside the letters that are lit and cannot be unlit.
+    value: ${{ steps.track.outputs.holes }}
+  today-short:
+    description: >-
+      Contributions today still owes — for a letter day, or for a background
+      day when `background` is set. `0` when today is neither, or is already
+      the shade it should be.
+    value: ${{ steps.track.outputs.today-short }}
+  tomorrow-need:
+    description: What tomorrow will need. `0` when nothing is asked of it.
+    value: ${{ steps.track.outputs.tomorrow-need }}
+  field-level:
+    description: The level the background is drawn at. `0` when there is none.
+    value: ${{ steps.track.outputs.field-level }}
+  legibility:
+    description: >-
+      `clear`, `readable` or `faint` — how well the letters stand out from the
+      background they sit on, measured across every palette GitHub ships.
+      Always `clear` when there is no background.
+    value: ${{ steps.track.outputs.legibility }}
+  separation:
+    description: >-
+      How far apart those two shades look, as CIE76 ΔE, in the worst palette a
+      reader might have. Under 20 is faint; 35 and up is plainly two colours.
+    value: ${{ steps.track.outputs.separation }}
+  field-days:
+    description: Days the background covers. `0` when there is none.
+    value: ${{ steps.track.outputs.field-days }}
+  field-bright:
+    description: Background days already at the right shade.
+    value: ${{ steps.track.outputs.field-bright }}
+  field-owing-days:
+    description: Background days still short.
+    value: ${{ steps.track.outputs.field-owing-days }}
+  field-owing-commits:
+    description: Contributions those days owe between them.
+    value: ${{ steps.track.outputs.field-owing-commits }}
+
+runs:
+  using: composite
+  steps:
+    - name: Cache the tracker build
+      # Pinned by SHA, like every action in this repository: a composite
+      # action that pulls an unpinned one hands its supply chain away.
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ github.action_path }}/../target
+        # The ref key goes stale when a branch ref moves; the build step below
+        # always runs, so a stale hit only means an incremental rebuild.
+        key: mossaic-action-${{ runner.os }}-${{ github.action_ref }}
+        restore-keys: |
+          mossaic-action-${{ runner.os }}-
+
+    - name: Build the tracker
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      run: cargo build --release --bin mossaic-art
+
+    - name: Track the plan
+      id: track
+      shell: bash
+      env:
+        # Inputs reach the shell as environment variables, never interpolated
+        # into the script: a text of `"; rm -rf /` is a text, not a command.
+        GH_TOKEN: ${{ inputs.token }}
+        INPUT_TEXT: ${{ inputs.text }}
+        INPUT_USER: ${{ inputs.user }}
+        INPUT_YEAR: ${{ inputs.year }}
+        INPUT_START_WEEK: ${{ inputs.start-week }}
+        INPUT_TOP: ${{ inputs.top }}
+        INPUT_BACKGROUND: ${{ inputs.background }}
+        TZ: ${{ inputs.timezone }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_SUMMARY: ${{ inputs.summary }}
+        OWNER: ${{ github.repository_owner }}
+        ART: ${{ github.action_path }}/../target/release/mossaic-art
+      run: |
+        set -euo pipefail
+        report_dir="${RUNNER_TEMP}/mossaic"
+        mkdir -p "${report_dir}"
+
+        # `[ -n "$x" ] && args+=(…)` would exit the script under `set -e` on the
+        # very common case of the input being empty. Plain ifs instead.
+        args=("${INPUT_TEXT}" --track "${INPUT_USER:-$OWNER}" --top "${INPUT_TOP}")
+        if [ -n "${INPUT_YEAR}" ]; then args+=(--year "${INPUT_YEAR}"); fi
+        if [ -n "${INPUT_START_WEEK}" ]; then args+=(--start-week "${INPUT_START_WEEK}"); fi
+        if [ -n "${INPUT_BACKGROUND}" ] && [ "${INPUT_BACKGROUND}" != "0" ]; then
+          args+=(--background "${INPUT_BACKGROUND}")
+        fi
+
+        "${ART}" "${args[@]}" --format json > "${report_dir}/report.json"
+        "${ART}" "${args[@]}" --format markdown > "${report_dir}/report.md"
+
+        # Multi-line outputs need a delimiter the value cannot contain.
+        delimiter="mossaic-${GITHUB_RUN_ID}-${RANDOM}"
+        {
+          echo "json<<${delimiter}"
+          cat "${report_dir}/report.json"
+          echo "${delimiter}"
+          echo "markdown<<${delimiter}"
+          cat "${report_dir}/report.md"
+          echo "${delimiter}"
+        } >> "$GITHUB_OUTPUT"
+
+        # Every scalar output comes from the report itself — including the
+        # headline, so no two places have to agree about how to word it.
+        jq -r '
+          "verdict=" + .verdict,
+          "headline=" + .headline,
+          "bright=" + (.bright | tostring),
+          "letters=" + (.letters | tostring),
+          "owing-days=" + (.owing_days | tostring),
+          "owing-commits=" + (.owing_commits | tostring),
+          "holes=" + (.holes | tostring),
+          "today-short=" + ((.today.short // 0) | tostring),
+          "tomorrow-need=" + ((.tomorrow.need // 0) | tostring),
+          "field-level=" + (.field_level | tostring),
+          "legibility=" + .legibility,
+          "separation=" + (.separation | floor | tostring),
+          "field-days=" + (.field_days | tostring),
+          "field-bright=" + (.field_bright | tostring),
+          "field-owing-days=" + (.field_owing_days | tostring),
+          "field-owing-commits=" + (.field_owing_commits | tostring)
+        ' "${report_dir}/report.json" >> "$GITHUB_OUTPUT"
+
+        if [ "${INPUT_SUMMARY}" = "true" ]; then
+          cat "${report_dir}/report.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        verdict="$(jq -r .verdict "${report_dir}/report.json")"
+        today_short="$(jq -r '.today.short // 0' "${report_dir}/report.json")"
+        case "${INPUT_FAIL_ON}" in
+          holed)
+            if [ "${verdict}" = "holed" ]; then
+              echo "::error::${INPUT_TEXT} can no longer be drawn cleanly this year"
+              exit 1
+            fi
+            ;;
+          behind)
+            if [ "${today_short}" -gt 0 ]; then
+              echo "::error::today is a letter day and is ${today_short} contribution(s) short"
+              exit 1
+            fi
+            ;;
+          never | "") ;;
+          *)
+            echo "::error::unknown fail-on value '${INPUT_FAIL_ON}' — never, behind or holed"
+            exit 1
+            ;;
+        esac

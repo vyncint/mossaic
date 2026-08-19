@@ -1,0 +1,88 @@
+# Copy this to .github/workflows/track.yml in a public repository of your own,
+# edit the `with:` block, and delete the channels you do not want.
+#
+# Setup, and the two things GitHub does that will bite you (60-day schedule
+# expiry; cron is UTC), are in action/README.md.
+name: contribution art
+
+on:
+  schedule:
+    # UTC. 01:00 UTC is 08:00 in UTC+7 — set `timezone:` below to match.
+    - cron: "0 1 * * *"
+  # So you can run it now instead of waiting for tomorrow.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Only needed by the issue-comment step below.
+  issues: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - id: art
+        uses: vyncint/mossaic/action@main
+        with:
+          text: VYNCINT
+          year: "2027"
+          # Keep this fixed for the whole year: the plan is these inputs, and
+          # changing one compares against a different plan.
+          start-week: "6"
+          # Draw the background as a shade rather than leaving it empty, so
+          # you can keep contributing every day. 0 = empty (the default), and
+          # leave two levels between this and the letters' 4 — so 1 or 2.
+          # Fixed for the whole year, like start-week: it is part of the plan.
+          background: "1"
+          timezone: Asia/Ho_Chi_Minh
+          # `behind` fails the job when today is a letter day and is short, so
+          # the failure notification you already get does the reminding.
+          fail-on: never
+
+      # ----------------------------------------------------------------- issue
+      # No secrets, nothing to sign up for. Open one issue in this repository
+      # and put its number here.
+      - name: Comment on the tracking issue
+        if: steps.art.outputs.today-short != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ steps.art.outputs.markdown }}
+        run: gh issue comment 1 --repo "$GITHUB_REPOSITORY" --body "$BODY"
+
+      # ----------------------------------------------------------------- slack
+      # Settings -> Secrets and variables -> Actions -> SLACK_WEBHOOK_URL
+      - name: Slack
+        if: vars.SLACK_ENABLED == 'true'
+        env:
+          WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          TEXT: ${{ steps.art.outputs.headline }}
+          BODY: ${{ steps.art.outputs.markdown }}
+        run: |
+          jq -n --arg t "$TEXT" --arg b "$BODY" \
+            '{text: $t, blocks: [{type: "section", text: {type: "mrkdwn", text: $b}}]}' \
+            | curl -sSf -X POST -H 'Content-type: application/json' -d @- "$WEBHOOK"
+
+      # --------------------------------------------------------------- discord
+      - name: Discord
+        if: vars.DISCORD_ENABLED == 'true'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          BODY: ${{ steps.art.outputs.markdown }}
+        run: |
+          jq -n --arg c "$BODY" '{content: $c}' \
+            | curl -sSf -X POST -H 'Content-type: application/json' -d @- "$WEBHOOK"
+
+      # ----------------------------------------------------------------- email
+      - name: Email
+        if: vars.EMAIL_ENABLED == 'true'
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: contribution art
+          to: ${{ secrets.MAIL_TO }}
+          subject: ${{ steps.art.outputs.headline }}
+          html_body: ${{ steps.art.outputs.markdown }}

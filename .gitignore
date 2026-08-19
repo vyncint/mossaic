@@ -1,0 +1,7 @@
+/target
+# Local scratch: `--png` output, snapshots being previewed, art repositories.
+*.png
+!art/*.png
+/chart.png
+# A saved plan belongs to whoever is drawing, not to this repository.
+/mossaic-plan.json

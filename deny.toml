@@ -1,0 +1,47 @@
+# cargo-deny configuration — enforced by the `deny` CI job.
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive licenses only. Anything not on this list fails CI and needs an
+# explicit decision here, in a reviewed PR.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    # The Unicode data license, on the character-width tables the terminal
+    # crates carry. Permissive, and unavoidable for anything that measures text.
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+# Scoped exceptions, each with a reason.
+[[licenses.exceptions]]
+# WTFPL: permissive to the point of being a joke about permissiveness, but a
+# real grant. `terminfo` reaches the graph only through ratatui's optional
+# `termwiz` backend, which mossaic does not enable — it is in the lockfile,
+# never in a build. Kept as a named exception rather than hidden by narrowing
+# the graph, so that enabling that backend would be a visible decision.
+name = "terminfo"
+allow = ["WTFPL"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

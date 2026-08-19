@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest something mossaic should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that mossaic makes hard or impossible?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: A flag, a key, a rendering mode — whatever shape it takes.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing, or doing it outside mossaic.
+  - type: checkboxes
+    id: fidelity
+    attributes:
+      label: Fidelity
+      description: mossaic's north star is looking like github.com does.
+      options:
+        - label: This makes the chart more like github.com's, or explains why it should differ

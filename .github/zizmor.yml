@@ -1,0 +1,24 @@
+# zizmor configuration — accepted findings, each with a rationale.
+# The CI `zizmor` job runs at --persona=pedantic, so anything not listed
+# here fails the build.
+
+rules:
+  # dtolnay/rust-toolchain is deliberate, not superfluous: it pins the
+  # toolchain snapshot by commit SHA, installs rustfmt/clippy components
+  # reproducibly, and honors rust-toolchain.toml — the preinstalled runner
+  # toolchain drifts with the image.
+  superfluous-actions:
+    ignore:
+      - ci.yml
+      - stress.yml
+      - release.yml
+
+  # zizmor is right, and this is temporary. Trusted Publishing is configured
+  # on a crate, so it cannot be set up for a crate that has never been
+  # published — the first release has to use a stored token. Once 0.1.0 is on
+  # crates.io, set Trusted Publishing up there, switch release.yml back to
+  # `rust-lang/crates-io-auth-action`, delete the CARGO_REGISTRY_TOKEN secret,
+  # and delete this exception. docs/RELEASING.md carries the same note.
+  use-trusted-publishing:
+    ignore:
+      - release.yml

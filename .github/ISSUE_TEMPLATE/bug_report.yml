@@ -1,0 +1,58 @@
+name: Bug report
+description: Something the chart draws, or refuses to draw, is wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most rendering reports come down to what the terminal answered. Please
+        run `mossaic --capabilities` and paste its output below — it is four
+        lines and it usually contains the answer.
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: mossaic --capabilities
+      description: Run it in the terminal where the problem happens.
+      render: text
+      placeholder: |
+        terminal   TERM=xterm-kitty
+        kitty      yes
+        sixel      no
+        cell       9x19 px
+        background #0d1117  (Dark theme)
+        cells      kitty
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and version
+      placeholder: kitty 0.45.0 / Ghostty 1.2 / GNOME Terminal 3.56 (VTE 0.84)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: mossaic version
+      description: "`mossaic --help` prints it, or give the commit."
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: A screenshot helps for anything visual.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact command line, and which keys or mouse moves followed.
+      placeholder: |
+        1. mossaic --file art/vyncint-2027.json --graphics sixel
+        2. hover the third week
+        3. the tooltip names the wrong day
+    validations:
+      required: true

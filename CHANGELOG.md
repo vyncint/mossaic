@@ -1,0 +1,160 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Until 1.0, minor versions (0.x) may contain breaking changes; they are always
+listed under a **Changed** or **Removed** heading.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-08-19
+
+First release. The **Changed** and **Fixed** sections below record decisions
+taken during development rather than changes against a previous release —
+there was none.
+
+### Added
+
+- **The chart.** A whole year of GitHub contributions in the terminal: every
+  week drawn, including the days still to come, with a cursor that moves by day
+  and by week, year navigation that visits only years with contributions, and
+  streak statistics computed over the days that have actually happened.
+- **Primer colours**, read out of the stylesheets github.com serves rather than
+  transcribed: the light, dark and dark-dimmed scales, plus GitHub's seasonal
+  `winter` and `halloween` palettes on the dates GitHub itself shows them.
+  Light or dark follows the terminal's own background over `OSC 11`.
+- **Pixel cells**, at github.com's geometry — an 11px square on a 14px pitch,
+  2px corner radius, half a pixel of border — anti-aliased from a signed
+  distance field and square whatever the font's aspect ratio. Sent over the
+  **kitty graphics protocol** (RGBA, zlib'd: 507 KB of image becomes 8 KB on
+  the wire) or **sixel** (palette, run-length encoded), with block sextants as
+  the fallback where the terminal draws neither.
+- **A capability probe** that asks the terminal instead of sniffing `TERM`:
+  the kitty graphics query, `OSC 11`, `CSI 16 t`/`CSI 14 t` and device
+  attributes in one round trip, read from `/dev/tty` with `O_NONBLOCK` so a
+  terminal that never answers costs a timeout and nothing else.
+  `--capabilities` prints what yours said.
+- **Mouse hover**, with github.com's own tooltip wording (`97 contributions on
+  August 19th.`) floating above the grid. Motion, drag and click all hover,
+  because `1003` motion reporting is the mode most likely to be missing; the
+  wheel changes year; `m` hands mouse reporting back to the terminal. A hovered
+  day repaints one cell, not the year.
+- **`--png`**, which writes the chart as an image using the same rasteriser the
+  protocols feed from — the chart, from a terminal that draws no pixels.
+- **`--cell WxH`**, for terminals that will not report their cell size.
+- **`mossaic-art`**, a binary that writes text into a contribution graph by dating
+  commits: a 5×5 font, placement on Mon–Fri, a preview, snapshots the chart can
+  render, and `git fast-import` for the tens of thousands of commits an active
+  year can cost. It never pushes.
+- **`mossaic-glyphs`**, which shows the fallback cells so a terminal's rendering of
+  block sextants can be checked at a glance.
+- **Synchronized frame updates** (DEC 2026) around every repaint, so a terminal
+  that understands them shows a frame's text and images together.
+- **`--demo`**, a deterministic sample year that needs no account, no `gh` and
+  no network — so the chart can be seen before anything is authenticated.
+- **`?` in the chart**: an overlay with the keys, the mouse, and what this
+  terminal can actually draw. The question "does my terminal do pixels?" is
+  answerable without leaving the chart or knowing that `--capabilities` exists.
+- **`-V` / `--version`**, and a `--help` organised around what people come to
+  do rather than around the list of switches.
+- **`mossaic-art --track`**, which compares the plan with what has actually been
+  contributed: how many letter days are bright, what today and tomorrow owe, how
+  much is left, and — the part no amount of committing fixes — how many days
+  inside the letters are already lit and never can be unlit. It sweeps
+  `--start-week` to suggest the placement that runs into fewest of them, and
+  draws the year with each day coloured by what the plan makes of it.
+- **A GitHub Action** (`vyncint/mossaic/action`), so a plan can be tracked on
+  a schedule instead of by remembering to ask. It runs the tracker, writes the
+  report to the job summary, and hands back `verdict`, `headline`, `markdown`,
+  `json` and the scalars — `bright`, `owing-commits`, `holes`, `today-short`,
+  `tomorrow-need`. `fail-on: behind` turns "today owes something" into a failed
+  job. Sending the report to Slack, Discord, email or an issue is a step you add
+  after it; `action/README.md` carries one for each and a repository setup guide,
+  and `action/track.example.yml` is the file to copy.
+- **`mossaic-art --track --format json|markdown`**, which is what the Action reads: every
+  number the text report prints, in a shape a machine and a message can carry.
+- **`mossaic-art --font`**, which prints every glyph side by side — the view a new one
+  has to be judged in, for whoever writes it and whoever reviews it.
+
+- **A commit policy, enforced.** AI assistance is welcome; AI attribution is
+  not. `commit-policy.yml` runs `check-no-ai-attribution.sh` over every commit
+  in a pull request and rejects `Co-Authored-By` trailers naming an assistant,
+  "Generated with" watermarks, and bot identities. The check is shared verbatim
+  with [termlens], which runs the same rule — two repositories enforcing one
+  policy should not drift.
+
+### Changed
+
+- **`mossaic-art --background LEVEL`**, which draws the background as a shade
+  instead of leaving it empty. Contribution art used to cost you the rest of
+  the year — keeping the letters visible meant *not contributing* on the other
+  290 days. Now the letters are one green against another and every day stays
+  green. Because GitHub's five shades are not evenly spaced, the two you pick
+  are measured in CIELAB across all nine palettes GitHub ships and reported as
+  `ΔE 35 at worst, clear`: adjacent levels fall as low as ΔE 10.8, levels two
+  apart never below 35.4, so the tool asks for a gap of two and says so when it
+  does not get one. A background day is tracked as a band — a floor to reach
+  and a ceiling to stay under — and the Action gains `background`, `legibility`,
+  `separation` and the `field-*` counts.
+- **The extra binaries are namespaced**: `art` and `glyphs` are now
+  `mossaic-art` and `mossaic-glyphs`. Both were about to go onto everyone's
+  `PATH` under names nobody could guess belonged to this, and `art` in
+  particular is a name someone else's tool is entitled to.
+- **A plan can be saved**, so tracking needs no flags at all:
+  `mossaic-art VYNCINT --year 2027 --save` writes `mossaic-plan.json`, and
+  `mossaic-art --track` reads it. The placement is stored *resolved*, which
+  closes the one trap in the tracker — comparing against a different plan
+  because a flag was typed differently. Typed flags still win over saved ones.
+- **`--color auto|always|never` on the text tools**, honouring
+  [`NO_COLOR`](https://no-color.org); `--no-colour` is now a spelling of
+  `--color never`. `-V`/`--version` and `-y`/`--year` work everywhere they read
+  as though they should.
+- **One argument parser** behind all three binaries, so they agree about the
+  things a user notices: `--year=2027` and `--year 2027`, what a missing value
+  says, and that every error is `binary: message` with exit code 2.
+- **The README leads with a quickstart** rather than with prerequisites, and the
+  contribution-art material moved to `docs/ART.md` — a front page and a manual
+  are different documents.
+
+### Fixed
+
+- **A contributed glyph can no longer break the build's silence.** A row a
+  character short used to index past the end and panic for whoever drew it
+  first; a stray character silently rendered as a dark day. Both are now
+  compile-time failures naming the rule they broke, alongside the same for a
+  character listed twice. Two further rules — a glyph must draw something and
+  not everything, and no two characters may draw the same pixels — are covered
+  by tests, because a compiler cannot judge them.
+- **Five findings from a security review of untrusted input**, each with a
+  regression test: escape sequences from a crafted calendar reaching the
+  terminal through the non-renderer output paths; a calendar spanning millennia
+  allocating gigabytes; counts from a file overflowing the shading arithmetic;
+  a character-cell size sizing an image allocation unchecked; and a git identity
+  going into a `fast-import` stream unvalidated. See SECURITY.md for what each
+  one was.
+
+- **`--font` and `--capabilities` no longer ignore the flags written after
+  them**: both act once the whole command line is parsed.
+- **`--help` now lists every spelling the parser accepts.** The test that keeps
+  help and parser in step read only the first flag of each match arm, so an arm
+  like `"-h" | "--help"` was half-checked — `--help`, `--colour` and
+  `--no-color` all worked and none of them were documented.
+- **`mossaic-art --year 999999` panicked**, and `--year -5` drew a calendar
+  for the year minus five. Both binaries now check the year against the same
+  range, and `art::Grid::new` returns `None` for a year no calendar can hold
+  rather than ending in an `expect` — it is a library, and a year is input.
+- **One cost model, not two.** `commits_for_level` took a day's shade from the
+  commits *added* to it but the year's peak from the day's *total* — the same
+  day counted two ways, which under-priced art landing on days that already had
+  contributions. Shade and peak now both come from the total, the answer is a
+  fixed point rather than a 20,000-step search, and `commits_to_reach` states
+  the arithmetic in one line that every quoted price goes through. The README's
+  worked example (a peak of 112 costing 85 a day) is unchanged; its sweep figure
+  moved, and has been re-measured.
+
+[termlens]: https://github.com/vyncint/termlens
+
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vyncint/mossaic/releases/tag/v0.1.0

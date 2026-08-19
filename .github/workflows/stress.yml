@@ -1,0 +1,58 @@
+# Flake hunter: the whole test suite, many times, on both OSes.
+#
+# The end-to-end suite drives a real PTY, and a flaky harness is worse than
+# none — a test that fails one run in four teaches contributors to re-run CI
+# rather than to read it. Run this before a release and whenever anything
+# touching frames, waits or the event loop changes.
+name: stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Number of full-suite iterations
+        required: false
+        default: "100"
+  schedule:
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+
+permissions:
+  contents: read
+
+# One stress run per ref at a time; a second dispatch queues rather than
+# cancelling a half-finished measurement.
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stress:
+    name: stress (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # The binaries too: the smoke suite spawns `mossaic` itself, so it must
+      # exist before iteration 1 rather than be built inside the timing loop.
+      - name: Build once
+        run: cargo build --release --all-targets
+      - name: Run the suite repeatedly
+        env:
+          ITERS: ${{ inputs.iterations || '100' }}
+        run: |
+          for i in $(seq "$ITERS"); do
+            echo "::group::iteration ${i}/${ITERS}"
+            cargo test --release \
+              || { echo "::error::suite flaked on iteration ${i}/${ITERS}"; exit 1; }
+            echo "::endgroup::"
+          done
