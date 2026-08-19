@@ -102,6 +102,10 @@ files are advisory and CI is what actually holds.
 
 ## 5. Pull requests
 
+A pull request is the only way anything lands: `main` rejects direct pushes —
+the maintainer's too — and merges are squashes that need the `required-green`
+and `commit-policy` checks green first.
+
 1. Open an issue first for anything larger than a fix — especially anything
    that changes what the chart looks like.
 2. `cargo fmt --all`, `cargo clippy --all-targets --all-features -- -D warnings`
