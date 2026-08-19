@@ -1,7 +1,9 @@
 # mossaic GitHub Action: track a contribution-art plan on a schedule.
 #
 # The action ships inside the mossaic repository itself: when a workflow says
-# `uses: vyncint/mossaic/action@<ref>`, the runner materializes the whole repo
+# `uses: vyncint/mossaic/action@<ref>`, the runner materializes the whole repo.
+# The ref pins these steps; which *tracker* runs is the `version` input, which
+# defaults to the latest release on crates.io.
 # at that ref, so the tracker is built from the exact sources the ref pins — no
 # published binaries, no registry, nothing to fetch beyond the action itself.
 #
@@ -76,6 +78,14 @@ inputs:
     description: Write the report to the job summary ("true"/"false").
     required: false
     default: "true"
+  version:
+    description: >-
+      Which mossaic release runs the tracking, e.g. "0.2.0". The default,
+      `latest`, installs the newest release on crates.io each run — fine for
+      tracking, since the report format is versioned with the crate. Pin a
+      number if you want the tracker to change only when you say so.
+    required: false
+    default: latest
 
 outputs:
   verdict:
@@ -144,55 +154,28 @@ outputs:
 runs:
   using: composite
   steps:
-    # Which version of the tracker to run is decided by the ref you pinned:
-    # `@v0.1.2` runs mossaic 0.1.2. Read from the manifest that shipped with
-    # this action rather than hardcoded, so the two can never disagree.
-    - name: Work out which tracker to install
-      id: version
-      shell: bash
-      env:
-        MANIFEST: ${{ github.action_path }}/../Cargo.toml
-      run: |
-        set -euo pipefail
-        version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$MANIFEST" | head -1)"
-        if [ -z "$version" ]; then
-          echo "::error::Could not read a version from ${MANIFEST}."
-          exit 1
-        fi
-        echo "Tracker version: ${version}"
-        echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-    - name: Cache the tracker
-      id: cache
-      # Pinned by SHA, like every action in this repository: a composite
-      # action that pulls an unpinned one hands its supply chain away.
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-      with:
-        path: ${{ runner.tool_cache }}/mossaic
-        # Keyed by version, which is immutable — so a hit is always the right
-        # binary and the install below can be skipped outright. (The old key
-        # was the git ref, which moves, so every run had to rebuild to be
-        # sure.)
-        key: mossaic-${{ steps.version.outputs.version }}-${{ runner.os }}
-
     - name: Install the tracker
-      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
-        VERSION: ${{ steps.version.outputs.version }}
-        ROOT: ${{ runner.tool_cache }}/mossaic
+        INPUT_VERSION: ${{ inputs.version }}
+        ROOT: ${{ runner.temp }}/mossaic
       run: |
         set -euo pipefail
         # From crates.io, not from this checkout: the published crate is the
         # artifact that was tested and released, and `--locked` pins it to the
-        # exact dependency versions it was released with.
-        if ! cargo install mossaic --version "$VERSION" --locked \
-             --bin mossaic-art --root "$ROOT"; then
-          echo "::error::Could not install mossaic ${VERSION} from crates.io. \
-        If you pinned this action to a branch, that branch may declare a version \
-        that has not been published yet — pin a released tag instead."
+        # exact dependency versions it was released with. Nothing is cached —
+        # a fresh install per run costs a minute or two and can never be
+        # stale, poisoned, or the wrong version.
+        args=(mossaic --locked --bin mossaic-art --root "$ROOT")
+        if [ -n "${INPUT_VERSION}" ] && [ "${INPUT_VERSION}" != "latest" ]; then
+          args+=(--version "${INPUT_VERSION}")
+        fi
+        if ! cargo install "${args[@]}"; then
+          echo "::error::Could not install mossaic ${INPUT_VERSION} from crates.io. \
+        Released versions are listed at https://crates.io/crates/mossaic/versions."
           exit 1
         fi
+        "$ROOT/bin/mossaic-art" --version
 
     - name: Track the plan
       id: track
@@ -211,7 +194,7 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_SUMMARY: ${{ inputs.summary }}
         OWNER: ${{ github.repository_owner }}
-        ART: ${{ runner.tool_cache }}/mossaic/bin/mossaic-art
+        ART: ${{ runner.temp }}/mossaic/bin/mossaic-art
       run: |
         set -euo pipefail
         report_dir="${RUNNER_TEMP}/mossaic"

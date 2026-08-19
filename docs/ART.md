@@ -229,7 +229,7 @@ arrive rather than be asked for:
 
 ```yaml
 - id: art
-  uses: vyncint/mossaic/action@main
+  uses: vyncint/mossaic/action@v0.2.0
   with:
     text: VYNCINT
     year: "2027"

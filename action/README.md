@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@main
+        uses: vyncint/mossaic/action@v0.2.0
         with:
           text: VYNCINT
           year: "2027"
@@ -70,6 +70,7 @@ Two things GitHub does that will bite you otherwise:
 | `token` | `github.token` | see *Private contributions* below |
 | `fail-on` | `never` | `never`, `behind`, or `holed` |
 | `summary` | `true` | write the report to the job summary |
+| `version` | `latest` | which mossaic release runs the tracking — pin a number to change only when you say so |
 
 **The plan is these inputs.** Tracking with a different `start-week` — or a
 different `background` — compares against a different plan and reports nonsense
@@ -171,15 +172,15 @@ lands in the notifications you already have.
 
 ## Notes
 
-- **Pin a released tag.** The ref you pin decides which tracker runs: the
-  action reads the version from the `Cargo.toml` beside it and installs exactly
-  that from crates.io, so `@v0.1.1` runs mossaic 0.1.1 and always will. A
-  branch ref works, but it can only ever get you the last *published* version —
-  and if the branch has bumped its version ahead of a release, the install
-  fails rather than guessing.
-- A cold run compiles the tracker, which takes a minute or two. It is then
-  cached by version, and because a version is immutable, later runs skip the
-  build entirely rather than re-checking it.
+- **Two knobs, two jobs.** The ref you pin (`@v0.2.0`, `@main`) chooses the
+  *action's steps* — the glue that runs the tracker and shapes the outputs.
+  The `version` input chooses the *tracker itself*, straight from crates.io.
+  The default, `latest`, is fine for a daily report; pin a number when you
+  want the tracker to change only on your say-so.
+- Every run installs the tracker fresh from crates.io with `--locked` — a
+  minute or two of compile, nothing cached, so what runs can never be stale or
+  the wrong version. A version that does not exist fails plainly, with a link
+  to the list of releases.
 - **Private contributions.** The default `GITHUB_TOKEN` sees public
   contributions only. Your own graph counts private ones if you have
   [that setting][private] on, so a token without `read:user` will report you

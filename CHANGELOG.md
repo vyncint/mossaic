@@ -9,14 +9,17 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-19
+
 ### Changed
 
 - **The GitHub Action installs the tracker from crates.io** instead of building
-  the checked-out repository. The ref you pin decides the version — the action
-  reads it from the `Cargo.toml` beside it, so `@v0.1.2` runs mossaic 0.1.2 —
-  and the cache is keyed by that version rather than by a git ref. A version is
-  immutable, so a cache hit is now exact and the build is skipped outright,
-  where the old ref key could go stale and had to rebuild to be sure.
+  the checked-out repository, and gains a `version` input to say which release:
+  the default, `latest`, follows crates.io, and a pinned number changes only
+  when you change it. Nothing is cached — a fresh `--locked` install per run
+  costs a minute or two and can never be stale, poisoned, or the wrong
+  version. The ref you pin (`@v0.2.0`) now chooses only the action's own
+  steps.
 
 ### Fixed
 
@@ -195,6 +198,7 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/vyncint/mossaic/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vyncint/mossaic/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vyncint/mossaic/releases/tag/v0.1.0
