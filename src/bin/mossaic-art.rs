@@ -42,12 +42,13 @@ usage:
   --snapshot PATH     write a calendar file for `mossaic --file PATH`
   --repo DIR          where --write puts the commits
   --write             actually create the commits in --repo (local only)
-  --backfill          commit only what each day is still short of the plan,
-                      measured against the real calendar — the flag for catching
-                      up on days already past. Unlike a plain --write it never
-                      adds to a day that is already bright, which over an active
-                      year is what stops the art raising the very peak it is
-                      measured against. Needs --repo, and --write to commit
+  --backfill          commit what each day already past is still short of the
+                      plan, measured against the real calendar — the flag for
+                      catching up. Unlike a plain --write it never adds to a day
+                      that is already bright, which over an active year is what
+                      stops the art raising the very peak it is measured
+                      against, and it leaves days still to come alone. --today
+                      is what \"past\" means. Needs --repo, and --write to commit
   --login NAME        name shown in the snapshot (default: preview)
   --name NAME         commit author name (default: git config)
   --email ADDRESS     commit author email (default: git config)
@@ -206,7 +207,12 @@ fn main() {
 
     let mut combined = existing.clone();
     for (day, count) in &placed.all() {
-        *combined.entry(*day).or_insert(0) += count;
+        // Saturating: the peak the whole costing model rests on is computed from
+        // this map, and a `--merge` calendar is a file. Wrapping here reported a
+        // peak of 8 for a year whose busiest day held four billion, and then
+        // quoted a price to match it.
+        let total = combined.entry(*day).or_insert(0);
+        *total = total.saturating_add(*count);
     }
 
     let peak = combined.values().copied().max().unwrap_or(1);
@@ -287,7 +293,7 @@ fn main() {
             if let Some(need) = art::commits_for_level(&days, &existing, 4) {
                 println!(
                     "  -> for the brightest level, use --commits {need} ({} commits)",
-                    thousands(need * placed.lit.len() as u32)
+                    thousands(need.saturating_mul(placed.lit.len() as u32))
                 );
             }
         }
@@ -402,16 +408,28 @@ fn backfill(
         shades,
     );
 
-    // Every day the plan wants more of, letters and background alike. A day at
-    // or past what it needs contributes nothing here, and neither does one
-    // whose job is to stay dark — `short()` is zero for both.
+    // Days already past, and only those. A day at or past what it needs
+    // contributes nothing here, and neither does one whose job is to stay dark —
+    // `short()` is zero for both.
+    //
+    // The date bound is the point of the mode. Back-dating is the only way to
+    // reach a day that has gone by; a day still to come needs no help, and
+    // whether GitHub even counts a future-dated commit is unverified (see
+    // docs/ART.md). Writing the whole year would also mean pre-filling a
+    // background onto days that have not happened.
+    let today = options.now();
     let owed: BTreeMap<NaiveDate, u32> = plan
         .days
         .iter()
-        .filter(|day| day.short() > 0)
+        .filter(|day| day.date < today && day.short() > 0)
         .map(|day| (day.date, day.short()))
         .collect();
     let total = owed.values().fold(0u32, |sum, n| sum.saturating_add(*n));
+    let ahead = plan
+        .days
+        .iter()
+        .filter(|day| day.date >= today && day.short() > 0)
+        .count();
 
     println!(
         "{}  ·  {}  ·  backfilling against {who}\n",
@@ -433,9 +451,33 @@ fn backfill(
         "  a day gets  what it is short of {}, never a flat count",
         thousands(plan.need)
     );
+    println!("  reaching    days before {today}, which are the ones only back-dating reaches");
+    if ahead > 0 {
+        println!(
+            "              {ahead} day(s) from {today} on are short too, and left alone — \
+             contribute on those as they come"
+        );
+    }
+    // An irreversible write is the worst place to leave this unsaid: the letters
+    // can be finished and still read with holes in them, and no number of
+    // commits changes that.
+    if let plan::Verdict::Holed { holes } = plan.verdict() {
+        println!(
+            "\n  warning: {} cannot be drawn cleanly in {} — {holes} day(s) inside the\n  \
+             letters are already lit, and nothing takes those away. Backfilling will\n  \
+             brighten the letters, and the text will still read with holes in it.\n  \
+             `mossaic-art --track` sweeps --start-week for a placement with fewer.",
+            plan.text, plan.year
+        );
+    }
 
     if owed.is_empty() {
-        println!("\nnothing to backfill — every day the plan wants is already there.");
+        match ahead {
+            0 => println!("\nnothing to backfill — every day the plan wants is already there."),
+            _ => {
+                println!("\nnothing to backfill — every day the plan is short of is still to come.")
+            }
+        }
         return;
     }
     println!(
@@ -512,22 +554,22 @@ fn track_progress(
     // contribution at all.
     let hideable = plan.field_ceiling.unwrap_or(0);
 
-    // Resolved once, and said out loud when it lands outside the plan. A report
-    // is about one year, so a date outside it has no today and no tomorrow —
-    // and the whole "what to do next" half of the report simply vanishes. That
-    // is easy to reach by accident, because `--today` does not carry a year
-    // with it: `--today 2027-06-01` against a plan whose year defaulted to this
-    // one is a question about a calendar the plan does not cover. Not an error,
-    // though — every letter day of an ended year is overdue, and that is a
-    // retrospective worth asking for.
+    // Resolved once, and said out loud only when the plan's year has already
+    // ended: `under_way` and not `holds` together mean today is past the last
+    // day of it. There the today, tomorrow and next-seven-days lines are simply
+    // absent with nothing to explain them, which reads like a fault.
+    //
+    // Deliberately silent for a year that has *not started*, which is the other
+    // way to fall outside it. That is the first example in the help, the README
+    // and docs/ART.md, and the report already answers it in full — "2027 has not
+    // started. The first letter day is Mon Feb 8." A note there told people
+    // their own year was wrong.
     let today = options.now();
-    if !plan.holds(today) {
+    if plan.under_way(today) && !plan.holds(today) {
         eprintln!(
-            "note: {today} is not in {} — the report covers the plan's year, so it \
-             has nothing to say about that day. Add --year {} if that is the year \
-             you meant.",
-            plan.year,
-            today.year()
+            "note: {today} is after {}, so this report has no today or tomorrow in \
+             it — those lines cover the plan's own year.",
+            plan.year
         );
     }
 

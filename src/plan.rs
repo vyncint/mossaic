@@ -467,12 +467,59 @@ pub struct Spec {
 pub const DEFAULT_SPEC: &str = "mossaic-plan.json";
 
 impl Spec {
+    /// Whether this is a plan the tools can actually draw.
+    ///
+    /// A plan is **input**: `--plan PATH` names a file, and a file may have come
+    /// from somewhere other than your own `--save`. Without this it was the way
+    /// around every bound the command line enforces — a `top` of `usize::MAX`
+    /// wrapped past [`place`](crate::art::place)'s guard and drew the letters on
+    /// scrambled rows, a `commits` of `u32::MAX` quoted four billion commits a
+    /// day, and a `year` of -262143 panicked building the calendar. The ranges
+    /// are the same ones the flags use, so a saved plan can never mean something
+    /// a typed command could not.
+    pub fn validate(&self) -> Result<(), String> {
+        // `i128`, so that every field's whole range fits and the message names
+        // the value that was actually rejected. Narrowing to `i64` first made a
+        // `top` of `usize::MAX` report itself as -1, which is a confusing thing
+        // to read in a refusal.
+        let bounded = |what: &str, value: i128, low: i128, high: i128| {
+            if (low..=high).contains(&value) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{what} is {value}, which is not between {low} and {high}"
+                ))
+            }
+        };
+        bounded(
+            "year",
+            i128::from(self.year),
+            i128::from(*crate::cli::YEARS.start()),
+            i128::from(*crate::cli::YEARS.end()),
+        )?;
+        // Five rows of glyph have to fit inside a calendar week.
+        bounded(
+            "top",
+            self.top as i128,
+            0,
+            (crate::art::WEEKDAYS - GLYPH_ROWS) as i128,
+        )?;
+        bounded("commits", i128::from(self.commits), 1, 1_000_000)?;
+        // The tight bound needs the year and the text; `place` applies it.
+        bounded("start_week", self.start_week as i128, 0, 60)?;
+        bounded("background", i128::from(self.background), 0, 4)?;
+        Ok(())
+    }
+
     /// Read a plan, or say why it could not be read.
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let body = std::fs::read_to_string(path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-        serde_json::from_str(&body)
-            .map_err(|error| format!("{} is not a mossaic plan: {error}", path.display()))
+        let spec: Self = serde_json::from_str(&body)
+            .map_err(|error| format!("{} is not a mossaic plan: {error}", path.display()))?;
+        spec.validate()
+            .map_err(|why| format!("{} is not a plan that can be drawn: {why}", path.display()))?;
+        Ok(spec)
     }
 
     /// Write a plan where `load` will find it.

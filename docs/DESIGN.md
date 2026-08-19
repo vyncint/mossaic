@@ -257,9 +257,18 @@ The related decision is what `--backfill` writes. A flat `--commits` on every
 lit day cannot converge over an active year: a day's shade is a fraction of the
 year's *peak*, so adding to the busiest day raises the peak, which raises what
 every other letter day needs. A **shortfall** is immune to that, and provably
-so — the brightest shade is three quarters of the peak, so topping a day up to
-`need` never exceeds the busiest day. One pass, no fixed point to chase, and a
-test that adds the shortfalls to a real year and checks the price did not move.
+so — `need = ⌊3·measured/4⌋ + 1 ≤ measured` for every `measured ≥ 1`, so topping
+a day up to `need` cannot push it past the scale it is measured against, and
+`measured` is unchanged on the next pass. One pass, and a test that adds the
+shortfalls to a real year and checks the price did not move. (An *empty* year is
+the one where the peak does move, from nothing to whatever the art puts there;
+`Shades::min_peak` is why that arithmetic is still expressible.)
+
+It writes **only days already past**, which is the other half of taking the
+clock as an input. Back-dating is the sole way to reach a day that has gone;
+a day still to come wants an ordinary commit on the day, and whether GitHub
+counts a future-dated commit is unverified. Writing the whole year would also
+pre-paint a background onto days that have not happened.
 
 ## 12. Frames
 

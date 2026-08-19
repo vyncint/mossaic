@@ -263,24 +263,45 @@ mossaic-art --backfill --repo ../art --write    # write it, locally
 ```
 
 ```
+# with --merge art/vyncint-2026.json --today 2026-08-19, to reproduce this exactly
 VYNCINT  ·  2026  ·  backfilling against art/vyncint-2026.json
 
   letters     57 day(s) short, 5,994 commits
   a day gets  what it is short of 110, never a flat count
+  reaching    days before 2026-08-19, which are the ones only back-dating reaches
+              23 day(s) from 2026-08-19 on are short too, and left alone — contribute on those as they come
 
-  5,994 commit(s) across 57 day(s), earliest 2026-02-09, latest 2026-11-16
+  warning: VYNCINT cannot be drawn cleanly in 2026 — 61 day(s) inside the
+  letters are already lit, and nothing takes those away. Backfilling will
+  brighten the letters, and the text will still read with holes in it.
+  `mossaic-art --track` sweeps --start-week for a placement with fewer.
+
+  3,464 commit(s) across 34 day(s), earliest 2026-02-09, latest 2026-08-14
 
 (add --write to create them; this was a dry run)
 ```
+
+The 34 days and 3,464 commits are exactly what `--track` reports as "already
+past" — the two answers come from the same plan and the same date, so they agree
+by construction rather than by coincidence.
+
+**Only days already past.** A day still to come needs no back-dating — you
+contribute on it when it arrives — and whether GitHub counts a future-dated
+commit at all is unverified (see below). `--today` is what "past" is measured
+against, so the 34 days here are exactly the ones `--track` reports as "already
+past".
 
 A shortfall rather than a flat `--commits`, and the reason is the same
 arithmetic the rest of this page turns on: a shade is a fraction of the year's
 *peak*, so putting the same count on every lit day adds to the busiest of them
 and raises the peak — which raises what every other letter day needs. The bar
-moves as you walk towards it. A shortfall cannot do that, because the brightest
-shade is three quarters of the peak: topping a day up to what it needs never
-exceeds the busiest day, so one pass finishes the plan. There is a test that
-proves exactly that.
+moves as you walk towards it. A shortfall cannot, because what a day needs is
+never more than the peak it is measured against: the brightest shade is three
+quarters of it. Topping a day up to `need` therefore leaves the peak where the
+scale already stood, and one pass finishes the plan. (On an *empty* year the peak
+does move — from nothing to whatever the art puts there — which is the easy
+direction, and `Shades::min_peak` is what keeps even that arithmetic expressible.)
+There is a test that proves the fixed point.
 
 Like `--write`, it never pushes; it prints the command for you to run.
 

@@ -153,6 +153,10 @@ pub fn alphabet() -> impl Iterator<Item = char> {
 }
 
 /// The Sunday that starts `day`'s calendar column. Sunday is row 0.
+///
+/// Panics within six days of the first date a [`NaiveDate`] can hold, where
+/// there is no earlier Sunday to name. [`Grid::new`] does this arithmetic
+/// checked, because a year reaching it can come from a file.
 pub fn sunday_of(day: NaiveDate) -> NaiveDate {
     day - Days::new(u64::from(day.weekday().num_days_from_sunday()))
 }
@@ -181,7 +185,13 @@ impl Grid {
     pub fn new(year: i32) -> Option<Self> {
         let first = NaiveDate::from_ymd_opt(year, 1, 1)?;
         let last = NaiveDate::from_ymd_opt(year, 12, 31)?;
-        let start = sunday_of(first);
+        // Checked, not [`sunday_of`]: the first year a calendar can express has
+        // no room before it, so stepping back to a Sunday runs off the end and
+        // panics. This function promises `None` for a year no calendar can hold,
+        // and a year can arrive from a plan file — so it has to keep that
+        // promise rather than nearly keep it.
+        let start =
+            first.checked_sub_days(Days::new(u64::from(first.weekday().num_days_from_sunday())))?;
         Some(Self {
             year,
             first,
@@ -390,15 +400,19 @@ impl Shades {
 
     /// The most a background day may hold before it stops being background.
     ///
-    /// `None` when the field is the brightest shade below the letters and any
-    /// overshoot would land on the letters' own level — there is no headroom to
-    /// quote. Zero-field art has a ceiling of zero: the day must stay dark.
+    /// Zero-field art has a ceiling of zero: the day must stay dark. Otherwise
+    /// it is one below the count that would reach the next shade up, and that is
+    /// always a number — [`commits_to_reach`] never returns less than 1, so the
+    /// `Option` here is a shape the caller wanted rather than a case that
+    /// happens. [`crate::plan::Day::ceiling`] is the one that is genuinely
+    /// `None`, for a day that cannot be too bright at all.
     pub fn ceiling(self, peak: u32) -> Option<u32> {
         if self.field == 0 {
             return Some(0);
         }
-        // One below the count that would reach the next shade up.
-        commits_to_reach(self.field + 1, peak).checked_sub(1)
+        // Saturating, because `Shades` is public and need not have been checked:
+        // a field of 255 would otherwise overflow the level rather than clamp.
+        commits_to_reach(self.field.saturating_add(1), peak).checked_sub(1)
     }
 }
 
@@ -459,7 +473,10 @@ pub fn place(
     start: Option<usize>,
     ink: Ink,
 ) -> Result<Placed, String> {
-    if top + GLYPH_ROWS > WEEKDAYS {
+    // Subtraction, so the guard cannot be wrapped past: `usize::MAX + GLYPH_ROWS`
+    // comes out as 4, which is comfortably "inside" a seven-row week, and the
+    // rows were then drawn wherever the wrapping took them.
+    if top > WEEKDAYS - GLYPH_ROWS {
         return Err(format!("--top {top} would push the text past row 6"));
     }
     if columns.len() > grid.weeks {
@@ -592,7 +609,9 @@ pub fn commits_for_level(
     for _ in 0..64 {
         let peak = days
             .iter()
-            .map(|day| held(day) + added)
+            // Saturating, like every other sum here: the counts come from a
+            // calendar and a calendar can come from a file.
+            .map(|day| held(day).saturating_add(added))
             .chain([elsewhere])
             .max()
             .unwrap_or(added)

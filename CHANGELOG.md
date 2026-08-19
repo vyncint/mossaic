@@ -42,10 +42,13 @@ listed under a **Changed** or **Removed** heading.
   2024 while it is 2026 reported on a day in 2026 and called it `outside`, which
   is true of the wrong calendar; `today` and `tomorrow` are now `null` there.
   (#4)
-- **`hole` in the JSON report names damage rather than position.** A clean day
-  inside the letters is `keep-dark`; `hole` is what it becomes once it is too
-  bright. Nothing in this repository read the old value, and the markdown report
-  already agreed with the new meaning. (#4)
+- **`hole` names damage rather than position**, in the JSON report and in the
+  markdown one. A clean day inside the letters is `keep-dark`; `hole` is what it
+  becomes once it is too bright. The old value was a *position*, and the markdown
+  report read it as damage — so with a background drawn, a day inside the letters
+  holding **no contributions at all** was reported as "inside the letters and
+  already lit — a permanent hole". It now reads as the background day it is.
+  (#4)
 - **A failed fetch names whose year it was reading.** Whose contributions to
   track can come from a saved plan, and "gh was not found" gave no hint which
   login it had resolved. The login is stripped of control characters where it is
@@ -54,6 +57,26 @@ listed under a **Changed** or **Removed** heading.
 
 ### Fixed
 
+- **A saved plan is validated when it is read.** `--plan PATH` names a file, and
+  a file need not have come from your own `--save` — so it was the way around
+  every bound the command line enforces. A `top` of `usize::MAX` wrapped past
+  `place`'s guard (`usize::MAX + 5` is 4, which is comfortably "inside" a
+  seven-row week) and drew the letters on scrambled rows; a `commits` of
+  `u32::MAX` quoted four billion commits a day; a `year` of -262143 panicked
+  building the calendar, and one of 180000 drew a calendar `cli::YEARS` exists to
+  refuse. `Spec::validate` applies the flags' own ranges, so a saved plan can
+  never mean something a typed command could not.
+- **`art::Grid::new` keeps the promise in its own doc comment.** It said it
+  returned `None` rather than panicking "because this is a library: a year
+  arriving from a command line, a file or a caller is input" — and then stepped
+  back to a Sunday with unchecked arithmetic, which panics in the first week a
+  calendar can express. Two guards for one hole, because the second is what the
+  library owes a caller that is not this CLI.
+- **Three counts from a `--merge` calendar no longer wrap.** The year's peak — the
+  number the entire costing model rests on — was accumulated with `+=`. A
+  calendar whose busiest day held four billion reported a peak of 8 and quoted a
+  price to match it, in release builds; in debug it panicked. Everything around
+  them already saturated or widened.
 - **Numeric options are bounded where they are read.** `--year` was
   range-checked because a binary once passed 999999 through to a panic; every
   other number took the unguarded path, and `as` is not a check. `--commits -1`

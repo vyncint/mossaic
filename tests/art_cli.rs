@@ -893,8 +893,11 @@ fn today_is_an_input_so_a_report_is_reproducible() {
     // "what to do next" half of the report disappears otherwise, which looks
     // like a bug rather than like an answer.
     let note = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert!(note.contains("2027-03-01 is not in 2026"), "{note}");
-    assert!(note.contains("--year 2027"), "and what to do: {note}");
+    assert!(note.contains("2027-03-01 is after 2026"), "{note}");
+    assert!(
+        note.contains("no today or tomorrow"),
+        "and why that matters: {note}"
+    );
 
     for bad in ["notadate", "2026-13-01", "1999-01-01"] {
         let out = art(&["VYNCINT", "--track", "--today", bad]);
@@ -1049,6 +1052,8 @@ fn backfill_commits_only_what_is_short() {
         "art/vyncint-2027.json",
         "--repo",
         &repo,
+        "--today",
+        "2027-12-31",
         "--no-colour",
     ]);
     assert!(
@@ -1075,6 +1080,11 @@ fn backfill_commits_only_what_is_short() {
         "--repo",
         &repo,
         "--write",
+        // Past-only, so the run has to be told about a day after the letters it
+        // is meant to reach. Without this the whole of 2027 is still to come and
+        // there is correctly nothing to back-date.
+        "--today",
+        "2027-12-31",
         "--no-colour",
     ]);
     assert!(
@@ -1123,6 +1133,8 @@ fn backfill_commits_only_what_is_short() {
         "art/vyncint-2027.json",
         "--repo",
         &repo,
+        "--today",
+        "2027-12-31",
         "--no-colour",
     ]);
     assert!(
@@ -1153,4 +1165,190 @@ fn backfill_commits_only_what_is_short() {
     assert!(String::from_utf8_lossy(&nowhere.stderr).contains("--repo"));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_plan_file_cannot_smuggle_past_the_flag_bounds() {
+    // The flags are bounded; a plan file was not, and `--plan PATH` is a path.
+    // Each of these got past a different guard: `top` wrapped `place`'s check
+    // and drew the letters on scrambled rows, `commits` quoted four billion a
+    // day, and the two years panicked or drew a calendar `--year` refuses.
+    let dir = scratch("plan-bounds-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let run = |plan: &str| {
+        std::fs::write(dir.join("mossaic-plan.json"), plan).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_mossaic-art"))
+            .current_dir(&dir)
+            .args(["--no-colour"])
+            .output()
+            .expect("the art binary runs")
+    };
+    let plan = |field: &str, value: &str| {
+        let mut fields = [
+            ("text", "\"HI\""),
+            ("year", "2027"),
+            ("start_week", "10"),
+            ("top", "1"),
+            ("commits", "4"),
+            ("background", "0"),
+            ("user", "null"),
+        ];
+        for entry in fields.iter_mut() {
+            if entry.0 == field {
+                entry.1 = value;
+            }
+        }
+        let body: Vec<String> = fields
+            .iter()
+            .map(|(key, val)| format!("\"{key}\":{val}"))
+            .collect();
+        format!("{{{}}}", body.join(","))
+    };
+
+    for (field, value, wanted) in [
+        ("top", "18446744073709551615", "between 0 and 2"),
+        ("commits", "4294967295", "between 1 and 1000000"),
+        ("commits", "0", "between 1 and 1000000"),
+        ("year", "-262143", "between 2000 and 2100"),
+        ("year", "180000", "between 2000 and 2100"),
+        ("start_week", "18446744073709551615", "between 0 and 60"),
+        ("background", "9", "between 0 and 4"),
+    ] {
+        let out = run(&plan(field, value));
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(!out.status.success(), "plan {field}={value} was accepted");
+        assert_eq!(out.status.code(), Some(2), "{field}={value}");
+        assert!(
+            error.contains("is not a plan that can be drawn"),
+            "{field}={value}: {error}"
+        );
+        assert!(error.contains(wanted), "{field}={value}: {error}");
+        assert!(!error.contains("panicked"), "{field}={value}: {error}");
+        // The refusal names the value it refused, not a wrapped version of it.
+        assert!(error.contains(value), "{field}={value}: {error}");
+    }
+
+    // And a sound plan still loads, or this test would pass by refusing
+    // everything.
+    let out = run(&plan("text", "\"HI\""));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout(&out).contains("HI  ·  2027"), "{}", stdout(&out));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backfill_reaches_only_the_days_that_have_gone() {
+    // `--track` prints this command under "only back-dated commits reach
+    // those", and the help calls it the flag for catching up — but it wrote the
+    // whole year, future days included, and ignored `--today` entirely. A day
+    // still to come wants an ordinary commit when it arrives, and whether
+    // GitHub counts a future-dated one is unverified.
+    let args = |today: &'static str| -> Vec<&'static str> {
+        vec![
+            "VYNCINT",
+            "--year",
+            "2026",
+            "--backfill",
+            "--merge",
+            "art/vyncint-2026.json",
+            "--repo",
+            "/nonexistent-dry-run",
+            "--today",
+            today,
+            "--no-colour",
+        ]
+    };
+
+    let mid = stdout(&art(&args("2026-08-19")));
+    // The same 34 days and 3,464 commits `--track` calls "already past": both
+    // answers come from one plan and one date, so they agree by construction.
+    assert!(mid.contains("3,464 commit(s) across 34 day(s)"), "{mid}");
+    assert!(
+        mid.contains("latest 2026-08-14"),
+        "nothing after today: {mid}"
+    );
+    assert!(
+        mid.contains("23 day(s) from 2026-08-19 on are short too, and left alone"),
+        "and it says what it is leaving: {mid}"
+    );
+
+    // Later in the year, more of it is reachable.
+    let end = stdout(&art(&args("2026-12-31")));
+    assert!(end.contains("5,994 commit(s) across 57 day(s)"), "{end}");
+
+    // Before the year starts, none of it is — and it says why rather than
+    // claiming the plan is finished.
+    let early = stdout(&art(&args("2026-01-01")));
+    assert!(
+        early.contains("every day the plan is short of is still to come"),
+        "{early}"
+    );
+
+    // A year that cannot be drawn cleanly says so before an irreversible write.
+    assert!(
+        mid.contains("cannot be drawn cleanly in 2026") && mid.contains("61 day(s) inside the"),
+        "a warning belongs where the commits do: {mid}"
+    );
+}
+
+#[test]
+fn tracking_a_year_that_has_not_started_is_not_a_mistake() {
+    // The first example in the help, the README and docs/ART.md. The clock is
+    // not in 2027, and that is the normal case — the report answers it properly.
+    // A note saying "add --year 2026" told people their own year was wrong.
+    let out = art(&[
+        "VYNCINT",
+        "--year",
+        "2027",
+        "--track",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--today",
+        "2026-08-19",
+        "--no-colour",
+    ]);
+    assert!(out.status.success());
+    let note = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(note.is_empty(), "nothing to warn about: {note}");
+    assert!(
+        stdout(&out).contains("2027 has not started"),
+        "{}",
+        stdout(&out)
+    );
+    // Nor when the date comes from the clock, whatever year that turns out to
+    // be: the note is about a year that has ended, not about one it is not.
+    let bare = art(&[
+        "VYNCINT",
+        "--year",
+        "2100",
+        "--track",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--no-colour",
+    ]);
+    assert!(String::from_utf8_lossy(&bare.stderr)
+        .lines()
+        .all(|line| !line.contains("no today or tomorrow")));
+
+    // A typed `--today` that misses the year still explains itself, because
+    // there the missing today/tomorrow section is a surprise.
+    let missed = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--today",
+        "2027-03-01",
+        "--no-colour",
+    ]);
+    assert!(String::from_utf8_lossy(&missed.stderr).contains("2027-03-01 is after 2026"));
 }

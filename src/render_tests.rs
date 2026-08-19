@@ -2963,3 +2963,109 @@ fn place_refuses_a_start_column_that_would_not_fit() {
         .expect_err("and neither does usize::MAX");
     assert!(error.contains("past the end of"), "{error}");
 }
+
+#[test]
+fn a_plan_file_is_input_and_is_bounded_like_one() {
+    use crate::plan::Spec;
+
+    // `--plan PATH` names a file, and a file need not have come from your own
+    // `--save`, so a plan was the way around every bound the command line
+    // enforces. Each of these reached past a different guard.
+    let sound = Spec {
+        text: "HI".to_string(),
+        year: 2027,
+        start_week: 10,
+        top: 1,
+        commits: 4,
+        background: 0,
+        user: None,
+    };
+    assert!(sound.validate().is_ok());
+
+    // `usize::MAX + GLYPH_ROWS` wraps to 4, which passes a `> WEEKDAYS` check
+    // comfortably, and the rows were then drawn wherever the wrapping landed.
+    let mut wild = sound.clone();
+    wild.top = usize::MAX;
+    let why = wild.validate().expect_err("top");
+    assert!(
+        why.contains("18446744073709551615"),
+        "names the value: {why}"
+    );
+    assert!(why.contains("between 0 and 2"), "{why}");
+
+    // Four billion commits a day, quoted in full.
+    let mut wild = sound.clone();
+    wild.commits = u32::MAX;
+    assert!(wild
+        .validate()
+        .expect_err("commits")
+        .contains("between 1 and 1000000"));
+
+    // A year no calendar can hold used to panic building the grid, and one
+    // merely absurd drew a calendar `cli::YEARS` exists to refuse.
+    for year in [-262143, 0, 1999, 2101, 180_000] {
+        let mut wild = sound.clone();
+        wild.year = year;
+        let why = wild.validate().expect_err("year");
+        assert!(why.contains("between 2000 and 2100"), "year {year}: {why}");
+    }
+
+    let mut wild = sound.clone();
+    wild.background = 9;
+    assert!(wild
+        .validate()
+        .expect_err("background")
+        .contains("between 0 and 4"));
+
+    // The bound the flag applies loosely, so `place` can name the exact column.
+    let mut wild = sound.clone();
+    wild.start_week = usize::MAX;
+    assert!(wild
+        .validate()
+        .expect_err("start_week")
+        .contains("between 0 and 60"));
+}
+
+#[test]
+fn a_grid_returns_none_for_a_year_no_calendar_can_hold() {
+    use crate::art::Grid;
+
+    // The doc comment promises this: "a year arriving from a command line, a
+    // file or a caller is input". It stepped back to a Sunday with unchecked
+    // arithmetic, which panics in the first week a calendar can express — so
+    // the promise held for every year except the ones that needed it.
+    assert!(Grid::new(2027).is_some());
+    assert!(Grid::new(2000).is_some(), "the first year the CLI allows");
+    assert!(
+        Grid::new(-262143).is_none(),
+        "a year whose January has no earlier Sunday"
+    );
+    // And the grid it does build is the one `sunday_of` would have.
+    let grid = Grid::new(2027).unwrap();
+    assert_eq!(grid.start, crate::art::sunday_of(grid.first));
+}
+
+#[test]
+fn counts_from_a_file_cannot_wrap_the_price() {
+    use crate::art::{self, commits_for_level};
+    use std::collections::BTreeMap;
+
+    // The year's peak is the number the whole costing model rests on, and it is
+    // summed from calendar counts. Wrapping there reported a peak of 8 for a
+    // year whose busiest day held four billion, and quoted a price to match.
+    let days: Vec<NaiveDate> = (1..=5)
+        .map(|day| NaiveDate::from_ymd_opt(2027, 6, day).unwrap())
+        .collect();
+    let existing: BTreeMap<NaiveDate, u32> = [(days[0], u32::MAX), (days[1], u32::MAX - 1)]
+        .into_iter()
+        .collect();
+
+    // Saturating rather than panicking (debug) or wrapping (release).
+    let answer = commits_for_level(&days, &existing, 4);
+    assert!(answer.is_some_and(|need| need > 0), "{answer:?}");
+
+    // And the shade of an enormous day is still the brightest one, not a
+    // wrapped-around dim one.
+    assert_eq!(art::level(u32::MAX, u32::MAX), 4);
+    assert_eq!(art::level(u32::MAX / 2, u32::MAX), 2);
+}
