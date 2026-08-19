@@ -1,6 +1,6 @@
 [package]
 name = "mossaic"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 # Minimum supported Rust version. Verified by the `msrv` CI job, which reads this
 # field; bumping it is a minor (not patch) change.
