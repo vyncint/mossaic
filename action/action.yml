@@ -4,8 +4,6 @@
 # `uses: vyncint/mossaic/action@<ref>`, the runner materializes the whole repo.
 # The ref pins these steps; which *tracker* runs is the `version` input, which
 # defaults to the latest release on crates.io.
-# at that ref, so the tracker is built from the exact sources the ref pins — no
-# published binaries, no registry, nothing to fetch beyond the action itself.
 #
 # What it does is compare a plan with reality once, and hand the numbers back as
 # outputs. Sending them somewhere — Slack, Discord, email, an issue — is a step
@@ -70,8 +68,11 @@ inputs:
     default: UTC
   fail-on:
     description: >-
-      When to fail the job: `never` (default), `behind` (today is a letter day
+      When to fail the job: `never` (default), `behind` (today is a *letter* day
       and it is short), or `holed` (the text can no longer be drawn cleanly).
+      `behind` counts letter days only: with `background` set, an unstarted
+      background day is short too, and 290 of them a year failing the job would
+      make the signal worthless.
     required: false
     default: never
   summary:
@@ -124,6 +125,19 @@ outputs:
   tomorrow-need:
     description: What tomorrow will need. `0` when nothing is asked of it.
     value: ${{ steps.track.outputs.tomorrow-need }}
+  today-kind:
+    description: >-
+      What the plan makes of today: `letter`, `background`, `keep-dark`, `hole`
+      or `outside`. Pair it with `today-short` to tell "owes 110" from "owes
+      nothing" — and read `keep-dark` as *do not commit today*: it is a day
+      inside the letters that is not part of one, so anything landing on it is
+      a hole nothing takes back.
+    value: ${{ steps.track.outputs.today-kind }}
+  tomorrow-kind:
+    description: >-
+      The same for tomorrow, which is the one worth notifying on: `keep-dark`
+      arriving a day early is the only warning that can still be acted on.
+    value: ${{ steps.track.outputs.tomorrow-kind }}
   field-level:
     description: The level the background is drawn at. `0` when there is none.
     value: ${{ steps.track.outputs.field-level }}
@@ -235,6 +249,8 @@ runs:
           "holes=" + (.holes | tostring),
           "today-short=" + ((.today.short // 0) | tostring),
           "tomorrow-need=" + ((.tomorrow.need // 0) | tostring),
+          "today-kind=" + (.today.kind // "outside"),
+          "tomorrow-kind=" + (.tomorrow.kind // "outside"),
           "field-level=" + (.field_level | tostring),
           "legibility=" + .legibility,
           "separation=" + (.separation | floor | tostring),
@@ -250,6 +266,10 @@ runs:
 
         verdict="$(jq -r .verdict "${report_dir}/report.json")"
         today_short="$(jq -r '.today.short // 0' "${report_dir}/report.json")"
+        # A background day is short too, and `behind` is documented as being
+        # about letter days. Without this, `background: "1"` failed the job on
+        # each of the year's ~290 field days and blamed a letter day for it.
+        today_kind="$(jq -r '.today.kind // "outside"' "${report_dir}/report.json")"
         case "${INPUT_FAIL_ON}" in
           holed)
             if [ "${verdict}" = "holed" ]; then
@@ -258,7 +278,7 @@ runs:
             fi
             ;;
           behind)
-            if [ "${today_short}" -gt 0 ]; then
+            if [ "${today_kind}" = "letter" ] && [ "${today_short}" -gt 0 ]; then
               echo "::error::today is a letter day and is ${today_short} contribution(s) short"
               exit 1
             fi

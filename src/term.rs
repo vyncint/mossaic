@@ -25,6 +25,10 @@ use crate::primer::Rgb;
 /// Arbitrary id for the kitty query. `a=q` only asks, so nothing is ever stored.
 const PROBE_ID: u32 = 7379;
 
+/// Only the unix probe writes these; on every other platform there is nothing
+/// to ask, and an unused constant is a warning the `-D warnings` gates turn
+/// into a build failure.
+#[cfg(unix)]
 const QUERIES: &str = concat!(
     "\x1b_Gi=7379,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
     "\x1b]11;?\x1b\\",
@@ -52,14 +56,12 @@ pub struct Caps {
     pub answered: bool,
 }
 
-/// Ask, with a deadline. Call this with the terminal already in raw mode, or the
-/// replies arrive line-buffered and echoed.
-#[cfg(unix)]
 /// Ask the terminal what it can do, with a deadline.
 ///
 /// Call this with the terminal already in raw mode, or the replies arrive
 /// line-buffered and echoed. A terminal that never answers costs the timeout
 /// and nothing else.
+#[cfg(unix)]
 pub fn probe(timeout: Duration) -> Caps {
     use std::fs::OpenOptions;
     use std::io::{ErrorKind, Read, Write};
@@ -105,6 +107,13 @@ pub fn probe(timeout: Duration) -> Caps {
     parse(&String::from_utf8_lossy(&reply))
 }
 
+/// Ask the terminal what it can do — except here, where nothing is asked.
+///
+/// The probe reads replies from `/dev/tty` with `O_NONBLOCK`, which is a unix
+/// arrangement. Everywhere else the answer is [`Caps::default`]: `answered` is
+/// false, so nothing claims a protocol, and the chart draws text cells. A
+/// terminal that does draw pixels can still be told to, with `--graphics` and
+/// `--cell`.
 #[cfg(not(unix))]
 pub fn probe(_timeout: Duration) -> Caps {
     Caps::default()

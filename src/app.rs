@@ -349,8 +349,13 @@ impl App {
             KeyCode::Right | KeyCode::Char('l') => self.move_cursor(7),
             KeyCode::Up | KeyCode::Char('k') => self.move_cursor(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_cursor(1),
-            KeyCode::Char('[') | KeyCode::Char('y') | KeyCode::PageUp => self.change_year(-1),
-            KeyCode::Char(']') | KeyCode::Char('Y') | KeyCode::PageDown => self.change_year(1),
+            // `y` and `Y` used to do this too, undocumented. In a chart that
+            // binds `h j k l`, `y` is a key a vim-handed user presses meaning
+            // *yank* — and having it silently change the year was the one
+            // binding here with a real chance of surprising someone. `PageUp`
+            // and `PageDown` say what they do and are documented instead.
+            KeyCode::Char('[') | KeyCode::PageUp => self.change_year(-1),
+            KeyCode::Char(']') | KeyCode::PageDown => self.change_year(1),
             KeyCode::Home => self.jump(Edge::First),
             KeyCode::End => self.jump(Edge::Last),
             KeyCode::Char('t') => self.jump(Edge::Today),

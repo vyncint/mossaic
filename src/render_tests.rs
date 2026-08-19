@@ -2780,3 +2780,175 @@ fn a_background_lets_the_letters_land_where_a_bare_graph_could_not() {
         "a level-1 background is where those days belong, so nothing is a hole"
     );
 }
+
+#[test]
+fn a_backfill_finishes_the_plan_without_moving_the_target() {
+    use crate::art::{self, Grid};
+    use crate::plan::Plan;
+    use std::collections::BTreeMap;
+
+    // The property the whole mode rests on. Topping every short day up to what
+    // it needs must finish the plan *in one pass* — and it can, because `need`
+    // never exceeds the year's peak: the brightest shade is three quarters of
+    // it. A flat `--write` has no such guarantee, which is why adding a uniform
+    // count to an active year raises the peak and moves the bar it was aiming
+    // at.
+    let grid = Grid::new(2026).unwrap();
+    let columns = art::bitmap("VYNCINT").unwrap();
+    let shades = art::Shades::default();
+    let placed = art::place(&columns, &grid, 1, Some(6), shades.commits(4)).unwrap();
+
+    // A year with real activity in it, including one big day that sets the price.
+    let mut actual: BTreeMap<NaiveDate, u32> = BTreeMap::new();
+    let mut date = grid.first;
+    let mut roll = 7u32;
+    while date <= grid.last {
+        roll = roll.wrapping_mul(31).wrapping_add(17);
+        if !roll.is_multiple_of(3) {
+            actual.insert(date, 1 + roll % 40);
+        }
+        date = date.succ_opt().unwrap();
+    }
+    actual.insert(NaiveDate::from_ymd_opt(2026, 8, 11).unwrap(), 146);
+
+    let before = Plan::build("VYNCINT", &grid, &placed, columns.len(), 1, &actual, shades);
+    let need = before.need;
+    assert!(before.owing().0 > 0, "there is work to do");
+
+    // Exactly what the backfill would write: each day's shortfall, nothing on a
+    // day already there, and nothing at all on a day that must stay dark.
+    let owed: BTreeMap<NaiveDate, u32> = before
+        .days
+        .iter()
+        .filter(|day| day.short() > 0)
+        .map(|day| (day.date, day.short()))
+        .collect();
+    assert!(
+        owed.keys().all(|date| before
+            .on(*date)
+            .is_some_and(|day| day.want == crate::plan::Want::Lit)),
+        "with no background drawn, only letter days are ever owed anything"
+    );
+
+    let mut after_counts = actual.clone();
+    for (date, extra) in &owed {
+        *after_counts.entry(*date).or_insert(0) += extra;
+    }
+    let after = Plan::build(
+        "VYNCINT",
+        &grid,
+        &placed,
+        columns.len(),
+        1,
+        &after_counts,
+        shades,
+    );
+
+    assert_eq!(
+        after.need, need,
+        "the price did not move, so one pass is enough"
+    );
+    assert_eq!(after.peak, before.peak, "and neither did the year's peak");
+    assert_eq!(after.owing(), (0, 0), "every letter day is bright");
+    assert_eq!(
+        after.bright(),
+        after.letters().count(),
+        "all of them, not most"
+    );
+    // The holes were holes before and are holes still: nothing here pretends to
+    // fix the one thing that cannot be fixed.
+    assert_eq!(after.holes().len(), before.holes().len());
+}
+
+#[test]
+fn a_day_inside_the_letters_is_kept_so_it_can_be_warned_about() {
+    use crate::art::{self, Grid};
+    use crate::plan::{Plan, Want};
+    use std::collections::BTreeMap;
+
+    // A clean day inside the text block used to be dropped from the plan for
+    // having nothing to say, which left `Plan::on` answering `None` and the
+    // report describing it as a day outside the text — free to commit on. It is
+    // the opposite of free: it is the only day whose loss is permanent.
+    let grid = Grid::new(2027).unwrap();
+    let columns = art::bitmap("I").unwrap();
+    let shades = art::Shades::default();
+    let placed = art::place(&columns, &grid, 1, Some(2), shades.commits(4)).unwrap();
+    let plan = Plan::build(
+        "I",
+        &grid,
+        &placed,
+        columns.len(),
+        1,
+        &BTreeMap::new(),
+        shades,
+    );
+
+    // `I` is five columns of five rows; 13 of those 25 are lit — two full bars
+    // and a stem — so 12 must stay dark, and every one of them has to be in the
+    // plan for the report to be able to mention it.
+    assert_eq!(placed.lit.len(), 13, "the glyph");
+    let dark: Vec<_> = plan
+        .days
+        .iter()
+        .filter(|day| day.want == Want::Hole)
+        .collect();
+    assert_eq!(dark.len(), 12, "the negative space inside it");
+    assert!(
+        dark.iter()
+            .all(|day| day.need == 0 && day.ceiling == Some(0)),
+        "nothing is owed on them, and nothing may be spent either"
+    );
+    assert!(
+        dark.iter().all(|day| plan.on(day.date).is_some()),
+        "which is only useful if the report can find them"
+    );
+
+    // None of that may count as damage, or an untouched year would read as
+    // ruined.
+    assert_eq!(plan.holes().len(), 0);
+    assert_eq!(plan.around(), 0);
+    assert_eq!(plan.verdict(), crate::plan::Verdict::Reachable);
+    assert_eq!(plan.field().count(), 0, "no background was asked for");
+
+    // A contribution on one of them is what turns it into a hole.
+    let spoiled: BTreeMap<NaiveDate, u32> = [(dark[0].date, 1)].into_iter().collect();
+    let holed = Plan::build("I", &grid, &placed, columns.len(), 1, &spoiled, shades);
+    assert_eq!(holed.holes().len(), 1);
+    assert!(matches!(
+        holed.verdict(),
+        crate::plan::Verdict::Holed { holes: 1 }
+    ));
+}
+
+#[test]
+fn place_refuses_a_start_column_that_would_not_fit() {
+    use crate::art::{self, Grid};
+
+    // Past the last column that fits, every pixel falls outside the year: the
+    // old answer was a note about dropped pixels and a plan of no days at all,
+    // and far enough out — `--start-week -1`, cast to a `usize` — building the
+    // date panicked instead.
+    let grid = Grid::new(2027).unwrap();
+    let columns = art::bitmap("VYNCINT").unwrap();
+    let ink = art::Ink { lit: 4, field: 0 };
+
+    let last = grid.weeks - columns.len();
+    assert!(
+        art::place(&columns, &grid, 1, Some(last), ink).is_ok(),
+        "the last column that fits, fits"
+    );
+
+    let error =
+        art::place(&columns, &grid, 1, Some(last + 1), ink).expect_err("one past it does not");
+    assert!(error.contains("past the end of 2027"), "{error}");
+    assert!(
+        error.contains(&format!("the last one that fits is {last}")),
+        "{error}"
+    );
+
+    // The value that used to panic, rather than merely draw nothing.
+    let error = art::place(&columns, &grid, 1, Some(usize::MAX), ink)
+        .expect_err("and neither does usize::MAX");
+    assert!(error.contains("past the end of"), "{error}");
+}

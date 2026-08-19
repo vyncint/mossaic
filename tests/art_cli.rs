@@ -52,6 +52,10 @@ fn an_unknown_character_says_what_there_is() {
 fn tracking_a_finished_year_says_so() {
     // art/vyncint-2027.json is VYNCINT drawn on an otherwise empty year, at the
     // placement centring gives — so tracking it back is a completed plan.
+    //
+    // `--today` is pinned because the last assertion is about a year that has
+    // not started, which the clock would make true only until it did. Every
+    // test that reads a report pins it, for the same reason.
     let out = art(&[
         "VYNCINT",
         "--year",
@@ -59,6 +63,8 @@ fn tracking_a_finished_year_says_so() {
         "--track",
         "--merge",
         "art/vyncint-2027.json",
+        "--today",
+        "2026-08-19",
         "--no-colour",
     ]);
     assert!(
@@ -87,6 +93,8 @@ fn tracking_a_busy_year_says_why_it_cannot_be_drawn() {
         "--merge",
         "art/vyncint-2026.json",
         "--no-colour",
+        "--today",
+        "2026-08-19",
         "--start-week",
         "1",
     ]);
@@ -120,6 +128,8 @@ fn tracking_a_busy_year_says_why_it_cannot_be_drawn() {
             "--merge",
             "art/vyncint-2026.json",
             "--no-colour",
+            "--today",
+            "2026-08-19",
             "--start-week",
             "1",
         ]))
@@ -222,6 +232,8 @@ fn the_report_is_machine_readable() {
         "art/vyncint-2026.json",
         "--start-week",
         "1",
+        "--today",
+        "2026-08-19",
         "--format",
         "json",
     ]);
@@ -277,6 +289,8 @@ fn the_report_is_machine_readable() {
         "art/vyncint-2026.json",
         "--start-week",
         "1",
+        "--today",
+        "2026-08-19",
         "--format",
         "markdown",
     ]));
@@ -550,6 +564,8 @@ fn tracking_reports_the_letters_and_the_field_apart() {
         "art/vyncint-2027.json",
         "--background",
         "1",
+        "--today",
+        "2027-06-01",
         "--no-colour",
     ]);
     assert!(
@@ -672,6 +688,8 @@ fn a_background_check_meant_for_drawing_does_not_block_tracking() {
         "--track",
         "--merge",
         "art/vyncint-2026.json",
+        "--today",
+        "2026-08-19",
         "--no-colour",
     ]);
     assert!(
@@ -717,6 +735,11 @@ fn a_hole_is_called_a_hole_not_a_background_at_level_zero() {
     // the plan never asked for. Inside the letters it is a hole, and that is
     // what it has to say — the markdown report always got this right, so the
     // text report was the one disagreeing.
+    //
+    // 2026-08-19 is a lit day inside the letters in the calendar this reads, and
+    // it is pinned rather than left to the clock. Without `--today` this test
+    // asserted that whatever day it happened to run on was one of those, which
+    // held on the day it was written and failed the morning after.
     let out = art(&[
         "VYNCINT",
         "--year",
@@ -724,6 +747,8 @@ fn a_hole_is_called_a_hole_not_a_background_at_level_zero() {
         "--track",
         "--merge",
         "art/vyncint-2026.json",
+        "--today",
+        "2026-08-19",
         "--no-colour",
     ]);
     assert!(out.status.success());
@@ -740,4 +765,375 @@ fn a_hole_is_called_a_hole_not_a_background_at_level_zero() {
         today.contains("permanent hole"),
         "a lit day inside the letters is a hole: {today}"
     );
+}
+
+#[test]
+fn a_day_that_must_stay_dark_says_so_before_it_arrives() {
+    // 2026-08-20 sits inside VYNCINT's block and is not part of a letter, so a
+    // contribution on it punches a hole nothing takes back. Every surface used
+    // to call it free — "not part of the text — anything you commit today
+    // shows" — because a clean day inside the text was dropped from the plan
+    // for having nothing to say. It has the most to say of any day in the year.
+    let args = |format: &'static str| -> Vec<&'static str> {
+        vec![
+            "VYNCINT",
+            "--year",
+            "2026",
+            "--track",
+            "--merge",
+            "art/vyncint-2026.json",
+            "--today",
+            "2026-08-20",
+            "--no-colour",
+            "--format",
+            format,
+        ]
+    };
+
+    let text = stdout(&art(&args("text")));
+    let today = text
+        .lines()
+        .find(|line| line.trim_start().starts_with("today"))
+        .expect("a year under way reports on today");
+    assert!(
+        today.contains("keep it dark"),
+        "the instruction has to be the instruction: {today}"
+    );
+    assert!(
+        !today.contains("anything committed on it shows"),
+        "and never the opposite of it: {today}"
+    );
+    // The seven-day schedule is where it is read a day early, which is the only
+    // time the warning is worth anything.
+    assert!(
+        text.contains("Thu Aug 20   keep dark"),
+        "the schedule names it too:\n{text}"
+    );
+
+    // And a machine reading the report gets the same answer, with a ceiling of
+    // zero rather than the `null` that said "nothing is asked of this day".
+    let json: serde_json::Value = serde_json::from_str(&stdout(&art(&args("json")))).expect("json");
+    assert_eq!(json["today"]["kind"], "keep-dark");
+    assert_eq!(json["today"]["ceiling"], 0);
+    assert_eq!(json["today"]["over"], 0, "clean, so not yet a hole");
+    // The count of real holes must not move: a day that must stay dark and has
+    // is not damage.
+    assert_eq!(json["holes"], 61);
+
+    let md = stdout(&art(&args("markdown")));
+    assert!(
+        md.contains("| today | inside the letters — keep it dark |"),
+        "{md}"
+    );
+}
+
+#[test]
+fn today_is_an_input_so_a_report_is_reproducible() {
+    // The whole reason `--today` exists: the answer to "what does today owe"
+    // has to be a fact about a calendar and a date, not about when the command
+    // ran. Two different dates, two different answers, both stable forever.
+    let on = |date: &str| {
+        stdout(&art(&[
+            "VYNCINT",
+            "--year",
+            "2026",
+            "--track",
+            "--merge",
+            "art/vyncint-2026.json",
+            "--today",
+            date,
+            "--no-colour",
+        ]))
+    };
+
+    let lit = on("2026-08-19");
+    assert!(
+        lit.contains("today       Wed Aug 19"),
+        "the date it was told, not the date it is: {lit}"
+    );
+    let dark = on("2026-08-20");
+    assert!(dark.contains("today       Thu Aug 20"), "{dark}");
+    assert_ne!(
+        lit, dark,
+        "two days inside the same block, reported differently"
+    );
+    // Run twice, byte for byte the same — which is what the clock never was.
+    assert_eq!(lit, on("2026-08-19"));
+
+    // A date the plan's year does not hold is not an answer about that plan.
+    // Tracking 2026 in 2027 used to report on a day in 2027 and call it
+    // `outside`, which is true of the wrong calendar.
+    let json: serde_json::Value = serde_json::from_str(&stdout(&art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--today",
+        "2027-03-01",
+        "--format",
+        "json",
+    ])))
+    .expect("json");
+    assert!(json["today"].is_null(), "{}", json["today"]);
+    assert!(json["tomorrow"].is_null(), "{}", json["tomorrow"]);
+
+    for bad in ["notadate", "2026-13-01", "1999-01-01"] {
+        let out = art(&["VYNCINT", "--track", "--today", bad]);
+        assert!(!out.status.success(), "--today {bad} was accepted");
+        assert_eq!(out.status.code(), Some(2));
+    }
+}
+
+#[test]
+fn numeric_flags_are_bounded_rather_than_cast() {
+    // `--year` was range-checked because one binary once passed 999999 through
+    // to a panic. Every other number took the unguarded path and `as` is not a
+    // check: `--commits -1` came out as 4,294,967,295 — which `--write` would
+    // then try to build a fast-import stream for — and `--start-week -1`
+    // reached `usize::MAX`, where building a date from it panicked.
+    for (flag, value, wanted) in [
+        ("--commits", "-1", "between 1 and 1000000"),
+        ("--commits", "0", "between 1 and 1000000"),
+        ("--top", "-1", "between 0 and 2"),
+        ("--top", "9", "between 0 and 2"),
+        ("--start-week", "-1", "between 0 and 60"),
+        ("--background", "-1", "between 0 and 4"),
+    ] {
+        let out = art(&["VYNCINT", "--year", "2027", flag, value]);
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(!out.status.success(), "{flag} {value} was accepted");
+        assert_eq!(out.status.code(), Some(2), "{flag} {value}");
+        assert!(error.contains(wanted), "{flag} {value}: {error}");
+        assert!(!error.contains("panicked"), "{flag} {value}: {error}");
+    }
+
+    // In range for the flag but not for the year: the tight bound needs both
+    // the calendar and the text, so `place` is what refuses it — and it names
+    // the last column that would have fitted rather than drawing nothing.
+    let out = art(&["VYNCINT", "--year", "2027", "--start-week", "20"]);
+    assert!(!out.status.success());
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(error.contains("past the end of 2027"), "{error}");
+    assert!(error.contains("the last one that fits is 12"), "{error}");
+}
+
+#[test]
+fn a_saved_plan_remembers_who_to_track() {
+    // The plan stores whose contributions to compare against, and `--track`
+    // threw it away: the user was read out of the file and then overwritten
+    // with the nothing a bare `--track` carries. With `gh` off PATH the loss is
+    // visible; with `gh` present it was worse than visible, because it tracked
+    // the authenticated user while reporting against someone else's plan.
+    let dir = std::env::temp_dir().join("mossaic-plan-user-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("mossaic-plan.json"),
+        r#"{"text":"HI","year":2026,"start_week":10,"top":1,"commits":4,
+            "background":0,"user":"octocat"}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_mossaic-art"))
+        .current_dir(&dir)
+        .env("PATH", "/nonexistent")
+        .args(["--track"])
+        .output()
+        .expect("the art binary runs");
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        error.contains("octocat"),
+        "the plan named who to track: {error}"
+    );
+    assert!(
+        !error.contains("could not tell whose"),
+        "it knew all along — it just threw the answer away: {error}"
+    );
+
+    // A user typed on the command line still wins over the saved one.
+    let typed = Command::new(env!("CARGO_BIN_EXE_mossaic-art"))
+        .current_dir(&dir)
+        .env("PATH", "/nonexistent")
+        .args(["--track", "someone-else"])
+        .output()
+        .expect("the art binary runs");
+    let error = String::from_utf8_lossy(&typed.stderr).into_owned();
+    assert!(error.contains("someone-else"), "{error}");
+    assert!(!error.contains("octocat"), "{error}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_calendar_from_another_year_says_so() {
+    // Every day of a 2026 calendar falls outside a 2027 grid, so it filters
+    // down to nothing and everything downstream is correct about an empty year:
+    // 9,527 contributions read as none, and a plan that cannot be drawn reads
+    // as reachable at one commit a day. Silence there is the same mistake the
+    // plan file was introduced to prevent.
+    let out = art(&[
+        "VYNCINT",
+        "--year",
+        "2027",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--today",
+        "2027-06-01",
+        "--no-colour",
+    ]);
+    assert!(out.status.success(), "a warning, not a refusal");
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(error.contains("holds no contributions in 2027"), "{error}");
+    assert!(error.contains("it covers 2026"), "{error}");
+    assert_eq!(
+        error
+            .lines()
+            .filter(|line| line.contains("holds no"))
+            .count(),
+        1,
+        "said once, not once per read: {error}"
+    );
+
+    // The matching year is quiet.
+    let fine = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--today",
+        "2026-08-19",
+        "--no-colour",
+    ]);
+    assert!(!String::from_utf8_lossy(&fine.stderr).contains("holds no"));
+}
+
+#[test]
+fn backfill_commits_only_what_is_short() {
+    // The command `--track` used to print was a plain `--write`, which puts the
+    // same flat count on every lit day — including the ones already bright, and
+    // adding to the busiest of them raises the very peak every letter day is
+    // measured against. A shortfall cannot do that.
+    let dir = std::env::temp_dir().join("mossaic-backfill-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let repo = dir.to_string_lossy().into_owned();
+
+    // A finished plan is short of nothing at all.
+    let done = art(&[
+        "VYNCINT",
+        "--year",
+        "2027",
+        "--backfill",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--repo",
+        &repo,
+        "--no-colour",
+    ]);
+    assert!(
+        done.status.success(),
+        "{}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+    assert!(
+        stdout(&done).contains("nothing to backfill"),
+        "{}",
+        stdout(&done)
+    );
+    assert!(!dir.exists(), "and it made no repository to do it in");
+
+    // HI over that same calendar: some of its letter days are already lit by
+    // VYNCINT's, and those must be left alone.
+    let out = art(&[
+        "HI",
+        "--year",
+        "2027",
+        "--backfill",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--repo",
+        &repo,
+        "--write",
+        "--no-colour",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert!(text.contains("backfilling against"), "{text}");
+    assert!(text.contains("never a flat count"), "{text}");
+    assert!(text.contains("nothing has been pushed"), "{text}");
+
+    // What git actually holds: every commit dated in the plan's year, and every
+    // day it touched short of the four that calendar's peak asks for.
+    let log = Command::new("git")
+        .current_dir(&dir)
+        .args(["log", "--format=%ad", "--date=short"])
+        .output()
+        .expect("git log runs");
+    let dates: Vec<String> = String::from_utf8_lossy(&log.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert!(!dates.is_empty(), "it wrote commits");
+    assert!(
+        dates.iter().all(|date| date.starts_with("2027-")),
+        "back-dated into the plan's year: {dates:?}"
+    );
+    let mut per_day: std::collections::BTreeMap<&String, usize> = std::collections::BTreeMap::new();
+    for date in &dates {
+        *per_day.entry(date).or_default() += 1;
+    }
+    assert!(
+        per_day.values().all(|count| *count == 4),
+        "each short day gets exactly what it lacked of 4: {per_day:?}"
+    );
+
+    // A dry run is a dry run: nothing new after it.
+    let before = dates.len();
+    let dry = art(&[
+        "HI",
+        "--year",
+        "2027",
+        "--backfill",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--repo",
+        &repo,
+        "--no-colour",
+    ]);
+    assert!(
+        stdout(&dry).contains("this was a dry run"),
+        "{}",
+        stdout(&dry)
+    );
+    let after = Command::new("git")
+        .current_dir(&dir)
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .expect("git rev-list runs");
+    assert_eq!(
+        String::from_utf8_lossy(&after.stdout).trim(),
+        before.to_string(),
+        "a dry run wrote something"
+    );
+
+    // The two modes are different questions, and running both would mean
+    // guessing which was meant.
+    let both = art(&["VYNCINT", "--track", "--backfill"]);
+    assert!(!both.status.success());
+    assert!(String::from_utf8_lossy(&both.stderr).contains("pick one"));
+
+    // And it needs somewhere to write.
+    let nowhere = art(&["VYNCINT", "--year", "2027", "--backfill"]);
+    assert!(!nowhere.status.success());
+    assert!(String::from_utf8_lossy(&nowhere.stderr).contains("--repo"));
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

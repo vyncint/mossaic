@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use chrono::{Datelike, Local, NaiveDate};
 use mossaic::art::{self, Grid};
-use mossaic::cli::Args;
+use mossaic::cli::{Args, YEARS};
 use mossaic::primer::{Appearance, Palette, Season};
 use mossaic::{github, plan, primer, thousands, Colour};
 
@@ -42,6 +42,12 @@ usage:
   --snapshot PATH     write a calendar file for `mossaic --file PATH`
   --repo DIR          where --write puts the commits
   --write             actually create the commits in --repo (local only)
+  --backfill          commit only what each day is still short of the plan,
+                      measured against the real calendar — the flag for catching
+                      up on days already past. Unlike a plain --write it never
+                      adds to a day that is already bright, which over an active
+                      year is what stops the art raising the very peak it is
+                      measured against. Needs --repo, and --write to commit
   --login NAME        name shown in the snapshot (default: preview)
   --name NAME         commit author name (default: git config)
   --email ADDRESS     commit author email (default: git config)
@@ -58,6 +64,9 @@ usage:
                       how far along, what today owes, and whether the text can
                       still be drawn at all. Reads --merge if given, otherwise
                       asks gh for USER (default: whoever gh is)
+  --today DATE        what \"today\" means, as YYYY-MM-DD (default: the clock).
+                      A report is then reproducible, and a day that has not
+                      arrived can be asked what it will owe
   -V, --version       print the version
   -h, --help          show this help
 
@@ -67,6 +76,8 @@ examples:
   mossaic-art VYNCINT --year 2027 --track             am I getting there, and what today owes
   mossaic-art VYNCINT --year 2027 --snapshot a.json   then: mossaic --file a.json
   mossaic-art VYNCINT --year 2027 --repo ../art --write   local commits, never pushed
+  mossaic-art --backfill --repo ../art --write        commit just what the plan is short
+  mossaic-art --track --today 2027-06-01              what that day will owe
   mossaic-art --font                                  every glyph, side by side
 
 Save the plan once and later runs need no flags at all:
@@ -103,10 +114,13 @@ fn main() {
     shades.check().unwrap_or_else(|error| fail(&error));
 
     // Loaded before placing, because the background's price is quoted against
-    // the year's busiest day and --merge can raise it.
-    let existing = match &options.merge {
-        Some(path) => load(path, &grid),
-        None => BTreeMap::new(),
+    // the year's busiest day and --merge can raise it. Only a run that draws
+    // needs it: tracking and backfilling read the calendar themselves, and
+    // loading it here as well would parse the file twice and say anything it
+    // has to say about it twice.
+    let existing = match (&options.merge, options.track || options.backfill) {
+        (Some(path), false) => load(path, &grid),
+        _ => BTreeMap::new(),
     };
     let peak = existing
         .values()
@@ -127,13 +141,13 @@ fn main() {
         ink: art::level(ink.lit, peak),
         field: art::level(ink.field, peak),
     };
-    //
-    // Only for a run that would *draw*. `--commits` is what `--write` puts on a
-    // lit day; tracking never writes one, and works out what a letter day needs
-    // from the year's real peak instead. Refusing `--track --merge --background`
-    // over a busy year told the user their plan was impossible when the only
-    // thing wrong was a flag that run does not use.
-    if !options.track && shades.field > 0 && drawn.field >= drawn.ink {
+    // Only for a run that would draw *a flat count*. `--commits` is what a
+    // plain `--write` puts on a lit day; neither tracking nor backfilling uses
+    // it — both work out what a day needs from the year's real peak. Refusing
+    // `--track --merge --background` over a busy year told the user their plan
+    // was impossible when the only thing wrong was a flag that run does not
+    // use, and `--backfill` ignores it for exactly the same reason.
+    if !options.track && !options.backfill && shades.field > 0 && drawn.field >= drawn.ink {
         fail(&format!(
             "--commits {} puts the letters at level {} and the background at level {}, \
              so the letters would not show.\n  \
@@ -183,6 +197,10 @@ fn main() {
 
     if options.track {
         track_progress(&options, &grid, &columns, &placed, shades);
+        return;
+    }
+    if options.backfill {
+        backfill(&options, &grid, &columns, &placed, shades);
         return;
     }
 
@@ -320,6 +338,143 @@ fn main() {
     }
 }
 
+/// The year as it actually stands: a saved response if one was given, otherwise
+/// whatever `gh` reports. Shared by `--track` and `--backfill`, which ask the
+/// same question of the same year and must never get different answers.
+fn observed(options: &Options, grid: &Grid) -> (String, BTreeMap<NaiveDate, u32>) {
+    match &options.merge {
+        Some(path) => (path.display().to_string(), load(path, grid)),
+        None => {
+            // Cleaned where it enters, which is the rule the calendar already
+            // follows: a login can arrive from a plan file, a plan file is a
+            // file someone may have sent you, and every path below this prints
+            // it — a header, an error, the report's `source`. A terminal
+            // executes what it is written.
+            let who = options
+                .tracking
+                .clone()
+                .or_else(github::whoami)
+                .map(|who| mossaic::printable(&who))
+                .unwrap_or_else(|| {
+                    fail("could not tell whose contributions to track — pass `--track USER`, or run `gh auth login`")
+                });
+            // Named, because whose year this is can come from a saved plan
+            // rather than from the command line, and "gh was not found" gives no
+            // hint about which login it was going to ask for.
+            let calendar = github::fetch(&who, grid.year).unwrap_or_else(|error| {
+                fail(&format!(
+                    "could not read {who}'s {} contributions: {error}",
+                    grid.year
+                ))
+            });
+            (who, plan::contributions(&calendar))
+        }
+    }
+}
+
+/// Commit what the plan is short, and nothing else.
+///
+/// A plain `--write` puts the same count on every lit day, which over an active
+/// year is both wasteful and self-defeating: adding to the busiest day raises
+/// the year's peak, and the peak is what every letter day is measured against.
+/// A shortfall cannot do that. `need` is at most the peak already — the
+/// brightest shade is three quarters of it — so topping a day up to `need`
+/// never exceeds the busiest day and never moves the target. One pass, with no
+/// fixed point to chase.
+fn backfill(
+    options: &Options,
+    grid: &Grid,
+    columns: &[[bool; art::GLYPH_ROWS]],
+    placed: &art::Placed,
+    shades: art::Shades,
+) {
+    let repo = options.repo.clone().unwrap_or_else(|| {
+        fail("--backfill needs --repo DIR — the directory to make the commits in")
+    });
+    let (who, actual) = observed(options, grid);
+    let plan = plan::Plan::build(
+        &options.text,
+        grid,
+        placed,
+        columns.len(),
+        options.top,
+        &actual,
+        shades,
+    );
+
+    // Every day the plan wants more of, letters and background alike. A day at
+    // or past what it needs contributes nothing here, and neither does one
+    // whose job is to stay dark — `short()` is zero for both.
+    let owed: BTreeMap<NaiveDate, u32> = plan
+        .days
+        .iter()
+        .filter(|day| day.short() > 0)
+        .map(|day| (day.date, day.short()))
+        .collect();
+    let total = owed.values().fold(0u32, |sum, n| sum.saturating_add(*n));
+
+    println!(
+        "{}  ·  {}  ·  backfilling against {who}\n",
+        plan.text, plan.year
+    );
+    let (letter_days, letter_commits) = plan.owing();
+    println!(
+        "  letters     {letter_days} day(s) short, {} commits",
+        thousands(letter_commits)
+    );
+    if shades.field > 0 {
+        let (field_days, field_commits) = plan.field_owing();
+        println!(
+            "  background  {field_days} day(s) short, {} commits",
+            thousands(field_commits)
+        );
+    }
+    println!(
+        "  a day gets  what it is short of {}, never a flat count",
+        thousands(plan.need)
+    );
+
+    if owed.is_empty() {
+        println!("\nnothing to backfill — every day the plan wants is already there.");
+        return;
+    }
+    println!(
+        "\n  {} commit(s) across {} day(s), earliest {}, latest {}",
+        thousands(total),
+        owed.len(),
+        owed.keys().next().expect("not empty"),
+        owed.keys().next_back().expect("not empty"),
+    );
+
+    if !options.write {
+        println!("\n(add --write to create them; this was a dry run)");
+        return;
+    }
+
+    let (name, email) = art::identity();
+    let name = options.name.clone().unwrap_or(name);
+    let email = options.email.clone().unwrap_or(email);
+    println!(
+        "\ncommitting {} commits into {} as {name} <{email}>",
+        thousands(total),
+        repo.display()
+    );
+    let label = format!("art: {}", plan.text);
+    let made = art::write_commits(&owed, &repo, &label, &name, &email)
+        .unwrap_or_else(|error| fail(&error));
+    println!(
+        "made {} commits — nothing has been pushed.\n\n\
+         To publish, from {}:\n\n  \
+         git push -u origin main\n\n\
+         To count towards the graph these must be on the default branch of a repo \
+         you own (not a fork), authored with an email registered to your GitHub \
+         account. Run --track again afterwards: GitHub takes a few minutes to \
+         recount.",
+        thousands(made as u32),
+        repo.display()
+    );
+}
+
 /// How far along the plan is, what today owes, and whether the text can still
 /// be drawn at all.
 fn track_progress(
@@ -341,21 +496,7 @@ fn track_progress(
     let shade = |level: usize| palette.as_ref().map(|palette| palette.levels[level]);
     let danger = || palette.as_ref().map(|palette| palette.danger);
 
-    // The real year: a saved response if one was given, otherwise gh.
-    let (who, actual) = match &options.merge {
-        Some(path) => (path.display().to_string(), load(path, grid)),
-        None => {
-            let who = options
-                .tracking
-                .clone()
-                .or_else(github::whoami)
-                .unwrap_or_else(|| {
-                    fail("could not tell whose contributions to track — pass `--track USER`, or run `gh auth login`")
-                });
-            let calendar = github::fetch(&who, grid.year).unwrap_or_else(|error| fail(&error));
-            (who, plan::contributions(&calendar))
-        }
-    };
+    let (who, actual) = observed(options, grid);
 
     let plan = plan::Plan::build(
         &options.text,
@@ -375,7 +516,7 @@ fn track_progress(
     // number the text report prints, so a notification never has to be parsed
     // out of a screen.
     if options.format != Format::Text {
-        let today = Local::now().date_naive();
+        let today = options.now();
         let suggestion =
             plan::best_start_week(grid, columns.len(), options.top, columns, &actual, hideable);
         let year_total = actual
@@ -555,7 +696,7 @@ fn track_progress(
     }
 
     // What to do next, which is the question this is really for.
-    let today = Local::now().date_naive();
+    let today = options.now();
     if !plan.under_way(today) {
         let first = plan
             .letters()
@@ -615,8 +756,14 @@ fn track_progress(
                 }
             ),
             Some(day) if day.need > 0 => "background — already the right shade".to_string(),
+            // Inside the letters with nothing asked of it. Committing here is
+            // the one mistake that cannot be worked off afterwards, so saying
+            // so before the day arrives is the whole point of reading this.
+            Some(day) if day.want == plan::Want::Hole => {
+                "inside the letters — keep it dark, or it becomes a permanent hole".to_string()
+            }
             Some(day) if day.have > 0 => "not part of the text, and already lit".to_string(),
-            _ => "not part of the text — anything you commit today shows".to_string(),
+            _ => "not part of the text — anything committed on it shows".to_string(),
         };
         println!(
             "  {label:<11} {} {}  ·  {line}",
@@ -628,7 +775,7 @@ fn track_progress(
     let upcoming = plan.schedule(today, 7);
     if upcoming
         .iter()
-        .any(|day| day.want == plan::Want::Lit || day.need > 0)
+        .any(|day| day.want != plan::Want::Around || day.need > 0)
     {
         println!("\n  the next seven days");
         for day in upcoming {
@@ -637,10 +784,19 @@ fn track_progress(
                     format!("letter  {} to go", thousands(day.short()))
                 }
                 plan::Want::Lit => "letter  done".to_string(),
+                // Already past its ceiling, before the advice arrives. Telling
+                // someone to keep a day dark that is already lit is worse than
+                // saying nothing: inside the letters it is a hole and permanent,
+                // and outside it is a field day that has run too bright.
+                plan::Want::Hole if day.over() > 0 => "hole".to_string(),
+                _ if day.over() > 0 => "too bright".to_string(),
                 _ if day.short() > 0 => {
                     format!("field   {} to go", thousands(day.short()))
                 }
                 _ if day.need > 0 => "field   done".to_string(),
+                // Nothing to do, which is not the same as nothing to say: this
+                // is a day inside the letters that has to stay empty.
+                plan::Want::Hole => "keep dark".to_string(),
                 _ => "—".to_string(),
             };
             println!(
@@ -662,13 +818,38 @@ fn track_progress(
         thousands(future_commits)
     );
     if past > 0 {
+        // The command has to be the one that does what the sentence above it
+        // says. A plain `--write` would put a flat `--commits` on every lit day,
+        // including the ones already bright — and with the text typed out it
+        // would not even read the plan, so the placement could differ from the
+        // one just reported on.
         println!(
             "    {past} letter day(s) already past, {} contributions — only back-dated\n    \
-             commits reach those:\n    `mossaic-art {} --year {} --repo ../art --write`",
+             commits reach those:\n\n      mossaic-art {}--backfill --repo ../art --write\n",
             thousands(past_commits),
-            plan.text,
-            plan.year
+            match options.plan_loaded {
+                true => String::new(),
+                // No saved plan, so the placement has to be spelled out or the
+                // command would draw a differently-placed text.
+                false => format!(
+                    "{} --year {} --start-week {} --top {} {}",
+                    plan.text,
+                    plan.year,
+                    plan.start_week,
+                    options.top,
+                    match shades.field {
+                        0 => String::new(),
+                        level => format!("--background {level} "),
+                    }
+                ),
+            }
         );
+        if !options.plan_loaded {
+            println!(
+                "    (or `--save` the plan once, and it is just \
+                 `mossaic-art --backfill …`)"
+            );
+        }
     }
 }
 
@@ -731,11 +912,26 @@ fn show_font(colour: bool) {
 fn load(path: &PathBuf, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
     let calendar = github::from_file(&path.to_string_lossy())
         .unwrap_or_else(|error| fail(&format!("could not read {path:?}: {error}")));
-    calendar
+    let kept: BTreeMap<NaiveDate, u32> = calendar
         .days()
         .filter(|day| day.count > 0 && grid.holds(day.date))
         .map(|day| (day.date, day.count))
-        .collect()
+        .collect();
+    // A calendar for another year filters down to nothing, and everything
+    // downstream is then correct about an empty year: 9,527 contributions read
+    // as none, and an impossible plan reads as trivially reachable. `--year` is
+    // the flag most likely to be typed as a one-off over a saved plan, so the
+    // mismatch is easy to reach and silent when it happens.
+    if kept.is_empty() && calendar.days().any(|day| day.count > 0) {
+        eprintln!(
+            "note: {} holds no contributions in {} — it covers {}. Tracking \
+             against an empty year.",
+            path.display(),
+            grid.year,
+            calendar.year
+        );
+    }
+    kept
 }
 
 /// What `--track` prints.
@@ -746,10 +942,29 @@ enum Format {
     Markdown,
 }
 
+impl Options {
+    /// What "today" means for this run: `--today` when it was given, otherwise
+    /// the clock.
+    ///
+    /// An input rather than an ambient fact, which is what makes a report
+    /// reproducible — and what lets a plan be asked about a day that has not
+    /// arrived yet.
+    fn now(&self) -> NaiveDate {
+        self.today.unwrap_or_else(|| Local::now().date_naive())
+    }
+}
+
 struct Options {
     format: Format,
     track: bool,
     tracking: Option<String>,
+    /// Commit each day's shortfall rather than a flat count.
+    backfill: bool,
+    /// What "today" means. `None` reads the clock.
+    today: Option<NaiveDate>,
+    /// Whether the plan was read from a file, which decides how the advice at
+    /// the end of `--track` spells the command it suggests.
+    plan_loaded: bool,
     text: String,
     year: i32,
     commits: u32,
@@ -776,6 +991,9 @@ fn parse_args() -> Option<Options> {
         format: Format::Text,
         track: false,
         tracking: None,
+        backfill: false,
+        today: None,
+        plan_loaded: false,
         text: String::new(),
         plan_path: PathBuf::from(plan::DEFAULT_SPEC),
         save: false,
@@ -810,25 +1028,47 @@ fn parse_args() -> Option<Options> {
                 return None;
             }
             "-y" | "--year" => options.year = args.year("--year"),
+            // Every one of these is bounded where it is read, so the cast that
+            // follows cannot misrepresent it. `--commits -1` used to come out
+            // as four billion, and `--start-week -1` as `usize::MAX`, where
+            // building a date from it panicked.
             "--commits" => {
-                options.commits = args.number("--commits") as u32;
+                // A million a day is far past any real need — the brightest
+                // shade is three quarters of the year's peak — and it keeps a
+                // whole year of them inside a u32.
+                options.commits = args.number_in("--commits", "count", 1..=1_000_000) as u32;
             }
             "--background" | "--bg" => {
-                let level = args.number("--background");
                 // Bounded here so the error names the flag; `Shades::check`
                 // then decides whether the pair can draw anything.
-                options.background = match u8::try_from(level) {
-                    Ok(level) if level <= 4 => level,
-                    _ => fail(&format!(
-                        "--background wants a level between 0 and 4, not {level}"
-                    )),
-                };
+                options.background = args.number_in("--background", "level", 0..=4) as u8;
             }
             "--top" => {
-                options.top = args.number("--top") as usize;
+                let rows = (art::WEEKDAYS - art::GLYPH_ROWS) as i64;
+                options.top = args.number_in("--top", "row", 0..=rows) as usize;
             }
             "--start-week" => {
-                options.start_week = Some(args.number("--start-week") as usize);
+                // A loose bound here, because the tight one depends on the year
+                // and the text: `place` knows both and refuses what will not
+                // fit, naming the last column that would.
+                options.start_week =
+                    Some(args.number_in("--start-week", "column", 0..=60) as usize);
+            }
+            "--backfill" => options.backfill = true,
+            "--today" => {
+                let raw = args.value("--today");
+                let date = NaiveDate::parse_from_str(&raw, "%Y-%m-%d").unwrap_or_else(|_| {
+                    fail(&format!("--today wants a date as YYYY-MM-DD, not {raw:?}"))
+                });
+                if !YEARS.contains(&date.year()) {
+                    fail(&format!(
+                        "--today {raw} is outside the years these tools work in, \
+                         {} to {}",
+                        YEARS.start(),
+                        YEARS.end()
+                    ));
+                }
+                options.today = Some(date);
             }
             "--merge" => options.merge = Some(args.value("--merge").into()),
             "--snapshot" => options.snapshot = Some(args.value("--snapshot").into()),
@@ -879,9 +1119,16 @@ fn parse_args() -> Option<Options> {
     }
     // A saved plan fills in whatever was not typed. Typed flags always win, so
     // `--year 2028` against a saved 2027 plan is a one-off, not a surprise.
+    // Set before the plan is read, so that the `is_none` check below sees a
+    // user typed on this command line. Assigning them afterwards is what threw
+    // the saved one away: `tracking` is `None` for a bare `--track`, so a plan
+    // that named a user was loaded and then overwritten with nothing.
+    options.track = track;
+    options.tracking = tracking;
     match (options.text.is_empty(), options.plan_path.exists()) {
         (true, true) => {
             let spec = plan::Spec::load(&options.plan_path).unwrap_or_else(|error| fail(&error));
+            options.plan_loaded = true;
             options.text = spec.text;
             if !args.was_typed("year") {
                 options.year = spec.year;
@@ -912,8 +1159,11 @@ fn parse_args() -> Option<Options> {
         )),
         _ => {}
     }
-    options.track = track;
-    options.tracking = tracking;
+    // One reports and the other writes; running both from one command line
+    // would mean guessing which was meant.
+    if options.track && options.backfill {
+        fail("--track reports on the plan and --backfill commits to it — pick one");
+    }
     Some(options)
 }
 

@@ -9,6 +9,98 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Added
+
+- **`--today DATE` makes "today" an input.** The tracker read the clock, so its
+  answer to "what does today owe" was a fact about when it ran rather than about
+  a calendar and a date. Now it can be told, which is what lets a report be
+  reproduced, lets a day that has not arrived be asked what it will owe, and
+  lets the tests assert on a report at all. (#2, #3)
+- **`--backfill` commits what the plan is short, and nothing else.** A plain
+  `--write` puts the same flat count on every lit day, including the ones
+  already bright — and adding to the busiest of those raises the year's peak,
+  which is the very thing every letter day is measured against. A shortfall
+  cannot do that: `need` is at most the peak already, so one pass finishes the
+  plan and the target does not move. Needs `--repo`, and `--write` to commit.
+  (#7)
+- **`keep-dark`, a day the report now warns about.** A day inside the text block
+  that is not part of a letter has to stay empty, and a contribution on it is
+  the one loss nothing takes back. The Action gains `today-kind` and
+  `tomorrow-kind` outputs, so *do not commit tomorrow* can arrive a day early.
+  (#4)
+- **A Windows job in CI.** The `cfg(not(unix))` probe was never compiled by any
+  gate, and had drifted out of date in two ways that `-D warnings` would have
+  caught. (#11)
+
+### Changed
+
+- **`fail-on: behind` counts letter days only.** It tested `today.short`, which
+  is also non-zero for a short *background* day — so with `background` set, each
+  of the year's ~290 field days failed the job, blaming a letter day for it.
+  (#9)
+- **A report says nothing about a day its own year does not hold.** Tracking
+  2024 while it is 2026 reported on a day in 2026 and called it `outside`, which
+  is true of the wrong calendar; `today` and `tomorrow` are now `null` there.
+  (#4)
+- **`hole` in the JSON report names damage rather than position.** A clean day
+  inside the letters is `keep-dark`; `hole` is what it becomes once it is too
+  bright. Nothing in this repository read the old value, and the markdown report
+  already agreed with the new meaning. (#4)
+- **A failed fetch names whose year it was reading.** Whose contributions to
+  track can come from a saved plan, and "gh was not found" gave no hint which
+  login it had resolved. The login is stripped of control characters where it is
+  resolved rather than at each of the places that print it, which is the rule the
+  calendar already followed — a plan file is a file someone may have sent you.
+
+### Fixed
+
+- **Numeric options are bounded where they are read.** `--year` was
+  range-checked because a binary once passed 999999 through to a panic; every
+  other number took the unguarded path, and `as` is not a check. `--commits -1`
+  came out as 4,294,967,295 — which `--write` would then try to build a
+  fast-import stream for — `--commits 0` drew bright letters for no commits at
+  all, `--top -1` wrapped past the guard meant to catch it, and
+  `--start-week -1` reached `usize::MAX`, where building a date from it panicked.
+  A start column too far right is now refused with the last one that would have
+  fitted, rather than silently drawing a plan of no days. (#5)
+- **A saved plan's `user` is no longer discarded.** It was read out of the file
+  and then overwritten with the nothing a bare `--track` carries, so
+  `mossaic-art --track` ignored the login the plan named — and with `gh`
+  authenticated it tracked the wrong person rather than saying so. (#6)
+- **A `--merge` calendar from another year says so.** Every day of a 2026
+  calendar falls outside a 2027 grid, so it filtered down to nothing and
+  everything downstream was correct about an empty year: 9,527 contributions
+  read as none, and a plan that cannot be drawn read as reachable at one commit
+  a day. (#8)
+- **Two tests no longer assert on the wall clock.** One claimed whatever day it
+  ran on was a lit day inside the letters — true when it was written, false the
+  morning after — and another that 2027 had not started. Both now pin `--today`,
+  and CI runs the CLI suite a second time from a timezone that is already
+  tomorrow. (#3)
+- **The command `--track` suggests for back-dating now does what the sentence
+  above it promises.** It printed a plain `--write` with the text typed out,
+  which ignored the saved plan, defaulted to 4 commits a day where the plan
+  needed 110, and wrote to every lit day rather than the short ones. (#7)
+- **Sixel uses all 256 colour registers.** The capacity check bailed at a full
+  palette rather than a full-plus-one, and it ran after an index had been handed
+  out — one step later and `seen.len() as u8` would have wrapped to 0 and
+  aliased a colour. Restructured so no such index is ever constructed. (#14)
+- **Rustdoc**: `term::probe` carried doc comments on both sides of its
+  `#[cfg]` and rendered them concatenated; `calendar::demo`'s summary line
+  belonged to `Stats`; the non-unix `probe` had no documentation at all. (#10)
+- **`calendar::demo` no longer re-implements GitHub's shading.** It called
+  `art::level`'s formula a second time, in `u32` where the original widens to
+  `u64` — a second place to change when GitHub restyles the graph, in a crate
+  whose whole point is agreeing with github.com. (#14)
+
+### Removed
+
+- **`y` and `Y` no longer change year.** They were undocumented, they duplicated
+  `[`, `]`, `PageUp` and `PageDown`, and in a chart that binds `h j k l` a `y`
+  that silently moves the year is the one binding with a real chance of
+  surprising a vim-handed user, to whom it means *yank*. `PageUp` and `PageDown`
+  are documented now, in the README and in the `?` overlay. (#12)
+
 ## [0.2.0] - 2026-08-19
 
 ### Changed

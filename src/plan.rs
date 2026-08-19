@@ -185,9 +185,15 @@ impl Plan {
                 Want::Around if shades.field > 0 => (field_need, field_ceiling),
                 Want::Around => (0, None),
             };
-            // Days with nothing to say are left out: a dark day that is dark is
-            // not news, and a year with no background has three hundred of them.
-            if want == Want::Lit || have > 0 || day_need > 0 {
+            // Days with nothing to say are left out — but which days those are
+            // depends on where they sit. Outside the text, a dark day that is
+            // dark is not news, and a year with no background has three hundred
+            // of them. *Inside* the text it is the news: the plan wants that day
+            // to stay dark, nothing takes a contribution back, and this is the
+            // only warning there is before the loss is permanent. Dropping them
+            // is what made the tracker call tomorrow free when committing on it
+            // would have punched a hole in a letter.
+            if want != Want::Around || have > 0 || day_need > 0 {
                 days.push(Day {
                     date,
                     want,
@@ -355,6 +361,15 @@ impl Plan {
     pub fn under_way(&self, today: NaiveDate) -> bool {
         today >= self.first_day()
     }
+
+    /// Whether `date` falls in the year this plan is drawn in.
+    ///
+    /// Stronger than [`Plan::under_way`], and the right question to ask before
+    /// reporting on a particular day: a plan for 2024 has nothing to say about
+    /// a day in 2026, though the year has certainly begun.
+    pub fn holds(&self, date: NaiveDate) -> bool {
+        self.first_day() <= date && date <= self.last_day()
+    }
 }
 
 /// How many days still owe something, and how much between them.
@@ -474,7 +489,19 @@ impl Spec {
 pub struct Standing {
     /// The date, ISO 8601.
     pub date: String,
-    /// `letter`, `background`, `hole`, or `outside`.
+    /// What the plan makes of the day, as one word:
+    ///
+    /// | `kind` | what it means |
+    /// | --- | --- |
+    /// | `letter` | part of a letter; it has to be bright |
+    /// | `background` | the plan wants a shade here, in the text block or out |
+    /// | `keep-dark` | inside the letters with nothing asked of it — a contribution here becomes a hole |
+    /// | `hole` | inside the letters and too bright already; nothing takes that back |
+    /// | `outside` | outside the text, and no background asks anything of it |
+    ///
+    /// `hole` names damage rather than position, so it appears only once a day
+    /// has passed its ceiling — a clean day inside the letters is `keep-dark`,
+    /// which is an instruction rather than a loss.
     pub kind: &'static str,
     /// What the day must reach; zero for a day with nothing to reach.
     pub need: u32,
@@ -496,7 +523,13 @@ impl Standing {
             date: day.date.to_string(),
             kind: match day.want {
                 Want::Lit => "letter",
-                Want::Hole => "hole",
+                // Inside the letters. Too bright is the one loss nothing
+                // undoes, so it is named for the damage; short of that the day
+                // is either part of a background the plan draws, or a day whose
+                // whole job is to stay dark.
+                Want::Hole if day.over() > 0 => "hole",
+                Want::Hole if day.need > 0 => "background",
+                Want::Hole => "keep-dark",
                 // Outside the text, but the plan still wants a shade there.
                 Want::Around if day.need > 0 => "background",
                 Want::Around => "outside",
@@ -605,23 +638,29 @@ impl Report {
         let (legibility, separation) = plan.shades.worst();
         let (overdue_days, overdue_commits) = plan.overdue(today);
         let (ahead_days, ahead_commits) = plan.ahead(today);
+        // Only about days the plan's own year holds. Tracking 2024 while it is
+        // 2026 used to report on a day in 2026 and call it `outside`, which is
+        // true of the wrong calendar; `--today` makes that easy to ask for by
+        // accident, so the answer is now "nothing" rather than something
+        // confident.
         let standing = |date: NaiveDate| {
-            plan.under_way(today)
-                .then(|| plan.on(date).map(Standing::of))
-                .flatten()
-                .or_else(|| {
-                    // A day the plan has no entry for is still an answer: it is
-                    // not part of the text.
-                    plan.under_way(today).then(|| Standing {
-                        date: date.to_string(),
-                        kind: "outside",
-                        need: 0,
-                        have: 0,
-                        short: 0,
-                        ceiling: None,
-                        over: 0,
-                    })
-                })
+            if !plan.holds(date) {
+                return None;
+            }
+            // A day the plan has no entry for is still an answer: it is not
+            // part of the text.
+            Some(plan.on(date).map_or_else(
+                || Standing {
+                    date: date.to_string(),
+                    kind: "outside",
+                    need: 0,
+                    have: 0,
+                    short: 0,
+                    ceiling: None,
+                    over: 0,
+                },
+                Standing::of,
+            ))
         };
 
         let mut report = Self {
@@ -770,6 +809,22 @@ impl Report {
                         ("hole", _) => {
                             "inside the letters and already lit — a permanent hole".to_string()
                         }
+                        // Nothing is owed on it, and that is the whole
+                        // instruction: leaving it alone is the work.
+                        ("keep-dark", _) => "inside the letters — keep it dark".to_string(),
+                        ("background", _) if day.over > 0 => format!(
+                            "background — {} contributions, {} too many for level {}",
+                            thousands(day.have),
+                            thousands(day.over),
+                            self.field_level
+                        ),
+                        ("background", 0) => "background — already the right shade".to_string(),
+                        ("background", short) => format!(
+                            "background — {} of {} there, {} to go",
+                            thousands(day.have),
+                            thousands(day.need),
+                            thousands(short)
+                        ),
                         _ => "not part of the text".to_string(),
                     }
                 ));

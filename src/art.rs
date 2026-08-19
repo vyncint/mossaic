@@ -28,8 +28,9 @@ pub const GLYPH_ROWS: usize = 5;
 /// width of any text — the placement, the centring and the eight-character
 /// limit all rest on it.
 pub const GLYPH_COLS: usize = 5;
-/// Rows in a calendar week, Sunday first.
-const WEEKDAYS: usize = 7;
+/// Rows in a calendar week, Sunday first. Public because it is what bounds
+/// `--top`: five rows of glyph have to fit inside it.
+pub const WEEKDAYS: usize = 7;
 
 /// The font: `#` lights a day, `.` leaves it dark.
 ///
@@ -191,6 +192,13 @@ impl Grid {
     }
 
     /// The date at a grid position, which may fall outside the year.
+    ///
+    /// `week` must be less than [`Grid::weeks`] and `row` less than 7 — that is
+    /// what "a position on this grid" means, and every caller here walks a
+    /// bounded range to satisfy it. Far outside that, adding the offset to a
+    /// date runs off the end of the calendar and panics, which is why
+    /// [`place`] refuses a start column that would not fit rather than
+    /// building dates from it.
     pub fn date_at(&self, week: usize, row: usize) -> NaiveDate {
         self.start + Days::new((week * WEEKDAYS + row) as u64)
     }
@@ -465,6 +473,23 @@ pub fn place(
     // Centred by default, which is also what keeps a short text off the ragged
     // first and last columns.
     let start_week = start.unwrap_or((grid.weeks - columns.len()) / 2);
+    // Refused rather than drawn. Past the last column that fits, every pixel
+    // falls outside the year: the old answer was a note about dropped pixels
+    // and a plan of nought days, and far enough out — `--start-week -1`, cast
+    // to a usize — building the date panicked.
+    // Subtraction rather than `start_week + columns.len() > grid.weeks`: the
+    // check above has already ruled out the underflow, and the addition would
+    // itself overflow for the very value that made this check necessary.
+    if start_week > grid.weeks - columns.len() {
+        return Err(format!(
+            "--start-week {start_week} puts {} columns past the end of {}, \
+             which has {}; the last one that fits is {}",
+            columns.len(),
+            grid.year,
+            grid.weeks,
+            grid.weeks - columns.len()
+        ));
+    }
 
     let mut lit = BTreeMap::new();
     let mut skipped = 0;

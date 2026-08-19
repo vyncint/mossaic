@@ -188,7 +188,6 @@ impl Calendar {
     }
 }
 
-/// What the summary line reports, counted over elapsed days only.
 /// A sample year, for trying the chart with no account and no network.
 ///
 /// Deterministic — the same year every time, so what `--demo` shows is what the
@@ -222,7 +221,6 @@ pub fn demo(year: i32) -> Calendar {
         date += Duration::days(1);
     }
 
-    // GitHub's own shading: equal slices of [0, peak], not rank quartiles.
     let peak = counts
         .iter()
         .map(|(_, count)| *count)
@@ -237,11 +235,11 @@ pub fn demo(year: i32) -> Calendar {
         .map(|(date, count)| Day {
             date,
             count,
-            level: if count == 0 {
-                0
-            } else {
-                ((count * 4).div_ceil(peak)).min(4) as u8
-            },
+            // GitHub's own shading, from the one place that implements it. A
+            // second copy here would be a second thing to change when GitHub
+            // restyles the graph, in a crate whose whole point is agreeing
+            // with github.com.
+            level: crate::art::level(count, peak),
             future: false,
         })
         .collect();

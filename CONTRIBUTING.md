@@ -62,6 +62,13 @@ Two rules that are easy to get wrong:
   magic.
 - **Keep tests hermetic.** `env_clear()`, `--file art/vyncint-2027.json`, no
   network. If a change genuinely needs the API, mark it `#[ignore]` and say so.
+- **Pin `--today` in anything that reads a report.** The clock is an input to
+  `mossaic-art --track`, and an assertion that does not pin it is an assertion
+  about the day it was written. Two of them were: one claimed whatever day CI
+  saw was a lit day inside the letters, and it passed for exactly as long as
+  that was true. `--today 2026-08-19` against `art/vyncint-2026.json` is the
+  fixture pair to reach for. The `test` job runs the CLI suite a second time
+  under `TZ=Pacific/Kiritimati`, which is a backstop rather than the rule.
 
 Anything user-visible in the terminal deserves a look in a real one too. The
 harness is a VT emulator; it agrees with terminals about text and knows nothing
