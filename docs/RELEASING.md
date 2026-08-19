@@ -4,17 +4,15 @@ The pipeline does the work; this is the human side of it.
 
 ## Prerequisites
 
-- A publish credential. These are not interchangeable, and which one you have
-  depends on whether the crate exists yet:
-  - **Before the first release** there is no crate on crates.io, and Trusted
-    Publishing is configured *on a crate* — so there is nothing to configure.
-    The first release uses a stored `CARGO_REGISTRY_TOKEN` repository secret,
-    scoped to this crate.
-  - **After it**, switch: set up Trusted Publishing on crates.io (Settings →
-    Trusted Publishing, pointing at `release.yml` and the `release`
-    environment), change the publish step in `release.yml` back to
-    `rust-lang/crates-io-auth-action` with `id-token: write`, and delete the
-    secret. Short-lived tokens beat one sitting at rest.
+- crates.io **Trusted Publishing** linked to this repository (Settings →
+  Trusted Publishing on crates.io, pointing at `release.yml` and the `release`
+  environment). No `CARGO_REGISTRY_TOKEN` secret is stored anywhere.
+
+  0.1.0 was the exception and could not have been otherwise: Trusted
+  Publishing is configured *on a crate*, so it cannot be set up for one that
+  has never been published. That release used a stored token, which was
+  deleted immediately afterwards. A new crate from this template will have to
+  do the same once, then switch back.
 - A `release` GitHub environment restricted to `v*` tags, so an OIDC publish
   token cannot be minted from a branch.
 - `v*.*.*` tags protected by a ruleset, so only a maintainer can push one.

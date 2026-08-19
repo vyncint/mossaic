@@ -9,6 +9,21 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-19
+
+No functional changes — the crate is byte-for-byte the same tool as 0.1.0.
+This release exists to prove the publishing pipeline works the way it is
+supposed to.
+
+### Changed
+
+- **Releases publish through crates.io Trusted Publishing.** The workflow
+  exchanges the job's OIDC token for a credential that lives for minutes, so
+  no registry token is stored on the repository at all. 0.1.0 could not do
+  this — Trusted Publishing is configured *on a crate*, and the crate did not
+  exist until 0.1.0 published — so it went out with a stored token, which has
+  since been deleted along with the zizmor exception that covered it.
+
 ## [0.1.0] - 2026-08-19
 
 First release. The **Changed** and **Fixed** sections below record decisions
@@ -156,5 +171,6 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/vyncint/mossaic/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vyncint/mossaic/releases/tag/v0.1.0
