@@ -9,6 +9,17 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tracking is no longer refused because of a flag it does not use.** Over a
+  busy year, `--track --merge --background 1` failed with "the letters would
+  not show" — a check meant for runs that *draw*, where `--commits` is what
+  each lit day gets. Tracking never writes a commit; it works out what a
+  letter day needs from the year's real peak. The GitHub Action passes no
+  `--merge` and so never hit it, which meant the Action and the CLI disagreed
+  about the same plan. Found by running the Action against a real year and
+  comparing.
+
 ## [0.1.1] - 2026-08-19
 
 No functional changes — the crate is byte-for-byte the same tool as 0.1.0.

@@ -647,3 +647,65 @@ fn a_saved_plan_remembers_the_background() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_background_check_meant_for_drawing_does_not_block_tracking() {
+    // `--commits` is what `--write` puts on a lit day. Tracking never writes
+    // one — it works out what a letter day needs from the year's real peak —
+    // so the "these shades cannot be told apart" guard must not fire there.
+    //
+    // The regression: over a busy year, `--track --merge --background` was
+    // refused with "the letters would not show", telling the user their plan
+    // was impossible when the only thing wrong was a flag that run ignores.
+    // The GitHub Action never hit it (it passes no --merge), so the two
+    // disagreed about the same plan.
+    let tracking = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--start-week",
+        "6",
+        "--background",
+        "1",
+        "--commits",
+        "4",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--no-colour",
+    ]);
+    assert!(
+        tracking.status.success(),
+        "tracking must not be refused over --commits: {}",
+        String::from_utf8_lossy(&tracking.stderr)
+    );
+    let text = stdout(&tracking);
+    assert!(
+        text.contains("letters at level 4, background at level 1"),
+        "and it reports the shades the plan actually wants: {text}"
+    );
+
+    // The same flags without --track *would* draw, and there the guard is
+    // right: 4 commits in a year peaking in the hundreds is level 1, the same
+    // as the background, so the letters would be invisible.
+    let drawing = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--start-week",
+        "6",
+        "--background",
+        "1",
+        "--commits",
+        "4",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--no-colour",
+    ]);
+    assert!(
+        !drawing.status.success(),
+        "drawing with indistinguishable shades is still refused"
+    );
+    let error = String::from_utf8_lossy(&drawing.stderr).into_owned();
+    assert!(error.contains("would not show"), "{error}");
+}

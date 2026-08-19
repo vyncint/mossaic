@@ -127,7 +127,13 @@ fn main() {
         ink: art::level(ink.lit, peak),
         field: art::level(ink.field, peak),
     };
-    if shades.field > 0 && drawn.field >= drawn.ink {
+    //
+    // Only for a run that would *draw*. `--commits` is what `--write` puts on a
+    // lit day; tracking never writes one, and works out what a letter day needs
+    // from the year's real peak instead. Refusing `--track --merge --background`
+    // over a busy year told the user their plan was impossible when the only
+    // thing wrong was a flag that run does not use.
+    if !options.track && shades.field > 0 && drawn.field >= drawn.ink {
         fail(&format!(
             "--commits {} puts the letters at level {} and the background at level {}, \
              so the letters would not show.\n  \
