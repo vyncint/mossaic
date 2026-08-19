@@ -166,39 +166,38 @@ Drawing the art is one command. Getting there while also living a normal year is
 a hundred small decisions, and `--track` is the one that answers them:
 
 ```sh
+# Against your own year. Add `--merge art/vyncint-2026.json` to reproduce the
+# output below exactly — it is the calendar this repository ships.
 mossaic-art VYNCINT --year 2026 --track
 ```
 
 ```
-VYNCINT  ·  2026  ·  tracking vyncint
+VYNCINT  ·  2026  ·  tracking art/vyncint-2026.json
 
-  the year    1,122 contributions  ·  busiest Aug 17 (112)
-              a letter day has to reach 85 to match it
+  the plan    41 of 53 columns from week 6, on rows 1-5
+  the year    9,527 contributions  ·  busiest Aug 11 (146)
+              a letter day has to reach 110 to match it
 
-  letters     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  2 of 75 bright
-  owing       73 day(s) short, 5,954 contributions between them
-  holes       19 day(s) inside the letters are lit and cannot be unlit
+  letters     ██████░░░░░░░░░░░░░░░░░░░░░░  18 of 75 bright
+  owing       57 day(s) short, 5,994 contributions between them
+  holes       61 day(s) inside the letters are lit and cannot be unlit
+  around      23 day(s) outside the text have contributions
 
   <the year, drawn: bright where a letter is done, dim where it is owed,
    red where a day inside the letters is lit and cannot be unlit>
 
   VYNCINT cannot be drawn cleanly in 2026.
-    19 day(s) inside the letters already have contributions, and
+    61 day(s) inside the letters already have contributions, and
     nothing takes those away — the text would read with holes in it.
-    --start-week 4 would leave 14 instead of 19.
+    --start-week 1 would leave 23 instead of 61.
 
-  today       Wed Aug 19  ·  not part of the text, and already lit
+  today       Wed Aug 19  ·  inside the letters and already lit (113) — a permanent hole
   tomorrow    Thu Aug 20  ·  not part of the text — anything you commit today shows
 
   the next seven days
-    Fri Aug 21   letter  85 to go
-    Mon Aug 24   letter  85 to go
-    ...
-
-  the rest of the year
-    23 letter day(s) still to come, 2,530 contributions
-    34 letter day(s) already past, 3,464 contributions — only back-dated
-    commits reach those
+    Wed Aug 19   —
+    Thu Aug 20   —
+    Fri Aug 21   letter  110 to go
 ```
 
 Three kinds of answer, and only two of them are work:

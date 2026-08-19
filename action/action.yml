@@ -144,22 +144,55 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Cache the tracker build
+    # Which version of the tracker to run is decided by the ref you pinned:
+    # `@v0.1.2` runs mossaic 0.1.2. Read from the manifest that shipped with
+    # this action rather than hardcoded, so the two can never disagree.
+    - name: Work out which tracker to install
+      id: version
+      shell: bash
+      env:
+        MANIFEST: ${{ github.action_path }}/../Cargo.toml
+      run: |
+        set -euo pipefail
+        version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$MANIFEST" | head -1)"
+        if [ -z "$version" ]; then
+          echo "::error::Could not read a version from ${MANIFEST}."
+          exit 1
+        fi
+        echo "Tracker version: ${version}"
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the tracker
+      id: cache
       # Pinned by SHA, like every action in this repository: a composite
       # action that pulls an unpinned one hands its supply chain away.
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
-        path: ${{ github.action_path }}/../target
-        # The ref key goes stale when a branch ref moves; the build step below
-        # always runs, so a stale hit only means an incremental rebuild.
-        key: mossaic-action-${{ runner.os }}-${{ github.action_ref }}
-        restore-keys: |
-          mossaic-action-${{ runner.os }}-
+        path: ${{ runner.tool_cache }}/mossaic
+        # Keyed by version, which is immutable — so a hit is always the right
+        # binary and the install below can be skipped outright. (The old key
+        # was the git ref, which moves, so every run had to rebuild to be
+        # sure.)
+        key: mossaic-${{ steps.version.outputs.version }}-${{ runner.os }}
 
-    - name: Build the tracker
+    - name: Install the tracker
+      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
-      working-directory: ${{ github.action_path }}/..
-      run: cargo build --release --bin mossaic-art
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+        ROOT: ${{ runner.tool_cache }}/mossaic
+      run: |
+        set -euo pipefail
+        # From crates.io, not from this checkout: the published crate is the
+        # artifact that was tested and released, and `--locked` pins it to the
+        # exact dependency versions it was released with.
+        if ! cargo install mossaic --version "$VERSION" --locked \
+             --bin mossaic-art --root "$ROOT"; then
+          echo "::error::Could not install mossaic ${VERSION} from crates.io. \
+        If you pinned this action to a branch, that branch may declare a version \
+        that has not been published yet — pin a released tag instead."
+          exit 1
+        fi
 
     - name: Track the plan
       id: track
@@ -178,7 +211,7 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_SUMMARY: ${{ inputs.summary }}
         OWNER: ${{ github.repository_owner }}
-        ART: ${{ github.action_path }}/../target/release/mossaic-art
+        ART: ${{ runner.tool_cache }}/mossaic/bin/mossaic-art
       run: |
         set -euo pipefail
         report_dir="${RUNNER_TEMP}/mossaic"

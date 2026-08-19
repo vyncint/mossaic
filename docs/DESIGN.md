@@ -38,6 +38,20 @@ that into a `Scene`, and `graphics.rs` makes the screen match it. Nothing in
 `graphics.rs` knows about years or keys; nothing in `ui.rs` knows about
 protocols.
 
+Three decisions in the data layer are worth stating, because none of them is
+visible from the diagram:
+
+- **Levels come from GitHub, not from arithmetic.** The API returns a
+  `contributionLevel` per day and that is what is drawn. Re-deriving it from
+  counts would be one more place to disagree with github.com.
+- **Fetches carry a sequence number.** They run on a background thread, and
+  holding `[` down starts several; without the number a slow early response
+  could overwrite a newer one and show the wrong year.
+- **Days still to come are kept, and flagged.** They draw as empty cells and
+  are excluded from every statistic. Without the flag, the empty tail of the
+  current year would read as a broken streak, and December would be
+  indistinguishable from a quiet Tuesday in March.
+
 ## 3. The cell contract
 
 **A day is two columns wide and one row tall.** Everything else falls out of
@@ -55,6 +69,12 @@ that:
 The square inside that pitch is `min(2 × cell_w, cell_h) × 11/14`, centred: the
 pitch is only square when a cell is exactly twice as tall as it is wide, and
 taking the smaller side keeps the day square on fonts where it is not.
+
+Rounding is anti-aliased from the signed distance to the shape's edge —
+coverage is `0.5 − distance`, clamped, one evaluation per pixel, no
+supersampling. At a 2px radius on an 11px cell the corner is a sub-pixel bite,
+which is exactly why it has to be drawn in fractions of a pixel rather than in
+thirds of a character.
 
 ## 4. Two protocols, one image
 
@@ -147,7 +167,24 @@ Motion, drag and click all hover. `1003` motion reporting is the mode most
 likely to be missing (Terminal.app, some multiplexers), and a click is the
 event those terminals do send.
 
+Events are drained to the end of the queue every frame rather than one per
+frame: motion reports arrive in floods, and answering them one at a time
+leaves the tooltip trailing several cells behind the pointer.
+
+Mouse reporting takes click-to-select away from the terminal, which is a real
+cost for something you may want to copy out of — so `m` turns it off and on,
+and a panic hook turns it off as well, because an unwind must not leave the
+shell printing escape codes at every click.
+
 ## 9. Colour, degraded
+
+The five shades, as github.com serves them:
+
+| | level 0 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- | --- |
+| light | `#eff2f5` | `#aceebb` | `#4ac26b` | `#2da44e` | `#116329` |
+| dark | `#151b23` | `#033a16` | `#196c2e` | `#2ea043` | `#56d364` |
+| dimmed | `#2a313c` | `#1b4721` | `#2b6a30` | `#46954a` | `#6bc46d` |
 
 The five levels are the one place a converted colour is not good enough. The
 256-colour cube has six steps per channel, and GitHub's dark greens fall between

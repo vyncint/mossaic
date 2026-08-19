@@ -171,10 +171,15 @@ lands in the notifications you already have.
 
 ## Notes
 
-- The tracker is built from the action's own ref on first use and cached; a
-  cold run adds a minute or two, warm runs seconds.
-- The action tracks whichever ref you pin — `@main`, a tag, or a SHA. Pin a tag
-  or SHA if you want it to change only when you say so.
+- **Pin a released tag.** The ref you pin decides which tracker runs: the
+  action reads the version from the `Cargo.toml` beside it and installs exactly
+  that from crates.io, so `@v0.1.1` runs mossaic 0.1.1 and always will. A
+  branch ref works, but it can only ever get you the last *published* version —
+  and if the branch has bumped its version ahead of a release, the install
+  fails rather than guessing.
+- A cold run compiles the tracker, which takes a minute or two. It is then
+  cached by version, and because a version is immutable, later runs skip the
+  build entirely rather than re-checking it.
 - **Private contributions.** The default `GITHUB_TOKEN` sees public
   contributions only. Your own graph counts private ones if you have
   [that setting][private] on, so a token without `read:user` will report you

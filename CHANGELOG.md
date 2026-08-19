@@ -9,6 +9,15 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Changed
+
+- **The GitHub Action installs the tracker from crates.io** instead of building
+  the checked-out repository. The ref you pin decides the version — the action
+  reads it from the `Cargo.toml` beside it, so `@v0.1.2` runs mossaic 0.1.2 —
+  and the cache is keyed by that version rather than by a git ref. A version is
+  immutable, so a cache hit is now exact and the build is skipped outright,
+  where the old ref key could go stale and had to rebuild to be sure.
+
 ### Fixed
 
 - **Tracking is no longer refused because of a flag it does not use.** Over a
@@ -19,6 +28,10 @@ listed under a **Changed** or **Removed** heading.
   `--merge` and so never hit it, which meant the Action and the CLI disagreed
   about the same plan. Found by running the Action against a real year and
   comparing.
+- **A hole is called a hole again.** With no background drawn, a lit day inside
+  the letters reported as "background — 113 contributions, 113 too many for
+  level 0", naming a shade the plan never asked for. The markdown report always
+  got this right, so the text report was the one disagreeing with it.
 
 ## [0.1.1] - 2026-08-19
 

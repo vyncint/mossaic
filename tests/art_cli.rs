@@ -709,3 +709,35 @@ fn a_background_check_meant_for_drawing_does_not_block_tracking() {
     let error = String::from_utf8_lossy(&drawing.stderr).into_owned();
     assert!(error.contains("would not show"), "{error}");
 }
+
+#[test]
+fn a_hole_is_called_a_hole_not_a_background_at_level_zero() {
+    // With no background there is no field, so describing a spoiled day as
+    // "background — 113 contributions, 113 too many for level 0" names a shade
+    // the plan never asked for. Inside the letters it is a hole, and that is
+    // what it has to say — the markdown report always got this right, so the
+    // text report was the one disagreeing.
+    let out = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--no-colour",
+    ]);
+    assert!(out.status.success());
+    let text = stdout(&out);
+    let today = text
+        .lines()
+        .find(|line| line.trim_start().starts_with("today"))
+        .expect("a year under way reports on today");
+    assert!(
+        !today.contains("level 0"),
+        "there is no level-0 background to be over: {today}"
+    );
+    assert!(
+        today.contains("permanent hole"),
+        "a lit day inside the letters is a hole: {today}"
+    );
+}

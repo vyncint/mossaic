@@ -588,7 +588,16 @@ fn track_progress(
             Some(day) if day.want == plan::Want::Lit => {
                 "a letter day — already bright enough".to_string()
             }
-            // Over its ceiling: already the wrong shade, and nothing undoes it.
+            // Over its ceiling, and nothing undoes it. Which loss it is
+            // depends on where the day sits: inside the letters it is a hole,
+            // and calling that "too many for level 0" when no background was
+            // asked for describes a shade that does not exist.
+            Some(day) if day.over() > 0 && day.want == plan::Want::Hole => {
+                format!(
+                    "inside the letters and already lit ({}) — a permanent hole",
+                    thousands(day.have)
+                )
+            }
             Some(day) if day.over() > 0 => format!(
                 "background — {} contributions, {} too many for level {}",
                 thousands(day.have),
