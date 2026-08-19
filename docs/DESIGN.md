@@ -230,7 +230,47 @@ debt, which contributing fixes. Above the ceiling is damage, which nothing
 does: it is the same loss as a lit day inside a letter, arrived at by being the
 wrong colour instead of by being lit at all.
 
-## 11. Frames
+The band is why a day with *nothing* asked of it still has something to say. The
+gaps inside and between the letters have a floor of zero and a ceiling of zero:
+no work, and no latitude either. Those days were once left out of the plan for
+having nothing to report, which made the tracker describe them as days outside
+the text — free to commit on, when they are the only days in the year whose loss
+is permanent. They are kept now, and they are the one state that has to be read
+*before* the day rather than after it, which is what `keep-dark` in the report
+and `tomorrow-kind` in the Action are for.
+
+## 11. Time is an input
+
+The tracker's whole job is to answer "what does today owe", and for three
+versions it read the clock to find out. That makes the answer a fact about when
+the command ran, and three things follow from it, none of them good: a
+documented sample stops being true overnight, a test asserts on the day it was
+written, and a plan cannot be asked about a day that has not arrived.
+
+So `--today` is a flag, defaulting to the clock rather than replacing it. The
+same shape as `--graphics` and `--cell`: ask the environment, and let it be
+overridden by someone who knows better. Two of the CLI tests had already rotted
+by the time it existed — one claimed whatever day CI saw was a lit day inside
+the letters — and pinning the date is what makes a report assertable at all.
+
+The related decision is what `--backfill` writes. A flat `--commits` on every
+lit day cannot converge over an active year: a day's shade is a fraction of the
+year's *peak*, so adding to the busiest day raises the peak, which raises what
+every other letter day needs. A **shortfall** is immune to that, and provably
+so — `need = ⌊3·measured/4⌋ + 1 ≤ measured` for every `measured ≥ 1`, so topping
+a day up to `need` cannot push it past the scale it is measured against, and
+`measured` is unchanged on the next pass. One pass, and a test that adds the
+shortfalls to a real year and checks the price did not move. (An *empty* year is
+the one where the peak does move, from nothing to whatever the art puts there;
+`Shades::min_peak` is why that arithmetic is still expressible.)
+
+It writes **only days already past**, which is the other half of taking the
+clock as an input. Back-dating is the sole way to reach a day that has gone;
+a day still to come wants an ordinary commit on the day, and whether GitHub
+counts a future-dated commit is unverified. Writing the whole year would also
+pre-paint a background onto days that have not happened.
+
+## 12. Frames
 
 Every repaint is bracketed in DEC 2026 synchronized updates. mossaic writes a
 frame in two parts — ratatui's text, then the images straight after it — and a
@@ -241,7 +281,7 @@ It also makes the tests exact: `wait_frame` sees only complete repaints. Waiting
 on content alone matches a frame half-applied, which fails about three runs in
 four for reasons that look like magic.
 
-## 12. Testing
+## 13. Testing
 
 Two layers, because they catch different things.
 
@@ -263,7 +303,7 @@ encoders are covered in process, and why `--png` exists — it renders the same
 image to a file, which separates "the rasteriser is wrong" from "the emission is
 wrong".
 
-## 13. Non-goals
+## 14. Non-goals
 
 - **A general image library.** `png.rs` writes one colour type with one filter,
   because that is what a chart needs.

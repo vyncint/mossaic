@@ -53,7 +53,7 @@ options:
 in the chart:
   ?                 keys, mouse, and what this terminal can draw
   arrows / h j k l  move a day or a week
-  [ ]               previous / next year
+  [ ] · PgUp PgDn   previous / next year
   hover a day       its tooltip; click moves the cursor; wheel changes year
   d                 cycle cell style        m  mouse reporting off/on
   t  today          r  reload               q  quit

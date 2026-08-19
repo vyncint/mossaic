@@ -28,8 +28,9 @@ pub const GLYPH_ROWS: usize = 5;
 /// width of any text — the placement, the centring and the eight-character
 /// limit all rest on it.
 pub const GLYPH_COLS: usize = 5;
-/// Rows in a calendar week, Sunday first.
-const WEEKDAYS: usize = 7;
+/// Rows in a calendar week, Sunday first. Public because it is what bounds
+/// `--top`: five rows of glyph have to fit inside it.
+pub const WEEKDAYS: usize = 7;
 
 /// The font: `#` lights a day, `.` leaves it dark.
 ///
@@ -152,6 +153,10 @@ pub fn alphabet() -> impl Iterator<Item = char> {
 }
 
 /// The Sunday that starts `day`'s calendar column. Sunday is row 0.
+///
+/// Panics within six days of the first date a [`NaiveDate`] can hold, where
+/// there is no earlier Sunday to name. [`Grid::new`] does this arithmetic
+/// checked, because a year reaching it can come from a file.
 pub fn sunday_of(day: NaiveDate) -> NaiveDate {
     day - Days::new(u64::from(day.weekday().num_days_from_sunday()))
 }
@@ -180,7 +185,13 @@ impl Grid {
     pub fn new(year: i32) -> Option<Self> {
         let first = NaiveDate::from_ymd_opt(year, 1, 1)?;
         let last = NaiveDate::from_ymd_opt(year, 12, 31)?;
-        let start = sunday_of(first);
+        // Checked, not [`sunday_of`]: the first year a calendar can express has
+        // no room before it, so stepping back to a Sunday runs off the end and
+        // panics. This function promises `None` for a year no calendar can hold,
+        // and a year can arrive from a plan file — so it has to keep that
+        // promise rather than nearly keep it.
+        let start =
+            first.checked_sub_days(Days::new(u64::from(first.weekday().num_days_from_sunday())))?;
         Some(Self {
             year,
             first,
@@ -191,6 +202,13 @@ impl Grid {
     }
 
     /// The date at a grid position, which may fall outside the year.
+    ///
+    /// `week` must be less than [`Grid::weeks`] and `row` less than 7 — that is
+    /// what "a position on this grid" means, and every caller here walks a
+    /// bounded range to satisfy it. Far outside that, adding the offset to a
+    /// date runs off the end of the calendar and panics, which is why
+    /// [`place`] refuses a start column that would not fit rather than
+    /// building dates from it.
     pub fn date_at(&self, week: usize, row: usize) -> NaiveDate {
         self.start + Days::new((week * WEEKDAYS + row) as u64)
     }
@@ -382,15 +400,19 @@ impl Shades {
 
     /// The most a background day may hold before it stops being background.
     ///
-    /// `None` when the field is the brightest shade below the letters and any
-    /// overshoot would land on the letters' own level — there is no headroom to
-    /// quote. Zero-field art has a ceiling of zero: the day must stay dark.
+    /// Zero-field art has a ceiling of zero: the day must stay dark. Otherwise
+    /// it is one below the count that would reach the next shade up, and that is
+    /// always a number — [`commits_to_reach`] never returns less than 1, so the
+    /// `Option` here is a shape the caller wanted rather than a case that
+    /// happens. [`crate::plan::Day::ceiling`] is the one that is genuinely
+    /// `None`, for a day that cannot be too bright at all.
     pub fn ceiling(self, peak: u32) -> Option<u32> {
         if self.field == 0 {
             return Some(0);
         }
-        // One below the count that would reach the next shade up.
-        commits_to_reach(self.field + 1, peak).checked_sub(1)
+        // Saturating, because `Shades` is public and need not have been checked:
+        // a field of 255 would otherwise overflow the level rather than clamp.
+        commits_to_reach(self.field.saturating_add(1), peak).checked_sub(1)
     }
 }
 
@@ -451,7 +473,10 @@ pub fn place(
     start: Option<usize>,
     ink: Ink,
 ) -> Result<Placed, String> {
-    if top + GLYPH_ROWS > WEEKDAYS {
+    // Subtraction, so the guard cannot be wrapped past: `usize::MAX + GLYPH_ROWS`
+    // comes out as 4, which is comfortably "inside" a seven-row week, and the
+    // rows were then drawn wherever the wrapping took them.
+    if top > WEEKDAYS - GLYPH_ROWS {
         return Err(format!("--top {top} would push the text past row 6"));
     }
     if columns.len() > grid.weeks {
@@ -465,6 +490,23 @@ pub fn place(
     // Centred by default, which is also what keeps a short text off the ragged
     // first and last columns.
     let start_week = start.unwrap_or((grid.weeks - columns.len()) / 2);
+    // Refused rather than drawn. Past the last column that fits, every pixel
+    // falls outside the year: the old answer was a note about dropped pixels
+    // and a plan of nought days, and far enough out — `--start-week -1`, cast
+    // to a usize — building the date panicked.
+    // Subtraction rather than `start_week + columns.len() > grid.weeks`: the
+    // check above has already ruled out the underflow, and the addition would
+    // itself overflow for the very value that made this check necessary.
+    if start_week > grid.weeks - columns.len() {
+        return Err(format!(
+            "--start-week {start_week} puts {} columns past the end of {}, \
+             which has {}; the last one that fits is {}",
+            columns.len(),
+            grid.year,
+            grid.weeks,
+            grid.weeks - columns.len()
+        ));
+    }
 
     let mut lit = BTreeMap::new();
     let mut skipped = 0;
@@ -567,7 +609,9 @@ pub fn commits_for_level(
     for _ in 0..64 {
         let peak = days
             .iter()
-            .map(|day| held(day) + added)
+            // Saturating, like every other sum here: the counts come from a
+            // calendar and a calendar can come from a file.
+            .map(|day| held(day).saturating_add(added))
             .chain([elsewhere])
             .max()
             .unwrap_or(added)
@@ -746,7 +790,24 @@ pub fn write_commits(
         run(repo, &["init", "-q", "-b", "main"])?;
     }
 
-    let mut stream = String::new();
+    let mut child = Command::new("git")
+        .args(["fast-import", "--quiet"])
+        .current_dir(repo)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run git fast-import: {e}"))?;
+
+    // Streamed into git rather than built up first. The whole point of
+    // fast-import here is that the counts get large, and a stream held in a
+    // `String` costs about 275 bytes a commit — a scale where the buffer is the
+    // limit rather than the work. Buffered through a `BufWriter` so this is
+    // still one write syscall per few thousand commits, not one per line.
+    //
+    // No deadlock to worry about: `--quiet` says almost nothing, and its stdout
+    // and stderr are inherited rather than piped, so nothing of ours has to be
+    // drained while we write.
+    let mut stdin = std::io::BufWriter::new(child.stdin.take().expect("piped"));
+    let feed = |error: std::io::Error| format!("could not feed git fast-import: {error}");
     let mut index = 0usize;
     for (day, count) in lit {
         let stamp = day
@@ -758,33 +819,30 @@ pub fn write_commits(
             index += 1;
             let message = format!("{label} {day} #{index}\n");
             let body = format!("{index}\n");
-            stream.push_str("commit refs/heads/main\n");
-            stream.push_str(&format!("mark :{index}\n"));
-            stream.push_str(&format!("author {name} <{email}> {stamp} +0000\n"));
-            stream.push_str(&format!("committer {name} <{email}> {stamp} +0000\n"));
-            stream.push_str(&format!("data {}\n{message}", message.len()));
+            write!(
+                stdin,
+                "commit refs/heads/main\nmark :{index}\n\
+                 author {name} <{email}> {stamp} +0000\n\
+                 committer {name} <{email}> {stamp} +0000\n\
+                 data {}\n{message}",
+                message.len()
+            )
+            .map_err(feed)?;
             if index > 1 {
-                stream.push_str(&format!("from :{}\n", index - 1));
+                writeln!(stdin, "from :{}", index - 1).map_err(feed)?;
             }
-            stream.push_str(&format!(
+            write!(
+                stdin,
                 "M 100644 inline count.txt\ndata {}\n{body}\n",
                 body.len()
-            ));
+            )
+            .map_err(feed)?;
         }
     }
+    // Flushed and closed before waiting, or fast-import never sees end of input.
+    stdin.flush().map_err(feed)?;
+    drop(stdin);
 
-    let mut child = Command::new("git")
-        .args(["fast-import", "--quiet"])
-        .current_dir(repo)
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not run git fast-import: {e}"))?;
-    child
-        .stdin
-        .take()
-        .expect("piped")
-        .write_all(stream.as_bytes())
-        .map_err(|e| format!("could not feed git fast-import: {e}"))?;
     let status = child
         .wait()
         .map_err(|e| format!("git fast-import failed: {e}"))?;

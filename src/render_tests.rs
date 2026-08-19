@@ -10,6 +10,17 @@ use crate::ui;
 
 /// Deterministic stand-in for a fetched year, so snapshots do not need the network.
 /// A wholly elapsed year of deterministic data, so snapshots need no network.
+/// A scratch path in the temp directory that no other process will touch.
+///
+/// The names here used to be constants, which made them shared state: a stress
+/// loop beside an ordinary `cargo test`, or two people on one machine, raced
+/// over the same file and failed in ways that looked like the code rather than
+/// like the harness. CONTRIBUTING.md §3 asks for hermetic tests, and a fixed
+/// global path is not one.
+fn scratch(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mossaic-{}-{name}", std::process::id()))
+}
+
 fn synthetic(year: i32, login: &str) -> Calendar {
     let mut date = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
@@ -558,7 +569,7 @@ fn a_saved_calendar_loads_with_nothing_in_the_future() {
     // A year wholly ahead of today: from a file every day must still be drawn,
     // which is what makes previewing contribution art possible at all.
     let year = Local::now().year() + 1;
-    let path = std::env::temp_dir().join("mossaic-snapshot-test.json");
+    let path = scratch("snapshot-test.json");
     let body = format!(
         r#"{{"data":{{"user":{{"login":"preview","contributionsCollection":{{
         "contributionYears":[{year}],"contributionCalendar":{{"totalContributions":9,
@@ -1671,7 +1682,7 @@ fn a_snapshot_is_something_the_renderer_can_read_back() {
     .unwrap();
     let body = art::snapshot(&placed.lit, &grid, "preview");
 
-    let path = std::env::temp_dir().join("mossaic-art-roundtrip.json");
+    let path = scratch("art-roundtrip.json");
     std::fs::write(&path, &body).unwrap();
     let calendar = crate::github::from_file(path.to_str().unwrap()).expect("parses");
     let _ = std::fs::remove_file(&path);
@@ -1710,7 +1721,7 @@ fn the_png_is_a_png() {
     levels[1][3] = Some(0);
     let image = graphics::grid(&levels, &palette, (10, 20));
 
-    let path = std::env::temp_dir().join("mossaic-png-test.png");
+    let path = scratch("png-test.png");
     crate::png::write(&path, &image, palette.canvas).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let _ = std::fs::remove_file(&path);
@@ -2150,7 +2161,7 @@ fn control_characters_never_leave_the_parser() {
         ]}}]}}}}}}}},"errors":null}}"#,
         serde_json::to_string(evil).unwrap()
     );
-    let path = std::env::temp_dir().join("mossaic-evil-login.json");
+    let path = scratch("evil-login.json");
     std::fs::write(&path, body).unwrap();
     let calendar = crate::github::from_file(path.to_str().unwrap()).expect("parses");
     let _ = std::fs::remove_file(&path);
@@ -2167,7 +2178,7 @@ fn control_characters_never_leave_the_parser() {
 
     // And the same for an error message, which is server-controlled text.
     let body = "{\"data\":null,\"errors\":[{\"message\":\"bad\u{1b}]0;PWNED\"}]}";
-    let path = std::env::temp_dir().join("mossaic-evil-error.json");
+    let path = scratch("evil-error.json");
     std::fs::write(&path, body).unwrap();
     let error = crate::github::from_file(path.to_str().unwrap()).unwrap_err();
     let _ = std::fs::remove_file(&path);
@@ -2187,7 +2198,7 @@ fn a_calendar_cannot_span_more_than_a_year() {
           {"date":"2027-01-01","contributionCount":1,"contributionLevel":"NONE"},
           {"date":"9999-12-31","contributionCount":1,"contributionLevel":"NONE"}
         ]}]}}}},"errors":null}"#;
-    let path = std::env::temp_dir().join("mossaic-far-dates.json");
+    let path = scratch("far-dates.json");
     std::fs::write(&path, body).unwrap();
     let error = crate::github::from_file(path.to_str().unwrap()).unwrap_err();
     let _ = std::fs::remove_file(&path);
@@ -2277,7 +2288,7 @@ fn a_commit_identity_cannot_carry_a_newline() {
     // An identity is written into the fast-import stream as a line of its own.
     let mut lit = BTreeMap::new();
     lit.insert(NaiveDate::from_ymd_opt(2027, 6, 1).unwrap(), 1);
-    let repo = std::env::temp_dir().join("mossaic-ident-test");
+    let repo = scratch("ident-test");
 
     for (name, email) in [
         ("evil\ncommit refs/heads/backdoor", "x@x.invalid"),
@@ -2595,7 +2606,7 @@ fn the_shades_survive_a_round_trip_through_githubs_own_encoding() {
     let shades = Shades { ink: 4, field: 1 };
     let placed = art::place(&columns, &grid, 1, Some(10), shades.commits(4)).unwrap();
 
-    let path = std::env::temp_dir().join("mossaic-shades-roundtrip.json");
+    let path = scratch("shades-roundtrip.json");
     std::fs::write(&path, art::snapshot(&placed.all(), &grid, "preview")).unwrap();
     let calendar = crate::github::from_file(path.to_str().unwrap());
     let _ = std::fs::remove_file(&path);
@@ -2779,4 +2790,388 @@ fn a_background_lets_the_letters_land_where_a_bare_graph_could_not() {
         hidden, 0,
         "a level-1 background is where those days belong, so nothing is a hole"
     );
+}
+
+#[test]
+fn topping_up_every_shortfall_does_not_move_the_price() {
+    use crate::art::{self, Grid};
+    use crate::plan::Plan;
+    use std::collections::BTreeMap;
+
+    // The property the whole mode rests on: topping short days up to what they
+    // need must not change what any *other* day needs, so one pass of arithmetic
+    // is enough. It holds because `need` never exceeds the year's peak — the
+    // brightest shade is three quarters of it — so nothing written can raise the
+    // scale everything is measured against. A flat `--write` has no such
+    // guarantee, which is why a uniform count over an active year moves the bar
+    // it is aiming at.
+    //
+    // This is the arithmetic only. `backfill()` applies a date bound on top of
+    // it, writing solely what is already past; `backfill_reaches_only_the_days
+    // _that_have_gone` in tests/art_cli.rs covers that end to end.
+    let grid = Grid::new(2026).unwrap();
+    let columns = art::bitmap("VYNCINT").unwrap();
+    let shades = art::Shades::default();
+    let placed = art::place(&columns, &grid, 1, Some(6), shades.commits(4)).unwrap();
+
+    // A year with real activity in it, including one big day that sets the price.
+    let mut actual: BTreeMap<NaiveDate, u32> = BTreeMap::new();
+    let mut date = grid.first;
+    let mut roll = 7u32;
+    while date <= grid.last {
+        roll = roll.wrapping_mul(31).wrapping_add(17);
+        if !roll.is_multiple_of(3) {
+            actual.insert(date, 1 + roll % 40);
+        }
+        date = date.succ_opt().unwrap();
+    }
+    actual.insert(NaiveDate::from_ymd_opt(2026, 8, 11).unwrap(), 146);
+
+    let before = Plan::build("VYNCINT", &grid, &placed, columns.len(), 1, &actual, shades);
+    let need = before.need;
+    assert!(before.owing().0 > 0, "there is work to do");
+
+    // Every shortfall the plan has: nothing on a day already there, and nothing
+    // at all on a day that must stay dark. `backfill()` writes the subset of
+    // these that is in the past, and a subset can only lower the resulting peak,
+    // so proving the whole set leaves the price alone proves it for any subset.
+    let owed: BTreeMap<NaiveDate, u32> = before
+        .days
+        .iter()
+        .filter(|day| day.short() > 0)
+        .map(|day| (day.date, day.short()))
+        .collect();
+    assert!(
+        owed.keys().all(|date| before
+            .on(*date)
+            .is_some_and(|day| day.want == crate::plan::Want::Lit)),
+        "with no background drawn, only letter days are ever owed anything"
+    );
+
+    let mut after_counts = actual.clone();
+    for (date, extra) in &owed {
+        *after_counts.entry(*date).or_insert(0) += extra;
+    }
+    let after = Plan::build(
+        "VYNCINT",
+        &grid,
+        &placed,
+        columns.len(),
+        1,
+        &after_counts,
+        shades,
+    );
+
+    assert_eq!(
+        after.need, need,
+        "the price did not move, so one pass is enough"
+    );
+    assert_eq!(after.peak, before.peak, "and neither did the year's peak");
+    assert_eq!(after.owing(), (0, 0), "every letter day is bright");
+    assert_eq!(
+        after.bright(),
+        after.letters().count(),
+        "all of them, not most"
+    );
+    // The holes were holes before and are holes still: nothing here pretends to
+    // fix the one thing that cannot be fixed.
+    assert_eq!(after.holes().len(), before.holes().len());
+}
+
+#[test]
+fn a_day_inside_the_letters_is_kept_so_it_can_be_warned_about() {
+    use crate::art::{self, Grid};
+    use crate::plan::{Plan, Want};
+    use std::collections::BTreeMap;
+
+    // A clean day inside the text block used to be dropped from the plan for
+    // having nothing to say, which left `Plan::on` answering `None` and the
+    // report describing it as a day outside the text — free to commit on. It is
+    // the opposite of free: it is the only day whose loss is permanent.
+    let grid = Grid::new(2027).unwrap();
+    let columns = art::bitmap("I").unwrap();
+    let shades = art::Shades::default();
+    let placed = art::place(&columns, &grid, 1, Some(2), shades.commits(4)).unwrap();
+    let plan = Plan::build(
+        "I",
+        &grid,
+        &placed,
+        columns.len(),
+        1,
+        &BTreeMap::new(),
+        shades,
+    );
+
+    // `I` is five columns of five rows; 13 of those 25 are lit — two full bars
+    // and a stem — so 12 must stay dark, and every one of them has to be in the
+    // plan for the report to be able to mention it.
+    assert_eq!(placed.lit.len(), 13, "the glyph");
+    let dark: Vec<_> = plan
+        .days
+        .iter()
+        .filter(|day| day.want == Want::Hole)
+        .collect();
+    assert_eq!(dark.len(), 12, "the negative space inside it");
+    assert!(
+        dark.iter()
+            .all(|day| day.need == 0 && day.ceiling == Some(0)),
+        "nothing is owed on them, and nothing may be spent either"
+    );
+    assert!(
+        dark.iter().all(|day| plan.on(day.date).is_some()),
+        "which is only useful if the report can find them"
+    );
+
+    // None of that may count as damage, or an untouched year would read as
+    // ruined.
+    assert_eq!(plan.holes().len(), 0);
+    assert_eq!(plan.around(), 0);
+    assert_eq!(plan.verdict(), crate::plan::Verdict::Reachable);
+    assert_eq!(plan.field().count(), 0, "no background was asked for");
+
+    // A contribution on one of them is what turns it into a hole.
+    let spoiled: BTreeMap<NaiveDate, u32> = [(dark[0].date, 1)].into_iter().collect();
+    let holed = Plan::build("I", &grid, &placed, columns.len(), 1, &spoiled, shades);
+    assert_eq!(holed.holes().len(), 1);
+    assert!(matches!(
+        holed.verdict(),
+        crate::plan::Verdict::Holed { holes: 1 }
+    ));
+}
+
+#[test]
+fn place_refuses_a_start_column_that_would_not_fit() {
+    use crate::art::{self, Grid};
+
+    // Past the last column that fits, every pixel falls outside the year: the
+    // old answer was a note about dropped pixels and a plan of no days at all,
+    // and far enough out — `--start-week -1`, cast to a `usize` — building the
+    // date panicked instead.
+    let grid = Grid::new(2027).unwrap();
+    let columns = art::bitmap("VYNCINT").unwrap();
+    let ink = art::Ink { lit: 4, field: 0 };
+
+    let last = grid.weeks - columns.len();
+    assert!(
+        art::place(&columns, &grid, 1, Some(last), ink).is_ok(),
+        "the last column that fits, fits"
+    );
+
+    let error =
+        art::place(&columns, &grid, 1, Some(last + 1), ink).expect_err("one past it does not");
+    assert!(error.contains("past the end of 2027"), "{error}");
+    assert!(
+        error.contains(&format!("the last one that fits is {last}")),
+        "{error}"
+    );
+
+    // The value that used to panic, rather than merely draw nothing.
+    let error = art::place(&columns, &grid, 1, Some(usize::MAX), ink)
+        .expect_err("and neither does usize::MAX");
+    assert!(error.contains("past the end of"), "{error}");
+}
+
+#[test]
+fn a_plan_file_is_input_and_is_bounded_like_one() {
+    use crate::plan::Spec;
+
+    // `--plan PATH` names a file, and a file need not have come from your own
+    // `--save`, so a plan was the way around every bound the command line
+    // enforces. Each of these reached past a different guard.
+    let sound = Spec {
+        text: "HI".to_string(),
+        year: 2027,
+        start_week: 10,
+        top: 1,
+        commits: 4,
+        background: 0,
+        user: None,
+    };
+    assert!(sound.validate().is_ok());
+
+    // `usize::MAX + GLYPH_ROWS` wraps to 4, which passes a `> WEEKDAYS` check
+    // comfortably, and the rows were then drawn wherever the wrapping landed.
+    let mut wild = sound.clone();
+    wild.top = usize::MAX;
+    let why = wild.validate().expect_err("top");
+    assert!(
+        why.contains("18446744073709551615"),
+        "names the value: {why}"
+    );
+    assert!(why.contains("between 0 and 2"), "{why}");
+
+    // Four billion commits a day, quoted in full.
+    let mut wild = sound.clone();
+    wild.commits = u32::MAX;
+    assert!(wild
+        .validate()
+        .expect_err("commits")
+        .contains("between 1 and 1000000"));
+
+    // A year no calendar can hold used to panic building the grid, and one
+    // merely absurd drew a calendar `cli::YEARS` exists to refuse.
+    for year in [-262143, 0, 1999, 2101, 180_000] {
+        let mut wild = sound.clone();
+        wild.year = year;
+        let why = wild.validate().expect_err("year");
+        assert!(why.contains("between 2000 and 2100"), "year {year}: {why}");
+    }
+
+    let mut wild = sound.clone();
+    wild.background = 9;
+    assert!(wild
+        .validate()
+        .expect_err("background")
+        .contains("between 0 and 4"));
+
+    // The bound the flag applies loosely, so `place` can name the exact column.
+    let mut wild = sound.clone();
+    wild.start_week = usize::MAX;
+    assert!(wild
+        .validate()
+        .expect_err("start_week")
+        .contains("between 0 and 60"));
+}
+
+#[test]
+fn a_grid_returns_none_for_a_year_no_calendar_can_hold() {
+    use crate::art::Grid;
+
+    // The doc comment promises this: "a year arriving from a command line, a
+    // file or a caller is input". It stepped back to a Sunday with unchecked
+    // arithmetic, which panics in the first week a calendar can express — so
+    // the promise held for every year except the ones that needed it.
+    assert!(Grid::new(2027).is_some());
+    assert!(Grid::new(2000).is_some(), "the first year the CLI allows");
+    assert!(
+        Grid::new(-262143).is_none(),
+        "a year whose January has no earlier Sunday"
+    );
+    // And the grid it does build is the one `sunday_of` would have.
+    let grid = Grid::new(2027).unwrap();
+    assert_eq!(grid.start, crate::art::sunday_of(grid.first));
+}
+
+#[test]
+fn counts_from_a_file_cannot_wrap_the_price() {
+    use crate::art::{self, commits_for_level};
+    use std::collections::BTreeMap;
+
+    // The year's peak is the number the whole costing model rests on, and it is
+    // summed from calendar counts. Wrapping there reported a peak of 8 for a
+    // year whose busiest day held four billion, and quoted a price to match.
+    let days: Vec<NaiveDate> = (1..=5)
+        .map(|day| NaiveDate::from_ymd_opt(2027, 6, day).unwrap())
+        .collect();
+    let existing: BTreeMap<NaiveDate, u32> = [(days[0], u32::MAX), (days[1], u32::MAX - 1)]
+        .into_iter()
+        .collect();
+
+    // Saturating rather than panicking (debug) or wrapping (release).
+    let answer = commits_for_level(&days, &existing, 4);
+    assert!(answer.is_some_and(|need| need > 0), "{answer:?}");
+
+    // And the shade of an enormous day is still the brightest one, not a
+    // wrapped-around dim one.
+    assert_eq!(art::level(u32::MAX, u32::MAX), 4);
+    assert_eq!(art::level(u32::MAX / 2, u32::MAX), 2);
+}
+
+#[test]
+fn a_calendar_has_to_sit_somewhere_a_calendar_can_sit() {
+    // The span check bounds how *wide* a calendar is. This bounds where it *is*,
+    // and the two catch different files. The grid reaches outside the days it is
+    // given — back to the Sunday before the first, and a week forward from the
+    // cursor — so a calendar pinned to the very edge of what a `NaiveDate` can
+    // express took the process with it. In the chart that was the worst of it:
+    // the fetch runs on its own thread, so the panic killed the thread and left
+    // the screen loading forever, with no error and no way to retry.
+    let file = |dates: &[&str]| {
+        let days: Vec<String> = dates
+            .iter()
+            .map(|date| {
+                format!(r#"{{"date":"{date}","contributionCount":1,"contributionLevel":"NONE"}}"#)
+            })
+            .collect();
+        format!(
+            r#"{{"data":{{"user":{{"login":"x","contributionsCollection":{{
+                "contributionYears":[2027],"contributionCalendar":{{
+                "totalContributions":{},"weeks":[{{"contributionDays":[{}]}}]}}}}}}}},
+                "errors":null}}"#,
+            days.len(),
+            days.join(",")
+        )
+    };
+    let read = |body: String| {
+        let path = scratch("edge-dates.json");
+        std::fs::write(&path, body).unwrap();
+        let result = crate::github::from_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        result
+    };
+
+    for dates in [
+        ["-262143-01-01", "-262143-01-02"], // no Sunday behind the first day
+        ["+262142-12-30", "+262142-12-31"], // no week ahead of the last
+    ] {
+        let error = read(file(&dates)).expect_err(&format!("{dates:?} was accepted"));
+        assert!(
+            error.contains("these tools work in 2000 to 2100"),
+            "{error}"
+        );
+        assert!(!error.contains("panicked"), "{error}");
+    }
+
+    // A year the tools do work in still loads.
+    assert!(read(file(&["2027-01-01", "2027-01-02"])).is_ok());
+
+    // And the public constructor, which cannot refuse anything, degrades to an
+    // empty grid rather than panicking.
+    let edge = vec![Day {
+        date: NaiveDate::MIN,
+        count: 1,
+        level: 1,
+        future: false,
+    }];
+    let calendar = Calendar::build("x".into(), 2027, 1, vec![2027], edge);
+    assert!(calendar.weeks.is_empty(), "no start, so no columns");
+    assert!(calendar.first_date().is_none());
+}
+
+#[test]
+fn the_cursor_cannot_be_walked_off_the_end_of_the_calendar() {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+    // `move_cursor` added to the date and clamped afterwards, so the clamp could
+    // not save it: a cursor within a week of the last date a `NaiveDate` holds
+    // panicked on the next arrow key. Reachable through `Calendar::build`, which
+    // is public and cannot refuse the dates it is handed.
+    let days: Vec<Day> = (0..3)
+        .map(|back| Day {
+            date: NaiveDate::MAX - chrono::Duration::days(back),
+            count: 1,
+            level: 1,
+            future: false,
+        })
+        .rev()
+        .collect();
+    let calendar = Calendar::build("x".into(), NaiveDate::MAX.year(), 3, vec![], days);
+    let mut app = ready(calendar);
+
+    // Every direction, from both ends, including the ones that used to panic.
+    for code in [
+        KeyCode::End,
+        KeyCode::Right,
+        KeyCode::Down,
+        KeyCode::Char('l'),
+        KeyCode::Char('j'),
+        KeyCode::Home,
+        KeyCode::Left,
+        KeyCode::Up,
+    ] {
+        app.on_key(code, KeyModifiers::NONE);
+    }
+    // Still somewhere the calendar holds.
+    assert!(app.cursor <= NaiveDate::MAX);
+    assert!(app.cursor >= NaiveDate::MAX - chrono::Duration::days(2));
 }

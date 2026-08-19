@@ -356,6 +356,12 @@ fn base64(data: &[u8]) -> String {
 /// coarser grid until they fit — starting at full precision, which is usually
 /// enough, and only losing accuracy on a palette that would not have fit anyway.
 fn indexed(image: &Image, background: Rgb) -> (Vec<[u8; 3]>, Vec<Option<u8>>) {
+    /// Registers `#0`-`#255`, so all 256 are addressable. Checked *before* an
+    /// index is handed out: `seen.len() as u8` silently wraps to 0 on the
+    /// 257th colour, and an index that aliases another colour must never be
+    /// constructed, whether or not the attempt it belongs to is discarded.
+    const REGISTERS: usize = 256;
+
     for step in [1u16, 2, 3, 4, 6, 20] {
         let mut palette: Vec<[u8; 3]> = Vec::new();
         let mut seen: HashMap<[u8; 3], u8> = HashMap::new();
@@ -374,15 +380,19 @@ fn indexed(image: &Image, background: Rgb) -> (Vec<[u8; 3]>, Vec<Option<u8>>) {
                 ((percent + step / 2) / step * step).min(100) as u8
             };
             let key = [snap(solid.0), snap(solid.1), snap(solid.2)];
-            let next = seen.len() as u8;
-            let index = *seen.entry(key).or_insert_with(|| {
-                palette.push(key);
-                next
-            });
-            if palette.len() > 255 {
-                overflowed = true;
-                break;
-            }
+            let index = match seen.get(&key) {
+                Some(index) => *index,
+                None if palette.len() == REGISTERS => {
+                    overflowed = true;
+                    break;
+                }
+                None => {
+                    let index = palette.len() as u8;
+                    palette.push(key);
+                    seen.insert(key, index);
+                    index
+                }
+            };
             map.push(Some(index));
         }
         if !overflowed {

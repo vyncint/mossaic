@@ -205,6 +205,8 @@ mossaic --no-mouse               # leave mouse reporting alone
 ```sh
 mossaic-art VYNCINT --year 2027  # draw text into a graph — see docs/ART.md
 mossaic-art --track              # how far along the plan is
+mossaic-art --track --today 2027-06-01   # what a day that has not arrived will owe
+mossaic-art --backfill --repo ../art     # commit just what the plan is short
 mossaic-glyphs                   # what this terminal makes of the fallback cells
 ```
 
@@ -217,7 +219,7 @@ the same commands.
 | --- | --- |
 | `←` `→` / `h` `l` | previous / next week |
 | `↑` `↓` / `k` `j` | previous / next day |
-| `[` `]` | previous / next year **that has contributions** (steps by ±1 when the current year is outside that set, e.g. after `--year 2010`) |
+| `[` `]` · `PgUp` `PgDn` | previous / next year **that has contributions** (steps by ±1 when the current year is outside that set, e.g. after `--year 2010`) |
 | `t` | jump to today |
 | `Home` / `End` | first / last day in range |
 | `?` | keys, mouse, and what this terminal can draw |

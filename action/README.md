@@ -68,7 +68,7 @@ Two things GitHub does that will bite you otherwise:
 | `background` | `0` | draw the background at this level instead of leaving it empty — **keep it fixed** |
 | `timezone` | `UTC` | what "today" means |
 | `token` | `github.token` | see *Private contributions* below |
-| `fail-on` | `never` | `never`, `behind`, or `holed` |
+| `fail-on` | `never` | `never`, `behind` (a *letter* day is short), or `holed` |
 | `summary` | `true` | write the report to the job summary |
 | `version` | `latest` | which mossaic release runs the tracking — pin a number to change only when you say so |
 
@@ -89,7 +89,8 @@ least two levels between the two — the `legibility` output says `clear`,
 `verdict` (`drawn` / `reachable` / `holed`), `headline` (one line, fit for a
 notification title), `markdown` (the whole report, fit for a message body),
 `json` (everything), and the scalars: `bright`, `letters`, `owing-days`,
-`owing-commits`, `holes`, `today-short`, `tomorrow-need`.
+`owing-commits`, `holes`, `today-short`, `tomorrow-need`, `today-kind`,
+`tomorrow-kind`.
 
 With a `background` set, also: `field-level`, `field-days`, `field-bright`,
 `field-owing-days`, `field-owing-commits`, plus `legibility` (`clear` /
@@ -97,7 +98,19 @@ With a `background` set, also: `field-level`, `field-days`, `field-bright`,
 the worst palette a reader might have).
 
 `today-short` counts a background day too, so a daily "what do I owe today"
-notification keeps working unchanged when you add one.
+notification keeps working unchanged when you add one. `today-kind` is what
+tells the two apart — `letter`, `background`, `keep-dark`, `hole` or `outside`.
+
+**`keep-dark` is the one to notify on.** It is a day inside the letters that is
+not part of one, so anything landing on it punches a hole nothing takes back —
+the only day of the year where the instruction is to commit *nothing*. Read it
+from `tomorrow-kind` and the warning arrives while it can still be acted on:
+
+```yaml
+      - name: Slack, the evening before a day that must stay empty
+        if: steps.art.outputs.tomorrow-kind == 'keep-dark'
+        ...
+```
 
 ## Sending it somewhere
 
@@ -168,7 +181,9 @@ wanting — a daily message that says "nothing to do" gets muted within a week:
 ```
 
 `fail-on: behind` does the same thing through the job status, so a failed run
-lands in the notifications you already have.
+lands in the notifications you already have. It counts **letter days only**: with
+a `background` set every unstarted field day is short too, and a job that fails
+on 290 days of the year is a job nobody reads.
 
 ## Notes
 

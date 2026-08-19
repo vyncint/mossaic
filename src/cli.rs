@@ -75,10 +75,39 @@ impl Args {
     }
 
     /// The same, as a number.
+    ///
+    /// Unbounded, so a caller that narrows the result has to cope with whatever
+    /// arrives. Prefer [`Args::number_in`]: every numeric option here feeds a
+    /// `usize` or a `u32` in the end, and `as` is not a check.
     pub fn number(&mut self, flag: &str) -> i64 {
         let raw = self.value(flag);
         raw.parse()
             .unwrap_or_else(|_| self.fail(&format!("{flag} needs a number, not {raw:?}")))
+    }
+
+    /// A number inside `range`, or a readable exit.
+    ///
+    /// This is the one that should be reached for. Every numeric option in
+    /// these tools ends up as a `usize` or a `u32`, and casting an unchecked
+    /// `i64` with `as` is not a conversion but a reinterpretation:
+    /// `--commits -1` came out as 4,294,967,295 and `--start-week -1` reached
+    /// `usize::MAX`, where building a date from it panicked. Bounding the value
+    /// where it is read makes the cast that follows infallible.
+    ///
+    /// `noun` names the thing in the error, the way `year` does — "wants a
+    /// level between 0 and 4" reads better than "wants a number".
+    pub fn number_in(&mut self, flag: &str, noun: &str, range: RangeInclusive<i64>) -> i64 {
+        let raw = self.value(flag);
+        raw.parse::<i64>()
+            .ok()
+            .filter(|value| range.contains(value))
+            .unwrap_or_else(|| {
+                self.fail(&format!(
+                    "{flag} wants a {noun} between {} and {}, not {raw:?}",
+                    range.start(),
+                    range.end()
+                ))
+            })
     }
 
     /// A calendar year, checked against the range the calendar model can hold.
@@ -86,17 +115,11 @@ impl Args {
     /// Shared because the two binaries used to disagree: one refused a year
     /// outside 2000-2100 and the other passed 999999 through to a panic.
     pub fn year(&mut self, flag: &str) -> i32 {
-        let raw = self.value(flag);
-        raw.parse::<i32>()
-            .ok()
-            .filter(|year| YEARS.contains(year))
-            .unwrap_or_else(|| {
-                self.fail(&format!(
-                    "{flag} wants a year between {} and {}, not {raw:?}",
-                    YEARS.start(),
-                    YEARS.end()
-                ))
-            })
+        self.number_in(
+            flag,
+            "year",
+            i64::from(*YEARS.start())..=i64::from(*YEARS.end()),
+        ) as i32
     }
 
     /// Note that a flag was typed, for the ones that carry no value.
@@ -152,6 +175,19 @@ mod tests {
         let mut bare = args(&["--track", "--year", "2027"]);
         bare.next_arg();
         assert!(!bare.peek_value(), "a flag is not a value");
+    }
+
+    #[test]
+    fn a_bounded_number_takes_its_ends_and_the_year_rides_on_it() {
+        let mut parsed = args(&["--top", "0", "--commits", "1", "--year", "2100"]);
+        parsed.next_arg();
+        assert_eq!(parsed.number_in("--top", "row", 0..=2), 0, "the low end");
+        parsed.next_arg();
+        assert_eq!(parsed.number_in("--commits", "count", 1..=9), 1);
+        parsed.next_arg();
+        // `year` is `number_in` with the calendar's own range, so the two
+        // cannot drift apart.
+        assert_eq!(parsed.year("--year"), 2100, "the high end");
     }
 
     #[test]

@@ -61,6 +61,40 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --all-features
+      # Again from a timezone that is already tomorrow. Reports are pinned to
+      # `--today` precisely so they do not depend on when they run, and the way
+      # that rule gets broken is a new assertion about whatever day CI happened
+      # to see — which passes on the day it is written and fails the morning
+      # after. The binaries are built by the step above, so this costs seconds.
+      - run: cargo test --all-features --test art_cli
+        env:
+          TZ: Pacific/Kiritimati
+
+  # The `cfg(not(unix))` path — a probe that asks nothing, since reading
+  # `/dev/tty` with O_NONBLOCK is a unix arrangement — is code the matrix above
+  # never compiles. It went out of date exactly as you would expect: an
+  # undocumented public function and a constant used only by the other branch,
+  # both of them warnings that `-D warnings` turns into failures.
+  windows:
+    name: check (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # Not the end-to-end suite: `tests/smoke.rs` drives a real PTY through
+      # termlens, which is its own question. The in-process tests are pure
+      # arithmetic and colour, and they run anywhere.
+      - run: cargo test --all-features --lib
 
   msrv:
     name: msrv
@@ -127,7 +161,7 @@ jobs:
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, msrv, docs, deny, zizmor]
+    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every needed job succeeded

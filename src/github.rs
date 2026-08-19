@@ -125,6 +125,24 @@ fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calen
                 first.date, last.date
             ));
         }
+        // The span says how *wide* a calendar is; this says where it *is*. Both
+        // matter, because the grid reaches outside the days it is given: back to
+        // the Sunday before the first, and forward a week from the cursor. A
+        // calendar positioned at the very first date a `NaiveDate` can hold has
+        // no Sunday before it, and stepping back to one panicked — in the chart
+        // that killed the fetch thread and left it loading forever, with no
+        // error and no way to retry. Checked after the span, so the more
+        // informative complaint still wins for a calendar that is both.
+        for edge in [first, last] {
+            if !crate::cli::YEARS.contains(&edge.date.year()) {
+                return Err(format!(
+                    "that calendar has a day in {}, and these tools work in {} to {}",
+                    edge.date.year(),
+                    crate::cli::YEARS.start(),
+                    crate::cli::YEARS.end()
+                ));
+            }
+        }
     }
     // GitHub returns exactly the requested year, so the first day names it.
     let year = days.first().map_or(fallback_year, |day| day.date.year());

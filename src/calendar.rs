@@ -53,9 +53,16 @@ impl Calendar {
         days: Vec<Day>,
     ) -> Self {
         years.sort_unstable();
-        let grid_start = days
-            .first()
-            .map(|d| d.date - Duration::days(i64::from(d.date.weekday().num_days_from_sunday())));
+        // Checked, for the same reason `art::Grid::new` is: this is a public
+        // constructor, and the Sunday before a day need not exist — at the very
+        // first date a `NaiveDate` can hold there is nothing behind it. A
+        // calendar with no start has no columns, which draws as "no contribution
+        // data" rather than taking the process with it.
+        let grid_start = days.first().and_then(|d| {
+            d.date.checked_sub_signed(Duration::days(i64::from(
+                d.date.weekday().num_days_from_sunday(),
+            )))
+        });
 
         // A year is 53 columns, 54 when it starts on a Saturday in a leap year.
         // The cap is defensive: this is a public constructor, and a day far out
@@ -188,7 +195,6 @@ impl Calendar {
     }
 }
 
-/// What the summary line reports, counted over elapsed days only.
 /// A sample year, for trying the chart with no account and no network.
 ///
 /// Deterministic — the same year every time, so what `--demo` shows is what the
@@ -222,7 +228,6 @@ pub fn demo(year: i32) -> Calendar {
         date += Duration::days(1);
     }
 
-    // GitHub's own shading: equal slices of [0, peak], not rank quartiles.
     let peak = counts
         .iter()
         .map(|(_, count)| *count)
@@ -237,11 +242,11 @@ pub fn demo(year: i32) -> Calendar {
         .map(|(date, count)| Day {
             date,
             count,
-            level: if count == 0 {
-                0
-            } else {
-                ((count * 4).div_ceil(peak)).min(4) as u8
-            },
+            // GitHub's own shading, from the one place that implements it. A
+            // second copy here would be a second thing to change when GitHub
+            // restyles the graph, in a crate whose whole point is agreeing
+            // with github.com.
+            level: crate::art::level(count, peak),
             future: false,
         })
         .collect();

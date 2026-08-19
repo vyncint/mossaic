@@ -8,6 +8,7 @@ command for you to run.
 - [Drawing it](#drawing-it)
 - [Drawing on a background, not on nothing](#drawing-on-a-background-not-on-nothing)
 - [Tracking it, day by day](#tracking-it-day-by-day)
+- [Catching up on the days already past](#catching-up-on-the-days-already-past)
 - [Tracking it from a schedule](#tracking-it-from-a-schedule)
 - [How GitHub shades a day, and why it decides the cost](#how-github-shades-a-day-and-why-it-decides-the-cost)
 
@@ -166,8 +167,9 @@ Drawing the art is one command. Getting there while also living a normal year is
 a hundred small decisions, and `--track` is the one that answers them:
 
 ```sh
-# Against your own year. Add `--merge art/vyncint-2026.json` to reproduce the
-# output below exactly — it is the calendar this repository ships.
+# Against your own year. Add `--merge art/vyncint-2026.json --today 2026-08-19`
+# to reproduce the output below exactly — that is the calendar this repository
+# ships, read on the day this was written.
 mossaic-art VYNCINT --year 2026 --track
 ```
 
@@ -192,30 +194,122 @@ VYNCINT  ·  2026  ·  tracking art/vyncint-2026.json
     --start-week 1 would leave 23 instead of 61.
 
   today       Wed Aug 19  ·  inside the letters and already lit (113) — a permanent hole
-  tomorrow    Thu Aug 20  ·  not part of the text — anything you commit today shows
+  tomorrow    Thu Aug 20  ·  inside the letters — keep it dark, or it becomes a permanent hole
 
   the next seven days
-    Wed Aug 19   —
-    Thu Aug 20   —
+    Wed Aug 19   hole
+    Thu Aug 20   keep dark
     Fri Aug 21   letter  110 to go
+    Sat Aug 22   —
+    Sun Aug 23   —
+    Mon Aug 24   letter  110 to go
+    Tue Aug 25   keep dark
+
+  the rest of the year
+    23 letter day(s) still to come, 2,530 contributions
+    34 letter day(s) already past, 3,464 contributions — only back-dated
+    commits reach those:
+
+      mossaic-art VYNCINT --year 2026 --start-week 6 --top 1 --backfill --repo ../art --write
 ```
 
-Three kinds of answer, and only two of them are work:
+Four kinds of answer, and only two of them are work:
 
 - **A letter day that is short.** Contribute more, today or by back-dating.
   Fixable whenever.
-- **A day inside the letters that is already lit.** Nothing takes contributions
-  away, so that day is a hole in the text for good. This is the honest answer to
-  "why can't I write VYNCINT in 2026": not that it is expensive, but that the
-  year has already been written on. `--track` counts the holes, and sweeps
-  `--start-week` to find the placement that runs into fewest.
+- **A day inside the letters that must stay dark.** The gaps inside and between
+  the letters are part of the picture, and a contribution landing on one punches
+  a hole that nothing takes back. This is the only kind of day where the
+  instruction is to do *nothing*, and the only one worth being told about a day
+  early — the report says `keep it dark`, the seven-day schedule says
+  `keep dark`, and the Action's `tomorrow-kind` output says `keep-dark`.
+- **A day inside the letters that is already lit.** The same day, after the fact.
+  Nothing takes contributions away, so it is a hole in the text for good. This is
+  the honest answer to "why can't I write VYNCINT in 2026": not that it is
+  expensive, but that the year has already been written on. `--track` counts the
+  holes, and sweeps `--start-week` to find the placement that runs into fewest.
 - **A day outside the text with contributions.** Noise around the letters rather
   than damage to them; reported, not warned about.
+
+### Asking about a day that is not today
+
+`--today DATE` is what the report measures against, and it defaults to the
+clock rather than replacing it. Two things it is for:
+
+```sh
+mossaic-art --track --today 2027-06-01   # what will that day owe?
+mossaic-art --track --today 2026-08-19   # the same answer, next year and forever
+```
+
+The first is planning; the second is why anything here can be tested or
+documented at all. A report that reads the clock is a report whose output
+changes overnight, which is no use in a README and no use in an assertion.
 
 It reads `--merge PATH` if you have a saved calendar, and otherwise asks `gh` —
 `--track USER` for someone else's year. Run it whenever you like: it holds no
 state, so the answer is a fact about today's data rather than about the last
 time you ran it.
+
+### Catching up on the days already past
+
+Nagging cannot reach a day that has gone by, and `--backfill` is what does. It
+reads the plan, asks what the year actually holds, and commits **each day's
+shortfall** — nothing on a day that is already bright, and nothing at all on a
+day whose job is to stay dark:
+
+```sh
+mossaic-art --backfill --repo ../art            # what it would write
+mossaic-art --backfill --repo ../art --write    # write it, locally
+```
+
+```
+# with --merge art/vyncint-2026.json --today 2026-08-19, to reproduce this exactly
+VYNCINT  ·  2026  ·  backfilling against art/vyncint-2026.json
+
+  letters     57 day(s) short, 5,994 commits
+  a day gets  what it is short of 110, never a flat count
+  reaching    days before 2026-08-19, which are the ones only back-dating reaches
+              23 day(s) from 2026-08-19 on are short too, and left alone — contribute on those as they come
+
+  warning: VYNCINT cannot be drawn cleanly in 2026 — 61 day(s) inside the
+  letters are already lit, and nothing takes those away. Backfilling will
+  brighten the letters, and the text will still read with holes in it.
+  `mossaic-art --track` sweeps --start-week for a placement with fewer.
+
+  3,464 commit(s) across 34 day(s), earliest 2026-02-09, latest 2026-08-14
+
+(add --write to create them; this was a dry run)
+```
+
+With no background drawn, the 34 days and 3,464 commits are exactly what
+`--track` reports as "already past": the two answers come from the same plan and
+the same date, so they agree by construction rather than by coincidence. With a
+background they will not match, and should not — `--track` counts "already past"
+in *letter* days, while a backfill also lays down every past day of the field.
+
+**Only days already past.** A day still to come needs no back-dating — you
+contribute on it when it arrives — and whether GitHub counts a future-dated
+commit at all is unverified (see below). `--today` is what "past" is measured
+against, so the 34 days here are exactly the ones `--track` reports as "already
+past".
+
+A shortfall rather than a flat `--commits`, and the reason is the same
+arithmetic the rest of this page turns on: a shade is a fraction of the year's
+*peak*, so putting the same count on every lit day adds to the busiest of them
+and raises the peak — which raises what every other letter day needs. The bar
+moves as you walk towards it. A shortfall cannot, because what a day needs is
+never more than the peak it is measured against: the brightest shade is three
+quarters of it. Topping a day up to `need` therefore leaves the peak where the
+scale already stood, so what every *other* day owes is the same afterwards as
+before — one pass, and no second round of arithmetic to chase. (On an *empty*
+year the peak does move, from nothing to whatever the art puts there, which is
+the easy direction; `Shades::min_peak` is what keeps even that expressible.)
+There is a test that proves the fixed point.
+
+It finishes the *past*, not the year: the days still to come are deliberately
+left for you to contribute on as they arrive.
+
+Like `--write`, it never pushes; it prints the command for you to run.
 
 **Why the price moves.** Everything above is measured against the year's peak,
 because that is what GitHub shades against. One big day anywhere — a merge queue

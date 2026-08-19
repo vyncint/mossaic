@@ -136,7 +136,13 @@ fn the_chart_draws_and_quits_cleanly() -> termlens::Result<()> {
 fn the_cursor_moves_by_day_and_by_week() -> termlens::Result<()> {
     let mut t = chart(&PREVIEW)?;
     t.wait_frame(loaded)?;
-    // A file preview starts on the last day it holds, since today is not in it.
+    // Start from a known day rather than from wherever the cursor landed. It
+    // opens on today when today is in the calendar and on the last day
+    // otherwise, so a fixture year that is in the future today becomes the
+    // current year eventually — and every relative assertion below it shifts by
+    // however far into the year that is. `End` is the same key the test exercises
+    // later, so this costs no coverage.
+    t.send(Key::End);
     t.wait_frame(|s| s.contains("Fri, Dec 31 2027"))?;
 
     for (key, expected) in [

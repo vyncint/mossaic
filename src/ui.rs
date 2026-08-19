@@ -306,7 +306,7 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
         heading(" Moving"),
         row("← → / h l", "previous / next week"),
         row("↑ ↓ / k j", "previous / next day"),
-        row("[ ]", "previous / next year"),
+        row("[ ] · PgUp PgDn", "previous / next year"),
         row("t · Home End", "today · first / last day"),
         Line::raw(""),
         heading(" Mouse"),
