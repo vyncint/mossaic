@@ -517,8 +517,17 @@ impl Spec {
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
         let spec: Self = serde_json::from_str(&body)
             .map_err(|error| format!("{} is not a mossaic plan: {error}", path.display()))?;
-        spec.validate()
-            .map_err(|why| format!("{} is not a plan that can be drawn: {why}", path.display()))?;
+        // Named as a problem with the file, and with the way out of it: 0.2.0
+        // let `--commits -1` through, which `--save` then wrote down as four
+        // billion, so a plan in the wild can be one this refuses. Saving it
+        // again is the fix, and saying so beats leaving someone to work it out.
+        spec.validate().map_err(|why| {
+            format!(
+                "{} is not a plan these tools can use: {why}.\n  \
+                 Saving it again replaces it:  mossaic-art TEXT --year YEAR --save",
+                path.display()
+            )
+        })?;
         Ok(spec)
     }
 

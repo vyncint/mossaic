@@ -281,9 +281,11 @@ VYNCINT  ·  2026  ·  backfilling against art/vyncint-2026.json
 (add --write to create them; this was a dry run)
 ```
 
-The 34 days and 3,464 commits are exactly what `--track` reports as "already
-past" — the two answers come from the same plan and the same date, so they agree
-by construction rather than by coincidence.
+With no background drawn, the 34 days and 3,464 commits are exactly what
+`--track` reports as "already past": the two answers come from the same plan and
+the same date, so they agree by construction rather than by coincidence. With a
+background they will not match, and should not — `--track` counts "already past"
+in *letter* days, while a backfill also lays down every past day of the field.
 
 **Only days already past.** A day still to come needs no back-dating — you
 contribute on it when it arrives — and whether GitHub counts a future-dated
@@ -298,10 +300,14 @@ and raises the peak — which raises what every other letter day needs. The bar
 moves as you walk towards it. A shortfall cannot, because what a day needs is
 never more than the peak it is measured against: the brightest shade is three
 quarters of it. Topping a day up to `need` therefore leaves the peak where the
-scale already stood, and one pass finishes the plan. (On an *empty* year the peak
-does move — from nothing to whatever the art puts there — which is the easy
-direction, and `Shades::min_peak` is what keeps even that arithmetic expressible.)
+scale already stood, so what every *other* day owes is the same afterwards as
+before — one pass, and no second round of arithmetic to chase. (On an *empty*
+year the peak does move, from nothing to whatever the art puts there, which is
+the easy direction; `Shades::min_peak` is what keeps even that expressible.)
 There is a test that proves the fixed point.
+
+It finishes the *past*, not the year: the days still to come are deliberately
+left for you to contribute on as they arrive.
 
 Like `--write`, it never pushes; it prints the command for you to run.
 

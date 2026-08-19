@@ -53,9 +53,16 @@ impl Calendar {
         days: Vec<Day>,
     ) -> Self {
         years.sort_unstable();
-        let grid_start = days
-            .first()
-            .map(|d| d.date - Duration::days(i64::from(d.date.weekday().num_days_from_sunday())));
+        // Checked, for the same reason `art::Grid::new` is: this is a public
+        // constructor, and the Sunday before a day need not exist — at the very
+        // first date a `NaiveDate` can hold there is nothing behind it. A
+        // calendar with no start has no columns, which draws as "no contribution
+        // data" rather than taking the process with it.
+        let grid_start = days.first().and_then(|d| {
+            d.date.checked_sub_signed(Duration::days(i64::from(
+                d.date.weekday().num_days_from_sunday(),
+            )))
+        });
 
         // A year is 53 columns, 54 when it starts on a Saturday in a leap year.
         // The cap is defensive: this is a public constructor, and a day far out

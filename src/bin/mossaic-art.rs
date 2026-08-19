@@ -451,12 +451,17 @@ fn backfill(
         "  a day gets  what it is short of {}, never a flat count",
         thousands(plan.need)
     );
-    println!("  reaching    days before {today}, which are the ones only back-dating reaches");
-    if ahead > 0 {
-        println!(
-            "              {ahead} day(s) from {today} on are short too, and left alone — \
-             contribute on those as they come"
-        );
+    // Only when there is something past to reach: before the year starts, "days
+    // before 2026-08-19" for a 2027 plan names a date the plan has never heard
+    // of, and the line below says the useful thing anyway.
+    if !owed.is_empty() {
+        println!("  reaching    days before {today}, which are the ones only back-dating reaches");
+        if ahead > 0 {
+            println!(
+                "              {ahead} day(s) from {today} on are short too, and left alone — \
+                 contribute on those as they come"
+            );
+        }
     }
     // An irreversible write is the worst place to leave this unsaid: the letters
     // can be finished and still read with holes in them, and no number of

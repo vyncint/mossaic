@@ -790,7 +790,24 @@ pub fn write_commits(
         run(repo, &["init", "-q", "-b", "main"])?;
     }
 
-    let mut stream = String::new();
+    let mut child = Command::new("git")
+        .args(["fast-import", "--quiet"])
+        .current_dir(repo)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run git fast-import: {e}"))?;
+
+    // Streamed into git rather than built up first. The whole point of
+    // fast-import here is that the counts get large, and a stream held in a
+    // `String` costs about 275 bytes a commit — a scale where the buffer is the
+    // limit rather than the work. Buffered through a `BufWriter` so this is
+    // still one write syscall per few thousand commits, not one per line.
+    //
+    // No deadlock to worry about: `--quiet` says almost nothing, and its stdout
+    // and stderr are inherited rather than piped, so nothing of ours has to be
+    // drained while we write.
+    let mut stdin = std::io::BufWriter::new(child.stdin.take().expect("piped"));
+    let feed = |error: std::io::Error| format!("could not feed git fast-import: {error}");
     let mut index = 0usize;
     for (day, count) in lit {
         let stamp = day
@@ -802,33 +819,30 @@ pub fn write_commits(
             index += 1;
             let message = format!("{label} {day} #{index}\n");
             let body = format!("{index}\n");
-            stream.push_str("commit refs/heads/main\n");
-            stream.push_str(&format!("mark :{index}\n"));
-            stream.push_str(&format!("author {name} <{email}> {stamp} +0000\n"));
-            stream.push_str(&format!("committer {name} <{email}> {stamp} +0000\n"));
-            stream.push_str(&format!("data {}\n{message}", message.len()));
+            write!(
+                stdin,
+                "commit refs/heads/main\nmark :{index}\n\
+                 author {name} <{email}> {stamp} +0000\n\
+                 committer {name} <{email}> {stamp} +0000\n\
+                 data {}\n{message}",
+                message.len()
+            )
+            .map_err(feed)?;
             if index > 1 {
-                stream.push_str(&format!("from :{}\n", index - 1));
+                writeln!(stdin, "from :{}", index - 1).map_err(feed)?;
             }
-            stream.push_str(&format!(
+            write!(
+                stdin,
                 "M 100644 inline count.txt\ndata {}\n{body}\n",
                 body.len()
-            ));
+            )
+            .map_err(feed)?;
         }
     }
+    // Flushed and closed before waiting, or fast-import never sees end of input.
+    stdin.flush().map_err(feed)?;
+    drop(stdin);
 
-    let mut child = Command::new("git")
-        .args(["fast-import", "--quiet"])
-        .current_dir(repo)
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not run git fast-import: {e}"))?;
-    child
-        .stdin
-        .take()
-        .expect("piped")
-        .write_all(stream.as_bytes())
-        .map_err(|e| format!("could not feed git fast-import: {e}"))?;
     let status = child
         .wait()
         .map_err(|e| format!("git fast-import failed: {e}"))?;

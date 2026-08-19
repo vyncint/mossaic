@@ -2793,17 +2793,22 @@ fn a_background_lets_the_letters_land_where_a_bare_graph_could_not() {
 }
 
 #[test]
-fn a_backfill_finishes_the_plan_without_moving_the_target() {
+fn topping_up_every_shortfall_does_not_move_the_price() {
     use crate::art::{self, Grid};
     use crate::plan::Plan;
     use std::collections::BTreeMap;
 
-    // The property the whole mode rests on. Topping every short day up to what
-    // it needs must finish the plan *in one pass* — and it can, because `need`
-    // never exceeds the year's peak: the brightest shade is three quarters of
-    // it. A flat `--write` has no such guarantee, which is why adding a uniform
-    // count to an active year raises the peak and moves the bar it was aiming
-    // at.
+    // The property the whole mode rests on: topping short days up to what they
+    // need must not change what any *other* day needs, so one pass of arithmetic
+    // is enough. It holds because `need` never exceeds the year's peak — the
+    // brightest shade is three quarters of it — so nothing written can raise the
+    // scale everything is measured against. A flat `--write` has no such
+    // guarantee, which is why a uniform count over an active year moves the bar
+    // it is aiming at.
+    //
+    // This is the arithmetic only. `backfill()` applies a date bound on top of
+    // it, writing solely what is already past; `backfill_reaches_only_the_days
+    // _that_have_gone` in tests/art_cli.rs covers that end to end.
     let grid = Grid::new(2026).unwrap();
     let columns = art::bitmap("VYNCINT").unwrap();
     let shades = art::Shades::default();
@@ -2826,8 +2831,10 @@ fn a_backfill_finishes_the_plan_without_moving_the_target() {
     let need = before.need;
     assert!(before.owing().0 > 0, "there is work to do");
 
-    // Exactly what the backfill would write: each day's shortfall, nothing on a
-    // day already there, and nothing at all on a day that must stay dark.
+    // Every shortfall the plan has: nothing on a day already there, and nothing
+    // at all on a day that must stay dark. `backfill()` writes the subset of
+    // these that is in the past, and a subset can only lower the resulting peak,
+    // so proving the whole set leaves the price alone proves it for any subset.
     let owed: BTreeMap<NaiveDate, u32> = before
         .days
         .iter()
@@ -3068,4 +3075,103 @@ fn counts_from_a_file_cannot_wrap_the_price() {
     // wrapped-around dim one.
     assert_eq!(art::level(u32::MAX, u32::MAX), 4);
     assert_eq!(art::level(u32::MAX / 2, u32::MAX), 2);
+}
+
+#[test]
+fn a_calendar_has_to_sit_somewhere_a_calendar_can_sit() {
+    // The span check bounds how *wide* a calendar is. This bounds where it *is*,
+    // and the two catch different files. The grid reaches outside the days it is
+    // given — back to the Sunday before the first, and a week forward from the
+    // cursor — so a calendar pinned to the very edge of what a `NaiveDate` can
+    // express took the process with it. In the chart that was the worst of it:
+    // the fetch runs on its own thread, so the panic killed the thread and left
+    // the screen loading forever, with no error and no way to retry.
+    let file = |dates: &[&str]| {
+        let days: Vec<String> = dates
+            .iter()
+            .map(|date| {
+                format!(r#"{{"date":"{date}","contributionCount":1,"contributionLevel":"NONE"}}"#)
+            })
+            .collect();
+        format!(
+            r#"{{"data":{{"user":{{"login":"x","contributionsCollection":{{
+                "contributionYears":[2027],"contributionCalendar":{{
+                "totalContributions":{},"weeks":[{{"contributionDays":[{}]}}]}}}}}}}},
+                "errors":null}}"#,
+            days.len(),
+            days.join(",")
+        )
+    };
+    let read = |body: String| {
+        let path = scratch("edge-dates.json");
+        std::fs::write(&path, body).unwrap();
+        let result = crate::github::from_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        result
+    };
+
+    for dates in [
+        ["-262143-01-01", "-262143-01-02"], // no Sunday behind the first day
+        ["+262142-12-30", "+262142-12-31"], // no week ahead of the last
+    ] {
+        let error = read(file(&dates)).expect_err(&format!("{dates:?} was accepted"));
+        assert!(
+            error.contains("these tools work in 2000 to 2100"),
+            "{error}"
+        );
+        assert!(!error.contains("panicked"), "{error}");
+    }
+
+    // A year the tools do work in still loads.
+    assert!(read(file(&["2027-01-01", "2027-01-02"])).is_ok());
+
+    // And the public constructor, which cannot refuse anything, degrades to an
+    // empty grid rather than panicking.
+    let edge = vec![Day {
+        date: NaiveDate::MIN,
+        count: 1,
+        level: 1,
+        future: false,
+    }];
+    let calendar = Calendar::build("x".into(), 2027, 1, vec![2027], edge);
+    assert!(calendar.weeks.is_empty(), "no start, so no columns");
+    assert!(calendar.first_date().is_none());
+}
+
+#[test]
+fn the_cursor_cannot_be_walked_off_the_end_of_the_calendar() {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+    // `move_cursor` added to the date and clamped afterwards, so the clamp could
+    // not save it: a cursor within a week of the last date a `NaiveDate` holds
+    // panicked on the next arrow key. Reachable through `Calendar::build`, which
+    // is public and cannot refuse the dates it is handed.
+    let days: Vec<Day> = (0..3)
+        .map(|back| Day {
+            date: NaiveDate::MAX - chrono::Duration::days(back),
+            count: 1,
+            level: 1,
+            future: false,
+        })
+        .rev()
+        .collect();
+    let calendar = Calendar::build("x".into(), NaiveDate::MAX.year(), 3, vec![], days);
+    let mut app = ready(calendar);
+
+    // Every direction, from both ends, including the ones that used to panic.
+    for code in [
+        KeyCode::End,
+        KeyCode::Right,
+        KeyCode::Down,
+        KeyCode::Char('l'),
+        KeyCode::Char('j'),
+        KeyCode::Home,
+        KeyCode::Left,
+        KeyCode::Up,
+    ] {
+        app.on_key(code, KeyModifiers::NONE);
+    }
+    // Still somewhere the calendar holds.
+    assert!(app.cursor <= NaiveDate::MAX);
+    assert!(app.cursor >= NaiveDate::MAX - chrono::Duration::days(2));
 }

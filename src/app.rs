@@ -445,7 +445,15 @@ impl App {
         let (Some(first), Some(last)) = (calendar.first_date(), calendar.last_date()) else {
             return;
         };
-        self.cursor = (self.cursor + Duration::days(days)).clamp(first, last);
+        // Checked, and the clamp cannot do it: the addition happens first, so a
+        // cursor within a week of the last date a `NaiveDate` can hold used to
+        // panic on the next arrow key. Running off the calendar is what clamping
+        // is for, so an overflow lands on the edge it was heading for.
+        let moved = self
+            .cursor
+            .checked_add_signed(Duration::days(days))
+            .unwrap_or(if days < 0 { first } else { last });
+        self.cursor = moved.clamp(first, last);
     }
 
     fn jump(&mut self, edge: Edge) {

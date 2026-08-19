@@ -1221,9 +1221,13 @@ fn a_plan_file_cannot_smuggle_past_the_flag_bounds() {
         assert!(!out.status.success(), "plan {field}={value} was accepted");
         assert_eq!(out.status.code(), Some(2), "{field}={value}");
         assert!(
-            error.contains("is not a plan that can be drawn"),
+            error.contains("is not a plan these tools can use"),
             "{field}={value}: {error}"
         );
+        // And it names the way out, because 0.2.0 could write a plan this
+        // refuses: it accepted `--commits -1`, which `--save` wrote down as four
+        // billion.
+        assert!(error.contains("--save"), "{field}={value}: {error}");
         assert!(error.contains(wanted), "{field}={value}: {error}");
         assert!(!error.contains("panicked"), "{field}={value}: {error}");
         // The refusal names the value it refused, not a wrapped version of it.

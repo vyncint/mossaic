@@ -57,6 +57,19 @@ listed under a **Changed** or **Removed** heading.
 
 ### Fixed
 
+- **A calendar has to sit somewhere a calendar can sit.** `github::parse` bounded
+  how *wide* a saved calendar was (400 days) but not where it *was*, and the grid
+  reaches outside the days it is handed: back to the Sunday before the first, and
+  a week forward from the cursor. A file whose first day was within three of the
+  earliest date a `NaiveDate` can express panicked in release as well as debug —
+  and in the chart that was the worst of it, because the fetch runs on its own
+  thread: the thread died and the screen sat on "loading" for ever, with no error
+  and no way to retry. `Calendar::build` degrades to an empty grid rather than
+  panicking, for the same reason `art::Grid::new` returns `None`.
+- **The cursor cannot be walked off the end of the calendar.** `move_cursor`
+  added to the date and clamped afterwards, so the clamp could not save it: with
+  a calendar ending within a week of the last representable date, one arrow key
+  ended the process.
 - **A saved plan is validated when it is read.** `--plan PATH` names a file, and
   a file need not have come from your own `--save` — so it was the way around
   every bound the command line enforces. A `top` of `usize::MAX` wrapped past
