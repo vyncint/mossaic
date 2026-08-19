@@ -10,6 +10,17 @@ use crate::ui;
 
 /// Deterministic stand-in for a fetched year, so snapshots do not need the network.
 /// A wholly elapsed year of deterministic data, so snapshots need no network.
+/// A scratch path in the temp directory that no other process will touch.
+///
+/// The names here used to be constants, which made them shared state: a stress
+/// loop beside an ordinary `cargo test`, or two people on one machine, raced
+/// over the same file and failed in ways that looked like the code rather than
+/// like the harness. CONTRIBUTING.md §3 asks for hermetic tests, and a fixed
+/// global path is not one.
+fn scratch(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mossaic-{}-{name}", std::process::id()))
+}
+
 fn synthetic(year: i32, login: &str) -> Calendar {
     let mut date = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
@@ -558,7 +569,7 @@ fn a_saved_calendar_loads_with_nothing_in_the_future() {
     // A year wholly ahead of today: from a file every day must still be drawn,
     // which is what makes previewing contribution art possible at all.
     let year = Local::now().year() + 1;
-    let path = std::env::temp_dir().join("mossaic-snapshot-test.json");
+    let path = scratch("snapshot-test.json");
     let body = format!(
         r#"{{"data":{{"user":{{"login":"preview","contributionsCollection":{{
         "contributionYears":[{year}],"contributionCalendar":{{"totalContributions":9,
@@ -1671,7 +1682,7 @@ fn a_snapshot_is_something_the_renderer_can_read_back() {
     .unwrap();
     let body = art::snapshot(&placed.lit, &grid, "preview");
 
-    let path = std::env::temp_dir().join("mossaic-art-roundtrip.json");
+    let path = scratch("art-roundtrip.json");
     std::fs::write(&path, &body).unwrap();
     let calendar = crate::github::from_file(path.to_str().unwrap()).expect("parses");
     let _ = std::fs::remove_file(&path);
@@ -1710,7 +1721,7 @@ fn the_png_is_a_png() {
     levels[1][3] = Some(0);
     let image = graphics::grid(&levels, &palette, (10, 20));
 
-    let path = std::env::temp_dir().join("mossaic-png-test.png");
+    let path = scratch("png-test.png");
     crate::png::write(&path, &image, palette.canvas).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let _ = std::fs::remove_file(&path);
@@ -2150,7 +2161,7 @@ fn control_characters_never_leave_the_parser() {
         ]}}]}}}}}}}},"errors":null}}"#,
         serde_json::to_string(evil).unwrap()
     );
-    let path = std::env::temp_dir().join("mossaic-evil-login.json");
+    let path = scratch("evil-login.json");
     std::fs::write(&path, body).unwrap();
     let calendar = crate::github::from_file(path.to_str().unwrap()).expect("parses");
     let _ = std::fs::remove_file(&path);
@@ -2167,7 +2178,7 @@ fn control_characters_never_leave_the_parser() {
 
     // And the same for an error message, which is server-controlled text.
     let body = "{\"data\":null,\"errors\":[{\"message\":\"bad\u{1b}]0;PWNED\"}]}";
-    let path = std::env::temp_dir().join("mossaic-evil-error.json");
+    let path = scratch("evil-error.json");
     std::fs::write(&path, body).unwrap();
     let error = crate::github::from_file(path.to_str().unwrap()).unwrap_err();
     let _ = std::fs::remove_file(&path);
@@ -2187,7 +2198,7 @@ fn a_calendar_cannot_span_more_than_a_year() {
           {"date":"2027-01-01","contributionCount":1,"contributionLevel":"NONE"},
           {"date":"9999-12-31","contributionCount":1,"contributionLevel":"NONE"}
         ]}]}}}},"errors":null}"#;
-    let path = std::env::temp_dir().join("mossaic-far-dates.json");
+    let path = scratch("far-dates.json");
     std::fs::write(&path, body).unwrap();
     let error = crate::github::from_file(path.to_str().unwrap()).unwrap_err();
     let _ = std::fs::remove_file(&path);
@@ -2277,7 +2288,7 @@ fn a_commit_identity_cannot_carry_a_newline() {
     // An identity is written into the fast-import stream as a line of its own.
     let mut lit = BTreeMap::new();
     lit.insert(NaiveDate::from_ymd_opt(2027, 6, 1).unwrap(), 1);
-    let repo = std::env::temp_dir().join("mossaic-ident-test");
+    let repo = scratch("ident-test");
 
     for (name, email) in [
         ("evil\ncommit refs/heads/backdoor", "x@x.invalid"),
@@ -2595,7 +2606,7 @@ fn the_shades_survive_a_round_trip_through_githubs_own_encoding() {
     let shades = Shades { ink: 4, field: 1 };
     let placed = art::place(&columns, &grid, 1, Some(10), shades.commits(4)).unwrap();
 
-    let path = std::env::temp_dir().join("mossaic-shades-roundtrip.json");
+    let path = scratch("shades-roundtrip.json");
     std::fs::write(&path, art::snapshot(&placed.all(), &grid, "preview")).unwrap();
     let calendar = crate::github::from_file(path.to_str().unwrap());
     let _ = std::fs::remove_file(&path);

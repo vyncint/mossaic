@@ -72,6 +72,16 @@ listed under a **Changed** or **Removed** heading.
   everything downstream was correct about an empty year: 9,527 contributions
   read as none, and a plan that cannot be drawn read as reachable at one commit
   a day. (#8)
+- **`--today` outside the plan's year says so.** The flag carries no year of its
+  own, so `--today 2027-06-01` against a plan whose year defaulted to this one
+  asked about a calendar the plan does not cover — and the entire "what to do
+  next" half of the report silently vanished. Still allowed, because every letter
+  day of an ended year is overdue and that is a retrospective worth asking for.
+- **Test scratch files no longer share a fixed path.** Fourteen of them named a
+  constant under the temp directory, so two test processes in one checkout — a
+  stress loop beside an ordinary `cargo test` — raced and failed in ways that
+  looked like the code. `CONTRIBUTING.md` §3 asks for hermetic tests, and a fixed
+  global path is not one.
 - **Two tests no longer assert on the wall clock.** One claimed whatever day it
   ran on was a lit day inside the letters — true when it was written, false the
   morning after — and another that 2027 had not started. Both now pin `--today`,

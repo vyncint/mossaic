@@ -15,6 +15,17 @@ fn art(args: &[&str]) -> Output {
         .expect("the art binary runs")
 }
 
+/// A scratch path in the temp directory that no other process will touch.
+///
+/// The names here used to be constants, which made them shared state: a stress
+/// loop beside an ordinary `cargo test`, or two people on one machine, raced
+/// over the same file and failed in ways that looked like the code rather than
+/// like the harness. CONTRIBUTING.md §3 asks for hermetic tests, and a fixed
+/// global path is not one.
+fn scratch(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mossaic-{}-{name}", std::process::id()))
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -156,7 +167,7 @@ fn tracking_without_a_calendar_explains_itself() {
 
 #[test]
 fn a_snapshot_round_trips_through_the_chart() {
-    let out = std::env::temp_dir().join("mossaic-art-cli.json");
+    let out = scratch("art-cli.json");
     let path = out.to_string_lossy().into_owned();
     let made = art(&["HI", "--year", "2027", "--snapshot", &path, "--no-colour"]);
     assert!(
@@ -171,7 +182,7 @@ fn a_snapshot_round_trips_through_the_chart() {
     assert!(Path::new(&path).exists());
 
     // And the chart renders it without a terminal.
-    let png = std::env::temp_dir().join("mossaic-art-cli.png");
+    let png = scratch("art-cli.png");
     let drawn = Command::new(env!("CARGO_BIN_EXE_mossaic"))
         .args(["--file", &path, "--png", &png.to_string_lossy()])
         .output()
@@ -313,7 +324,7 @@ fn an_unknown_format_is_refused() {
 
 #[test]
 fn a_saved_plan_makes_the_flags_optional() {
-    let dir = std::env::temp_dir().join("mossaic-plan-test");
+    let dir = scratch("plan-test");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -605,7 +616,7 @@ fn tracking_reports_the_letters_and_the_field_apart() {
 
 #[test]
 fn a_saved_plan_remembers_the_background() {
-    let dir = std::env::temp_dir().join("mossaic-plan-background-test");
+    let dir = scratch("plan-background-test");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -863,7 +874,7 @@ fn today_is_an_input_so_a_report_is_reproducible() {
     // A date the plan's year does not hold is not an answer about that plan.
     // Tracking 2026 in 2027 used to report on a day in 2027 and call it
     // `outside`, which is true of the wrong calendar.
-    let json: serde_json::Value = serde_json::from_str(&stdout(&art(&[
+    let out = art(&[
         "VYNCINT",
         "--year",
         "2026",
@@ -874,10 +885,16 @@ fn today_is_an_input_so_a_report_is_reproducible() {
         "2027-03-01",
         "--format",
         "json",
-    ])))
-    .expect("json");
+    ]);
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("json");
     assert!(json["today"].is_null(), "{}", json["today"]);
     assert!(json["tomorrow"].is_null(), "{}", json["tomorrow"]);
+    // And it says so, because `--today` carries no year of its own: the whole
+    // "what to do next" half of the report disappears otherwise, which looks
+    // like a bug rather than like an answer.
+    let note = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(note.contains("2027-03-01 is not in 2026"), "{note}");
+    assert!(note.contains("--year 2027"), "and what to do: {note}");
 
     for bad in ["notadate", "2026-13-01", "1999-01-01"] {
         let out = art(&["VYNCINT", "--track", "--today", bad]);
@@ -926,7 +943,7 @@ fn a_saved_plan_remembers_who_to_track() {
     // with the nothing a bare `--track` carries. With `gh` off PATH the loss is
     // visible; with `gh` present it was worse than visible, because it tracked
     // the authenticated user while reporting against someone else's plan.
-    let dir = std::env::temp_dir().join("mossaic-plan-user-test");
+    let dir = scratch("plan-user-test");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -1018,7 +1035,7 @@ fn backfill_commits_only_what_is_short() {
     // same flat count on every lit day — including the ones already bright, and
     // adding to the busiest of them raises the very peak every letter day is
     // measured against. A shortfall cannot do that.
-    let dir = std::env::temp_dir().join("mossaic-backfill-test");
+    let dir = scratch("backfill-test");
     let _ = std::fs::remove_dir_all(&dir);
     let repo = dir.to_string_lossy().into_owned();
 

@@ -512,11 +512,29 @@ fn track_progress(
     // contribution at all.
     let hideable = plan.field_ceiling.unwrap_or(0);
 
+    // Resolved once, and said out loud when it lands outside the plan. A report
+    // is about one year, so a date outside it has no today and no tomorrow —
+    // and the whole "what to do next" half of the report simply vanishes. That
+    // is easy to reach by accident, because `--today` does not carry a year
+    // with it: `--today 2027-06-01` against a plan whose year defaulted to this
+    // one is a question about a calendar the plan does not cover. Not an error,
+    // though — every letter day of an ended year is overdue, and that is a
+    // retrospective worth asking for.
+    let today = options.now();
+    if !plan.holds(today) {
+        eprintln!(
+            "note: {today} is not in {} — the report covers the plan's year, so it \
+             has nothing to say about that day. Add --year {} if that is the year \
+             you meant.",
+            plan.year,
+            today.year()
+        );
+    }
+
     // json and markdown are for machines and for messages; both carry every
     // number the text report prints, so a notification never has to be parsed
     // out of a screen.
     if options.format != Format::Text {
-        let today = options.now();
         let suggestion =
             plan::best_start_week(grid, columns.len(), options.top, columns, &actual, hideable);
         let year_total = actual
@@ -696,7 +714,6 @@ fn track_progress(
     }
 
     // What to do next, which is the question this is really for.
-    let today = options.now();
     if !plan.under_way(today) {
         let first = plan
             .letters()
