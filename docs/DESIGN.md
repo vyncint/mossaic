@@ -79,7 +79,17 @@ that:
 
 The square inside that pitch is `min(2 × cell_w, cell_h) × 11/14`, centred: the
 pitch is only square when a cell is exactly twice as tall as it is wide, and
-taking the smaller side keeps the day square on fonts where it is not.
+taking the smaller side keeps the day square on fonts where it is not. Its offset
+is rounded to whole pixels — a half-pixel one makes the square soft on one axis
+and crisp on the other, which reads as a rendering fault rather than as
+anti-aliasing.
+
+github.com's hairline border sits **over** the square's edge, not inset into it,
+and mossaic draws it the same way: the fill goes down at the full side and a ring
+is drawn on top. Insetting the fill by the border instead — which is what mossaic
+did until 0.4.0 — costs twice the border width off every side, so an 11-on-14
+square became 14px in a 20px pitch: 0.700 where github.com's is 0.786, every cell
+about a ninth too small with a dark rim where a hairline belonged.
 
 Rounding is anti-aliased from the signed distance to the shape's edge —
 coverage is `0.5 − distance`, clamped, one evaluation per pixel, no
@@ -96,9 +106,14 @@ The rasteriser produces straight-alpha RGBA once. What differs is the wire:
 | transparency | a real alpha channel; corners blend into any background | one bit — "leave this pixel alone" — so edges are composited against the background the terminal reported |
 | colour | 32-bit RGBA | 8-bit palette, components in *percent* |
 | placement | pinned to an exact number of columns and rows (`c`/`r`), so it cannot drift out of step with the labels | wherever the cursor is |
-| a year | 507 KB raw → **5 KB** zlib'd, ~7 KB on the wire | **44 KB**, run-length encoded |
-| one cell | ~224 bytes | ~489 bytes |
+| a year | 507 KB raw → **4.9 KB** on the wire, zlib'd then base64'd | **38 KB**, run-length encoded |
+| one cursor move | ~243 bytes | ~591 bytes |
 | layering | two layers, both under text: the year and legend at `z=-2`, the cursor and hover rings at `z=-1` | pixels are pixels |
+
+Every byte figure above is measured on the wire at a 9x19 cell against
+`art/vyncint-2027.json`, by `a_year_costs_what_the_design_notes_say` and
+`moving_the_cursor_sends_a_cell_not_a_year` in `tests/pixels.rs`. A cursor move
+is two cells — the ring leaving one day and arriving at another.
 
 Sixel's palette is the one place the image *may* be degraded on purpose. Blends
 are snapped to a coarser grid until they fit, starting at full precision — and at
@@ -109,7 +124,7 @@ chart. See `indexed()`.
 
 ## 5. The painter is a diff
 
-Redrawing a year for every hovered day would be 45 KB of sixel at 12 frames a
+Redrawing a year for every hovered day would be 38 KB of sixel at 12 frames a
 second. So `Painter` holds what is on screen — the base image's identity, and
 at most two marked cells — and writes only what changed:
 
@@ -339,8 +354,8 @@ out by protocol and in bytes. The budgets in §4 and the diffing in §5 are chec
 against the wire because of it, rather than against the rasteriser.
 
 What the harness still cannot reach is what the images *look like*: its emulator
-consumes DCS and APC strings without rendering them, so it can say that 43 KB of
-sixel went out in three payloads and nothing at all about the picture. That is why
+consumes DCS and APC strings without rendering them, so it can say that 38 KB of
+sixel went out and nothing at all about the picture. That is why
 the encoders are covered in process, and why `--png` exists — it renders the same
 image to a file, which separates "the rasteriser is wrong" from "the emission is
 wrong".

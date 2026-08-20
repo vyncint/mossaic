@@ -144,6 +144,14 @@ listed under a **Changed** or **Removed** heading.
 - **The README's terminal mock was several versions stale** — no `? help` in the
   footer, no streak in the summary, no `auto:` on the legend, and an active-day
   count from before `--today`. It is regenerated from the binary. (#33)
+- **Every byte figure in `docs/DESIGN.md` §4 is now the measured one**, and the
+  three places that quoted it agree: 4.9 KB on the wire for a year over kitty
+  against 38 KB of sixel, and 243 against 591 bytes for a cursor move. The table
+  said 5 KB/44 KB, §13 said 43 KB, and the tests' own comments said 8 KB/45 KB.
+  `tests/pixels.rs` prints what it measured, so the next reader does not have to
+  guess which was right. (#33)
+- **§3 says how the border is drawn**, which is the whole of #20: over the square's
+  edge, not inset into it, with the offset rounded to whole pixels. (#20, #33)
 - **Which palette the legibility numbers describe.** `Palette::separation` measures
   the 24-bit values whatever the terminal can show, and art is read in a browser, so
   those are the right numbers for the decision — but `docs/ART.md` now says so

@@ -194,24 +194,26 @@ fn the_grid_rows_belong_to_the_image_and_the_labels_stay_text() -> termlens::Res
 
 #[test]
 fn a_year_costs_what_the_design_notes_say() -> termlens::Result<()> {
-    // docs/DESIGN.md §4 quotes a year as ~8 KB over kitty (zlib'd RGBA) against
-    // ~45 KB of run-length-encoded sixel. Those figures were unverifiable from a
-    // test until the harness could see the payloads; now the table is a claim
-    // with a check behind it. Bounds rather than equalities, because the exact
-    // byte count moves with the cell size and the year's contents — but an order
-    // of magnitude is exactly what the design decision rests on.
+    // docs/DESIGN.md §4 quotes a year as 4.9 KB over kitty (zlib'd RGBA, base64'd)
+    // against 38 KB of run-length-encoded sixel. Those figures were unverifiable
+    // from a test until the harness could see the payloads; now the table is a
+    // claim with a check behind it, and the print below is where the numbers in it
+    // came from. Bounds rather than equalities, because the exact byte count moves
+    // with the cell size and the year's contents — but an order of magnitude is
+    // exactly what the design decision rests on.
     let mut kitty = chart(Graphics::Kitty, Some(CELL), SIZE, &PREVIEW)?;
     let kitty_bytes = kitty.wait_frame(loaded)?.graphics().bytes();
     let mut sixel = chart(Graphics::Sixel, Some(CELL), SIZE, &PREVIEW)?;
     let sixel_bytes = sixel.wait_frame(loaded)?.graphics().bytes();
 
+    println!("MEASURED kitty={kitty_bytes} sixel={sixel_bytes}");
     assert!(
         (1_000..=12_000).contains(&kitty_bytes),
-        "a year over kitty is quoted at ~8 KB, got {kitty_bytes} bytes"
+        "a year over kitty is quoted at 4.9 KB, got {kitty_bytes} bytes"
     );
     assert!(
         (20_000..=80_000).contains(&sixel_bytes),
-        "a year over sixel is quoted at ~45 KB, got {sixel_bytes} bytes"
+        "a year over sixel is quoted at 38 KB, got {sixel_bytes} bytes"
     );
     // The compression is the reason kitty is preferred where both are offered.
     assert!(
@@ -247,7 +249,7 @@ fn text_mode_transmits_no_image() -> termlens::Result<()> {
 #[test]
 fn moving_the_cursor_sends_a_cell_not_a_year() -> termlens::Result<()> {
     // docs/DESIGN.md §5: "the painter is a diff". Redrawing the year for every
-    // moved cursor would be 45 KB of sixel at 12 frames a second, so `Painter`
+    // moved cursor would be 38 KB of sixel at 12 frames a second, so `Painter`
     // holds what is on screen and writes only what changed. That was asserted
     // in process; this asserts it on the wire, for both protocols.
     for (label, graphics) in [("kitty", Graphics::Kitty), ("sixel", Graphics::Sixel)] {
@@ -267,6 +269,7 @@ fn moving_the_cursor_sends_a_cell_not_a_year() -> termlens::Result<()> {
             .bytes();
 
         let cost = moved - settled;
+        println!("MEASURED {label}: year={base} one-move={cost}");
         assert!(cost > 0, "{label}: the ring has to be drawn somehow");
         assert!(
             cost * 10 < base,
