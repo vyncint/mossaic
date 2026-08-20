@@ -179,7 +179,7 @@ fn the_cursor_moves_by_day_and_by_week() -> termlens::Result<()> {
     t.send(Key::Home)?;
     t.wait_frame(|s| s.contains("Fri, Jan 1 2027"))?;
     for _ in 0..4 {
-        t.send(Key::Up)?;
+        t.send(Key::Char('k'))?;
     }
     t.send(Key::Down)?;
     t.wait_frame(|s| s.contains("Sat, Jan 2 2027"))?;
@@ -765,5 +765,51 @@ fn the_wheel_does_nothing_behind_the_help_overlay() -> termlens::Result<()> {
         year,
         "the wheel changed the year behind it:\n{after}"
     );
+    Ok(())
+}
+
+/// The sizes the README's "Known limits" quotes, in the units a user's terminal
+/// reports them in — which is the drawable area plus the border mossaic draws.
+/// The in-process test pins the arithmetic; this pins that the arithmetic is
+/// about the right thing, because the two disagreed: the advice line told a
+/// reader with a 17-row window that it "has 15", so resizing to the 17 it asked
+/// for still did not fit.
+#[test]
+fn the_documented_window_sizes_are_the_ones_a_terminal_reports() -> termlens::Result<()> {
+    for (size, expected) in [
+        ((112u16, 19u16), "squares cells"),
+        ((111, 19), "compact cells"),
+        ((112, 18), "compact cells"),
+        ((165, 19), "rounded cells"),
+        ((164, 19), "squares cells"),
+    ] {
+        let mut t = spawn(&PREVIEW, size, |b| b)?;
+        // Not `loaded`: at a height where nothing fits, the advice line takes the
+        // footer's row, because "needs 19 rows" is the more actionable of the two.
+        let screen = t.wait_frame(|s| s.contains(" cells") && s.contains("contributions in"))?;
+        assert_eq!(
+            style(&screen),
+            expected,
+            "at {}x{}:\n{screen}",
+            size.0,
+            size.1
+        );
+        t.send(Key::Char('q'))?;
+        let _ = t.wait_exit()?;
+    }
+    Ok(())
+}
+
+/// And when nothing fits, the advice names a number the reader can resize to.
+#[test]
+fn the_advice_line_names_the_window_size_not_the_drawable_area() -> termlens::Result<()> {
+    let mut t = spawn(&PREVIEW, (112, 18), |b| b)?;
+    let screen = t.wait_frame(|s| s.contains("needs") && s.contains("rows"))?;
+    assert!(
+        screen.contains("the chart needs 19 rows — this window has 18"),
+        "the numbers a terminal reports, not the ones inside the border:\n{screen}"
+    );
+    t.send(Key::Char('q'))?;
+    let _ = t.wait_exit()?;
     Ok(())
 }

@@ -107,7 +107,7 @@ cells      kitty
   `xterm -ti vt340` all draw one of them; GNOME Terminal and Ptyxis draw
   neither, because VTE ships sixel switched off. Nothing is lost but the
   pixels — the chart still draws in block sextants.
-- **A window under 110 columns** falls back too, and the chart says so under
+- **A window under 112 columns** falls back too, and the chart says so under
   the legend rather than leaving you guessing — naming the number it wants.
 - Either way, `mossaic --png chart.png` renders the same image to a file from
   any terminal at all.
@@ -242,27 +242,29 @@ the same commands.
 ## Without a terminal that draws pixels
 
 A terminal without either protocol loses the pixels and nothing else. The whole
-chart still draws, in block sextants — same layout, same colours, same tooltip:
+chart still draws, in block sextants — same layout, same colours, same tooltip.
+Here the mouse is hovering August 19th while the cursor sits on today, which is
+why the pill and the line under the grid name different days:
 
 ```
 ┌ mossaic ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│vyncint  ·  2026  ·  9,527 contributions in 2026                                                                                                                              │
-│                                                                                      ▐ 113 contributions on August 19th. ▌                                                   │
-│    Jan            Feb         Mar            Apr         May            Jun         Jul         Aug    ▼       Sep         Oct         Nov            Dec                    │
-│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛            │
-│Mon    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛            │
-│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛            │
-│Wed    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛            │
-│    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛            │
-│Fri 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛               │
-│    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛               │
-│                                                                                                                                                                              │
-│Wed, Aug 19 2026  ·  113 contributions                                                                                                                                        │
-│Less 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 More   ·   rounded cells                                                                                                                                  │
-│110 active days  ·  longest 31  ·  best Aug 11 (146)                                                                                                                          │
-│                                                                                                                                                                              │
-│←→↑↓ day/week  ·  t today  ·  d cells  ·  m mouse off  ·  r reload  ·  q quit  ·  preview                                                                                     │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+│vyncint  ·  2026  ·  9,527 contributions in 2026                                                                                                                            │
+│                                                                                      ▐ 113 contributions on August 19th. ▌                                                 │
+│    Jan            Feb         Mar            Apr         May            Jun         Jul         Aug    ▼       Sep         Oct         Nov            Dec                  │
+│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
+│Mon    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
+│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
+│Wed    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
+│    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
+│Fri 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛             │
+│    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛             │
+│                                                                                                                                                                            │
+│Thu, Dec 31 2026  ·  No contributions                                                                                                                                       │
+│Less 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 More   ·   auto: rounded cells                                                                                                                          │
+│110 active days  ·  longest 31  ·  best Aug 11 (146)                                                                                                                        │
+│                                                                                                                                                                            │
+│←→↑↓ day/week  ·  t today  ·  d cells  ·  m mouse off  ·  r reload  ·  q quit  ·  ? help  ·  preview                                                                        │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## How it works
@@ -270,7 +272,7 @@ chart still draws, in block sextants — same layout, same colours, same tooltip
 Three things decide what you see, and the first is the only one you may need to
 act on:
 
-- **What your terminal can draw.** mossaic asks it — one write, four questions,
+- **What your terminal can draw.** mossaic asks it — one write, five questions,
   one round trip — rather than sniffing `TERM`, which is wrong in both
   directions: it misses terminals it has not heard of and claims support inside
   tmux or ssh where the escape never arrives. `mossaic --capabilities` prints
@@ -312,10 +314,10 @@ palette is degraded on purpose, and what the capability probe actually sends.
   clipped at the year boundary — and the *current* streak is the run ending on
   the day the year is read as of, so a year that has ended has none. `--today`
   moves that day.
-- A 53-week year needs 110 columns and 17 rows for pixel or square cells, 163 for
-  rounded corners, and 164×25 for the bordered grid. Below that `Auto` drops to a
-  borderless style, where a future day and a day off the end of the year both look
-  blank; `d` still forces the others if you would rather they clipped.
+- A 53-week year needs a **112×19** window for pixel or square cells and **165**
+  columns for rounded corners; the bordered grid wants 166×27. Below that `Auto`
+  drops to a borderless style, where a future day and a day off the end of the year
+  both look blank; `d` still forces the others if you would rather they clipped.
 - Private contributions appear only if the authenticated user can see them.
 
 ## Layout

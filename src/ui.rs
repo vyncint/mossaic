@@ -50,6 +50,15 @@ const ROUND: &str = "\u{1FB2B}\u{1FB1B}";
 /// smaller style at that one height, which is the better of the two failures.
 pub(crate) const CHROME_ROWS: usize = 10;
 
+/// Rows and columns the bordered block in [`draw`] takes before anything is
+/// drawn inside it — one on each side, both ways.
+///
+/// Everything below works in that inner area, which is the right frame for
+/// laying out a chart and the wrong one for advice. `note` told a reader with a
+/// 17-row window that it "has 15", so resizing to the 17 it asked for still did
+/// not fit. The number a reader can act on is the one their terminal reports.
+pub(crate) const BORDER: usize = 2;
+
 /// A concrete cell layout, resolved from a [`CellStyle`] and the space available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cells {
@@ -554,12 +563,14 @@ fn note(
         return Some(Line::styled(
             match (narrow, short) {
                 (true, _) => format!(
-                    "(a year needs {} columns even at its narrowest — this window has {width})",
-                    smallest.width(weeks)
+                    "(a year needs {} columns even at its narrowest — this window has {})",
+                    smallest.width(weeks) + BORDER,
+                    width + BORDER
                 ),
                 (false, true) => format!(
-                    "(the chart needs {} rows — this window has {height})",
-                    smallest.height() + CHROME_ROWS
+                    "(the chart needs {} rows — this window has {})",
+                    smallest.height() + CHROME_ROWS + BORDER,
+                    height + BORDER
                 ),
                 _ => "(too small for these cells — press d for a smaller style)".to_string(),
             },
@@ -575,11 +586,11 @@ fn note(
     // sharpening the corners reads as rounding not working.
     let (wanted, need) = match (app.pixels_available(), cells) {
         (true, Cells::Pixels) => return None,
-        (true, _) => ("pixel cells", Cells::Pixels.width(weeks) + 2),
+        (true, _) => ("pixel cells", Cells::Pixels.width(weeks) + BORDER),
         (false, Cells::Rounded { .. }) => return None,
         (false, _) => (
             "rounded corners",
-            Cells::Rounded { gap: 1 }.width(weeks) + 2,
+            Cells::Rounded { gap: 1 }.width(weeks) + BORDER,
         ),
     };
     Some(Line::styled(

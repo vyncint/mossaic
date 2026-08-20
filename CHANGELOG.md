@@ -134,11 +134,16 @@ listed under a **Changed** or **Removed** heading.
 
 ### Documented
 
-- **The column and row minimums the README quotes were both wrong** — "about 112
-  columns" and "about 115×26" against a measured 110×17 and 164×25. The chart's own
-  advice line names the number it wants (#31), so the two disagreed in front of the
-  same reader. Both figures are now asserted in `auto_picks_the_most_faithful_style_that_fits`.
-  (#33)
+- **The advice line named a window size that would not have worked.** It quoted the
+  drawable area inside mossaic's own border, so a reader with a 17-row window was
+  told it "has 15" — resizing to the 17 it asked for still did not fit. Both numbers
+  are now the ones a terminal reports. The README's figures were wrong in the other
+  direction ("about 115×26" for the bordered grid, against 166×27), and are now
+  measured in a pty: 112×19 for pixel or square cells, 165 columns for rounded
+  corners. (#31, #33)
+- **The README's terminal mock was several versions stale** — no `? help` in the
+  footer, no streak in the summary, no `auto:` on the legend, and an active-day
+  count from before `--today`. It is regenerated from the binary. (#33)
 - **Which palette the legibility numbers describe.** `Palette::separation` measures
   the 24-bit values whatever the terminal can show, and art is read in a browser, so
   those are the right numbers for the decision — but `docs/ART.md` now says so

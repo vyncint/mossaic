@@ -155,10 +155,15 @@ fn auto_picks_the_most_faithful_style_that_fits() {
     assert_eq!(SQUARES.height(), 7);
     assert_eq!(ROUNDED.height(), 7);
     assert_eq!(GRID.height(), 15);
-    // The README's "Known limits" quotes these as terminal sizes, so they are the
-    // grid plus the chrome around it. If one moves, that line moves with it.
-    assert_eq!(SQUARES.height() + crate::ui::CHROME_ROWS, 17);
-    assert_eq!(GRID.height() + crate::ui::CHROME_ROWS, 25);
+    // The README's "Known limits" quotes terminal sizes, which is these plus the
+    // border mossaic draws around everything. Measured in a pty: squares appear at
+    // 112x19 and rounded at 165, and both are these numbers plus `BORDER`.
+    use crate::ui::{BORDER, CHROME_ROWS};
+    assert_eq!(SQUARES.width(53) + BORDER, 112);
+    assert_eq!(ROUNDED.width(53) + BORDER, 165);
+    assert_eq!(GRID.width(53) + BORDER, 166);
+    assert_eq!(SQUARES.height() + CHROME_ROWS + BORDER, 19);
+    assert_eq!(GRID.height() + CHROME_ROWS + BORDER, 27);
 
     let auto = |width, height| resolve(CellStyle::Auto, 53, width, height, false);
     assert_eq!(
