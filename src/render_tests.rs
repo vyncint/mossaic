@@ -2475,7 +2475,7 @@ fn adjacent_shades_are_not_always_legible_which_is_why_the_rule_exists() {
     );
     assert!(
         tightest < 11.0,
-        "the tightest adjacent pair is ΔE {tightest:.1}; the docs say 10.8"
+        "the tightest adjacent pair is ΔE {tightest:.1}; the docs say 9.1"
     );
 }
 

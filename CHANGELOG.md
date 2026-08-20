@@ -116,9 +116,9 @@ listed under a **Changed** or **Removed** heading.
 - **The character cell is measured again on a resize**, which is also when a font
   size changes — `docs/DESIGN.md` promises the geometry is scaled to whatever a cell
   measures, and it was measured once at startup. (#37)
-- **Eight measured claims in the design notes, and four in the source.** The
+- **Eight measured claims in the design notes, and five in the source.** The
   tightest adjacent ΔE is 9.1 (light + halloween, levels 1 and 2), not the 10.8 that
-  four places quoted for a different pair; the sixel coarsening never triggers for a
+  five places quoted for a different pair (`src/art.rs` among them); the sixel coarsening never triggers for a
   chart, which needs 20–27 of 256 registers; the kitty layering is two layers at
   `z=-2` and `z=-1`, not one at `z=-1`; the probe asks five questions, not four, and
   has a window-size fallback; the two-level gap is warned about rather than enforced;
