@@ -84,7 +84,13 @@ depends on which theme the reader has. mossaic measures it in
 [CIELAB](https://en.wikipedia.org/wiki/CIELAB_color_space) — ΔE, where under 2
 is invisible, 10 is "you would have to be told", and 35 reads as two different
 colours at a glance — across all nine palettes GitHub ships (light, dark and
-dimmed, each with its winter and halloween variants):
+dimmed, each with its winter and halloween variants).
+
+These are the colours github.com serves a browser, which is where art is read, so
+they are the right ones for this decision. They are *not* the 256-colour ramp the
+chart falls back to in a terminal without truecolour: that ramp is chosen for
+legibility rather than accuracy, and its own separations differ. The numbers below
+describe the picture your readers see, not the one in your terminal.
 
 | `--background` | worst ΔE against level 4 | | where it is worst |
 | --- | --- | --- | --- |
@@ -94,9 +100,9 @@ dimmed, each with its winter and halloween variants):
 | `3` | 17.5 | **faint** | dimmed |
 
 The rule falls straight out of the table: **leave at least two levels between
-the background and the letters.** Adjacent shades fall as low as ΔE 10.8 — on
-the light theme, levels 2 and 3 are all but the same colour — while any gap of
-two or more never drops below 35.4. `--background 1` and `--background 2` are
+the background and the letters.** Adjacent shades fall as low as ΔE 9.1 — on the
+light halloween palette, levels 1 and 2 are all but the same colour — while any
+gap of two or more never drops below 35.4. `--background 1` and `--background 2` are
 both safe; `--background 3` is drawn, with a warning:
 
 ```

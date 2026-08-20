@@ -367,7 +367,7 @@ fn observed(options: &Options, grid: &Grid) -> (String, BTreeMap<NaiveDate, u32>
             // Named, because whose year this is can come from a saved plan
             // rather than from the command line, and "gh was not found" gives no
             // hint about which login it was going to ask for.
-            let calendar = github::fetch(&who, grid.year).unwrap_or_else(|error| {
+            let calendar = github::fetch(&who, grid.year, options.now()).unwrap_or_else(|error| {
                 fail(&format!(
                     "could not read {who}'s {} contributions: {error}",
                     grid.year
@@ -974,7 +974,7 @@ fn show_font(colour: bool) {
 
 /// Existing contributions from a saved `gh api graphql` response.
 fn load(path: &PathBuf, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
-    let calendar = github::from_file(&path.to_string_lossy())
+    let calendar = github::from_file(&path.to_string_lossy(), None)
         .unwrap_or_else(|error| fail(&format!("could not read {path:?}: {error}")));
     let kept: BTreeMap<NaiveDate, u32> = calendar
         .days()
@@ -1227,6 +1227,23 @@ fn parse_args() -> Option<Options> {
     // would mean guessing which was meant.
     if options.track && options.backfill {
         fail("--track reports on the plan and --backfill commits to it — pick one");
+    }
+    // Tracking writes nothing, so a flag asking it to was doing nothing at all —
+    // silently, which is worse than refusing. Distinct from `--commits`, a tuning
+    // parameter tracking genuinely has no use for; these ask for a side effect.
+    if options.track {
+        for (flag, asked) in [
+            ("--snapshot", options.snapshot.is_some()),
+            ("--write", options.write),
+            ("--repo", options.repo.is_some()),
+        ] {
+            if asked {
+                fail(&format!(
+                    "--track reports on the plan and writes nothing, so {flag} would \
+                     do nothing. Drop one of them."
+                ));
+            }
+        }
     }
     Some(options)
 }

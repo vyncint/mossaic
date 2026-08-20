@@ -8,8 +8,13 @@ use crate::app::{App, Load};
 use crate::calendar::{Calendar, Day};
 use crate::ui;
 
-/// Deterministic stand-in for a fetched year, so snapshots do not need the network.
-/// A wholly elapsed year of deterministic data, so snapshots need no network.
+/// A fixed day for the statistics, so a streak is a fact about a calendar and a
+/// date rather than about when the suite ran.
+const TODAY: NaiveDate = match NaiveDate::from_ymd_opt(2025, 12, 31) {
+    Some(date) => date,
+    None => panic!("a real date"),
+};
+
 /// A scratch path in the temp directory that no other process will touch.
 ///
 /// The names here used to be constants, which made them shared state: a stress
@@ -21,6 +26,8 @@ fn scratch(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("mossaic-{}-{name}", std::process::id()))
 }
 
+/// Deterministic stand-in for a fetched year, so snapshots do not need the
+/// network: a wholly elapsed year whose counts cluster the way real ones do.
 fn synthetic(year: i32, login: &str) -> Calendar {
     let mut date = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
@@ -148,6 +155,15 @@ fn auto_picks_the_most_faithful_style_that_fits() {
     assert_eq!(SQUARES.height(), 7);
     assert_eq!(ROUNDED.height(), 7);
     assert_eq!(GRID.height(), 15);
+    // The README's "Known limits" quotes terminal sizes, which is these plus the
+    // border mossaic draws around everything. Measured in a pty: squares appear at
+    // 112x19 and rounded at 165, and both are these numbers plus `BORDER`.
+    use crate::ui::{BORDER, CHROME_ROWS};
+    assert_eq!(SQUARES.width(53) + BORDER, 112);
+    assert_eq!(ROUNDED.width(53) + BORDER, 165);
+    assert_eq!(GRID.width(53) + BORDER, 166);
+    assert_eq!(SQUARES.height() + CHROME_ROWS + BORDER, 19);
+    assert_eq!(GRID.height() + CHROME_ROWS + BORDER, 27);
 
     let auto = |width, height| resolve(CellStyle::Auto, 53, width, height, false);
     assert_eq!(
@@ -155,15 +171,15 @@ fn auto_picks_the_most_faithful_style_that_fits() {
         ROUNDED,
         "rounded corners win wherever they fit"
     );
-    assert_eq!(auto(163, 16), ROUNDED, "rounded at its exact minimum");
+    assert_eq!(auto(163, 17), ROUNDED, "rounded at its exact minimum");
     assert_eq!(
         auto(162, 40),
         SQUARES,
         "one column short: sharp corners instead"
     );
-    assert_eq!(auto(110, 16), SQUARES, "squares at its exact minimum");
+    assert_eq!(auto(110, 17), SQUARES, "squares at its exact minimum");
     assert_eq!(auto(109, 40), COMPACT, "too narrow for squares");
-    assert_eq!(auto(240, 15), COMPACT, "too short for either");
+    assert_eq!(auto(240, 16), COMPACT, "too short for either");
     assert_eq!(auto(10, 5), COMPACT, "never panics on a tiny terminal");
 
     // Rounded and squares are the two faithful shapes and both cost less than any
@@ -531,7 +547,9 @@ fn a_streak_is_not_broken_by_the_unwritten_rest_of_the_year() {
     assert_eq!(calendar.last_date(), Some(end));
     assert_eq!(calendar.elapsed().count(), 181);
 
-    let stats = calendar.stats();
+    // The cutoff is what "today" means for this fixture: every day after it is
+    // flagged as still to come.
+    let stats = calendar.stats(cutoff);
     assert_eq!(
         stats.current_streak, 3,
         "future days must not count as a broken streak"
@@ -579,7 +597,7 @@ fn a_saved_calendar_loads_with_nothing_in_the_future() {
         ]}}]}}}}}}}},"errors":null}}"#
     );
     std::fs::write(&path, body).unwrap();
-    let loaded = crate::github::from_file(path.to_str().unwrap());
+    let loaded = crate::github::from_file(path.to_str().unwrap(), None);
     let _ = std::fs::remove_file(&path);
 
     let calendar = loaded.expect("snapshot should parse");
@@ -594,12 +612,12 @@ fn a_saved_calendar_loads_with_nothing_in_the_future() {
     );
     assert!(calendar.has_elapsed_days());
     assert_eq!(calendar.total, 9);
-    assert_eq!(calendar.stats().active_days, 1);
+    assert_eq!(calendar.stats(TODAY).active_days, 1);
 }
 
 #[test]
 fn a_missing_snapshot_reports_the_path() {
-    let error = crate::github::from_file("/nonexistent/nope.json").unwrap_err();
+    let error = crate::github::from_file("/nonexistent/nope.json", None).unwrap_err();
     assert!(error.contains("nope.json"), "{error}");
 }
 
@@ -638,7 +656,7 @@ fn month_labels_are_ordered_and_spaced() {
 #[test]
 fn stats_match_the_underlying_days() {
     let calendar = synthetic(2025, "octocat");
-    let stats = calendar.stats();
+    let stats = calendar.stats(TODAY);
     let active = calendar.days().filter(|d| d.count > 0).count() as u32;
     let best = calendar.days().map(|d| d.count).max().unwrap();
 
@@ -654,11 +672,11 @@ fn stats_match_the_underlying_days() {
 #[ignore = "requires gh and network access"]
 fn live() {
     let year = chrono::Local::now().year();
+    let today = chrono::Local::now().date_naive();
     let login = crate::github::whoami().expect("gh is not authenticated");
-    let calendar = crate::github::fetch(&login, year).expect("fetch failed");
+    let calendar = crate::github::fetch(&login, year, today).expect("fetch failed");
 
     let days: Vec<_> = calendar.days().collect();
-    let today = chrono::Local::now().date_naive();
     assert_eq!(
         days.first().unwrap().date,
         NaiveDate::from_ymd_opt(year, 1, 1).unwrap()
@@ -1277,7 +1295,7 @@ fn auto_takes_pixels_when_the_terminal_draws_them() {
         Cells::Pixels,
         "pixels beat every glyph"
     );
-    assert_eq!(auto(110, 16, true), Cells::Pixels, "at their exact minimum");
+    assert_eq!(auto(110, 17, true), Cells::Pixels, "at their exact minimum");
     assert_eq!(
         auto(109, 40, true),
         Cells::Solid { fill: 1, gap: 0 },
@@ -1352,6 +1370,7 @@ fn the_mouse_finds_the_day_under_it() {
         cells,
         legend: None,
         bottom: 40,
+        right: 200,
     };
     // Cells that would be drawn past the last row are not drawn: an image placed
     // there scrolls the screen out from under the rest of the frame.
@@ -1362,6 +1381,26 @@ fn the_mouse_finds_the_day_under_it() {
         ..layout(Cells::Pixels)
     }
     .has_room());
+    // Nor past the last *column*. Sixel clears the character cells it is about to
+    // cover by writing spaces, and doing that past the right edge wrapped seven
+    // rows over the gutter, the border and everything below — permanently, because
+    // ratatui believed it had written them.
+    assert!(
+        !Layout {
+            right: 80,
+            ..layout(Cells::Pixels)
+        }
+        .has_room(),
+        "53 weeks of two columns each cannot fit in 80"
+    );
+    assert!(
+        Layout {
+            right: 5 + 53 * 2,
+            ..layout(Cells::Pixels)
+        }
+        .has_room(),
+        "and exactly enough is enough"
+    );
 
     for cells in [
         Cells::Pixels,
@@ -1684,7 +1723,7 @@ fn a_snapshot_is_something_the_renderer_can_read_back() {
 
     let path = scratch("art-roundtrip.json");
     std::fs::write(&path, &body).unwrap();
-    let calendar = crate::github::from_file(path.to_str().unwrap()).expect("parses");
+    let calendar = crate::github::from_file(path.to_str().unwrap(), None).expect("parses");
     let _ = std::fs::remove_file(&path);
 
     assert_eq!(calendar.year, 2027);
@@ -1857,7 +1896,7 @@ fn the_demo_year_looks_like_a_real_one() {
         active(true) / 104.0 < active(false) / 261.0,
         "weekends should be quieter than weekdays"
     );
-    let stats = demo.stats();
+    let stats = demo.stats(TODAY);
     assert!(stats.longest_streak >= 3, "a streak worth showing");
     assert!(stats.active_days > 150 && stats.active_days < 320);
 }
@@ -2163,7 +2202,7 @@ fn control_characters_never_leave_the_parser() {
     );
     let path = scratch("evil-login.json");
     std::fs::write(&path, body).unwrap();
-    let calendar = crate::github::from_file(path.to_str().unwrap()).expect("parses");
+    let calendar = crate::github::from_file(path.to_str().unwrap(), None).expect("parses");
     let _ = std::fs::remove_file(&path);
 
     assert!(
@@ -2180,7 +2219,7 @@ fn control_characters_never_leave_the_parser() {
     let body = "{\"data\":null,\"errors\":[{\"message\":\"bad\u{1b}]0;PWNED\"}]}";
     let path = scratch("evil-error.json");
     std::fs::write(&path, body).unwrap();
-    let error = crate::github::from_file(path.to_str().unwrap()).unwrap_err();
+    let error = crate::github::from_file(path.to_str().unwrap(), None).unwrap_err();
     let _ = std::fs::remove_file(&path);
     assert!(!error.chars().any(char::is_control), "{error:?}");
 
@@ -2200,7 +2239,7 @@ fn a_calendar_cannot_span_more_than_a_year() {
         ]}]}}}},"errors":null}"#;
     let path = scratch("far-dates.json");
     std::fs::write(&path, body).unwrap();
-    let error = crate::github::from_file(path.to_str().unwrap()).unwrap_err();
+    let error = crate::github::from_file(path.to_str().unwrap(), None).unwrap_err();
     let _ = std::fs::remove_file(&path);
     assert!(error.contains("spans"), "{error}");
     assert!(error.contains("a year is at most 366"), "{error}");
@@ -2250,7 +2289,7 @@ fn counts_from_elsewhere_cannot_overflow_the_shading() {
         })
         .collect();
     let calendar = Calendar::build("x".into(), 2027, u32::MAX, vec![2027], days);
-    let stats = calendar.stats();
+    let stats = calendar.stats(TODAY);
     assert_eq!(stats.active_days, 3);
     assert_eq!(stats.best.unwrap().1, u32::MAX);
 }
@@ -2436,7 +2475,7 @@ fn adjacent_shades_are_not_always_legible_which_is_why_the_rule_exists() {
     );
     assert!(
         tightest < 11.0,
-        "the tightest adjacent pair is ΔE {tightest:.1}; the docs say 10.8"
+        "the tightest adjacent pair is ΔE {tightest:.1}; the docs say 9.1"
     );
 }
 
@@ -2608,7 +2647,7 @@ fn the_shades_survive_a_round_trip_through_githubs_own_encoding() {
 
     let path = scratch("shades-roundtrip.json");
     std::fs::write(&path, art::snapshot(&placed.all(), &grid, "preview")).unwrap();
-    let calendar = crate::github::from_file(path.to_str().unwrap());
+    let calendar = crate::github::from_file(path.to_str().unwrap(), None);
     let _ = std::fs::remove_file(&path);
     let calendar = calendar.expect("the snapshot should parse");
 
@@ -3105,7 +3144,7 @@ fn a_calendar_has_to_sit_somewhere_a_calendar_can_sit() {
     let read = |body: String| {
         let path = scratch("edge-dates.json");
         std::fs::write(&path, body).unwrap();
-        let result = crate::github::from_file(path.to_str().unwrap());
+        let result = crate::github::from_file(path.to_str().unwrap(), None);
         let _ = std::fs::remove_file(&path);
         result
     };
@@ -3174,4 +3213,327 @@ fn the_cursor_cannot_be_walked_off_the_end_of_the_calendar() {
     // Still somewhere the calendar holds.
     assert!(app.cursor <= NaiveDate::MAX);
     assert!(app.cursor >= NaiveDate::MAX - chrono::Duration::days(2));
+}
+
+#[test]
+fn a_streak_is_a_run_of_consecutive_dates() {
+    // Both loops used to compare positions in a list, so any gap in the calendar
+    // read as an unbroken run: ten non-adjacent Mondays reported a ten-day streak.
+    // A calendar listing only its busy days is a legal saved response.
+    let mondays: Vec<Day> = (0..10)
+        .map(|week| Day {
+            date: NaiveDate::from_ymd_opt(2026, 1, 5).unwrap() + Duration::days(7 * week),
+            count: 3,
+            level: 1,
+            future: false,
+        })
+        .collect();
+    let last = mondays[9].date;
+    let calendar = Calendar::build("x".into(), 2026, 30, vec![2026], mondays);
+    let stats = calendar.stats(last);
+    assert_eq!(stats.active_days, 10, "all ten happened");
+    assert_eq!(stats.longest_streak, 1, "no two of them are adjacent");
+    assert_eq!(stats.current_streak, 1, "and today is one of them, alone");
+
+    // A gap of a single day still breaks it, and the run before the gap is what
+    // `longest` is about.
+    let mut days: Vec<Day> = Vec::new();
+    for offset in [0i64, 1, 2, 4, 5] {
+        days.push(Day {
+            date: NaiveDate::from_ymd_opt(2026, 3, 1).unwrap() + Duration::days(offset),
+            count: 1,
+            level: 1,
+            future: false,
+        });
+    }
+    let calendar = Calendar::build("x".into(), 2026, 5, vec![2026], days);
+    let stats = calendar.stats(NaiveDate::from_ymd_opt(2026, 3, 6).unwrap());
+    assert_eq!(stats.longest_streak, 3, "Mar 1-3, then a gap");
+    assert_eq!(
+        stats.current_streak, 2,
+        "Mar 5-6 counting back from the 6th"
+    );
+}
+
+#[test]
+fn a_current_streak_is_about_today_and_not_about_december() {
+    // The "quiet today" tolerance dropped the last elapsed day unconditionally,
+    // and for a finished year that day is December 31st — so a year that ended a
+    // decade ago reported a current streak of however long its final run was.
+    let mut days = Vec::new();
+    let mut date = NaiveDate::from_ymd_opt(2015, 11, 21).unwrap();
+    let end = NaiveDate::from_ymd_opt(2015, 12, 31).unwrap();
+    while date <= end {
+        days.push(Day {
+            date,
+            count: u32::from(date < end),
+            level: u8::from(date < end),
+            future: false,
+        });
+        date += Duration::days(1);
+    }
+    let calendar = Calendar::build("x".into(), 2015, 40, vec![2015], days);
+
+    // Read from a day the year does not hold, which is what viewing an old year is.
+    let stats = calendar.stats(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap());
+    assert_eq!(stats.longest_streak, 40, "the run itself is still there");
+    assert_eq!(
+        stats.current_streak, 0,
+        "but nothing is current about a year that ended"
+    );
+
+    // Inside the year, the tolerance does apply: Dec 31 is quiet, so the run
+    // ending the day before is what "today, so far" means.
+    let stats = calendar.stats(end);
+    assert_eq!(stats.current_streak, 40, "a quiet today is tolerated");
+}
+
+#[test]
+fn a_shade_we_do_not_know_is_derived_rather_than_dropped() {
+    // `level_of` mapped anything unrecognised to 0, and nothing downstream
+    // re-derives one — so a day with forty contributions was painted exactly like
+    // an empty one while the header reported a full year.
+    let days: Vec<String> = (1..=28)
+        .map(|day| {
+            format!(
+                r#"{{"date":"2026-01-{day:02}","contributionCount":40,"contributionLevel":"FIFTH_QUARTILE"}}"#
+            )
+        })
+        .collect();
+    let body = format!(
+        r#"{{"data":{{"user":{{"login":"x","contributionsCollection":{{
+            "contributionYears":[2026],"contributionCalendar":{{"totalContributions":1120,
+            "weeks":[{{"contributionDays":[{}]}}]}}}}}}}},"errors":null}}"#,
+        days.join(",")
+    );
+    let path = scratch("unknown-level.json");
+    std::fs::write(&path, body).unwrap();
+    let calendar = crate::github::from_file(path.to_str().unwrap(), None).expect("parses");
+    let _ = std::fs::remove_file(&path);
+
+    let levels: Vec<u8> = calendar.days().map(|day| day.level).collect();
+    assert!(
+        levels.iter().all(|level| *level == 4),
+        "every day is the year's peak, so every day is the brightest shade: {levels:?}"
+    );
+    // The rule is the one we already own, not a guess.
+    assert_eq!(crate::art::level(40, 40), 4);
+}
+
+#[test]
+fn a_calendar_that_names_a_day_twice_is_refused() {
+    // The grid kept whichever record the sort happened to put last, so the total
+    // exceeded the sum of the visible days and which day survived was luck.
+    let body = r#"{"data":{"user":{"login":"x","contributionsCollection":{
+        "contributionYears":[2026],"contributionCalendar":{"totalContributions":15,
+        "weeks":[{"contributionDays":[
+          {"date":"2026-03-02","contributionCount":5,"contributionLevel":"FIRST_QUARTILE"},
+          {"date":"2026-03-02","contributionCount":9,"contributionLevel":"THIRD_QUARTILE"}
+        ]}]}}}},"errors":null}"#;
+    let path = scratch("dupes.json");
+    std::fs::write(&path, body).unwrap();
+    let error = crate::github::from_file(path.to_str().unwrap(), None).unwrap_err();
+    let _ = std::fs::remove_file(&path);
+    assert!(error.contains("2026-03-02"), "{error}");
+    assert!(error.contains("twice"), "{error}");
+}
+
+#[test]
+fn an_error_without_a_message_still_says_something() {
+    // `message` was required, so a real failure became "unexpected response from
+    // gh: missing field `message`" — a complaint about our parser.
+    let path = scratch("no-message.json");
+    std::fs::write(
+        &path,
+        r#"{"data":null,"errors":[{"type":"NOT_FOUND","path":["user"]}]}"#,
+    )
+    .unwrap();
+    let error = crate::github::from_file(path.to_str().unwrap(), None).unwrap_err();
+    let _ = std::fs::remove_file(&path);
+    assert!(!error.contains("missing field"), "{error}");
+    assert!(error.contains("GitHub reported an error"), "{error}");
+}
+
+#[test]
+fn the_winter_palette_is_reachable_from_the_calendar() {
+    use crate::primer::Season;
+    // Fully implemented in all three appearances, measured among the nine
+    // `Shades::worst` reads, askable with `--palette winter` — and unreachable
+    // from `Season::on`, so `--palette auto` could never show it.
+    let on = |month, day| Season::on(NaiveDate::from_ymd_opt(2026, month, day).unwrap());
+    assert_eq!(on(12, 18), Season::Default);
+    assert_eq!(on(12, 19), Season::Winter);
+    assert_eq!(on(12, 25), Season::Winter);
+    assert_eq!(on(12, 26), Season::Default);
+    // Halloween is unchanged.
+    assert_eq!(on(10, 24), Season::Default);
+    assert_eq!(on(10, 25), Season::Halloween);
+    assert_eq!(on(10, 31), Season::Halloween);
+    assert_eq!(on(11, 1), Season::Default);
+
+    // And every season a date can produce has a palette that differs from the
+    // default one, or picking it would be pointless.
+    for season in [Season::Winter, Season::Halloween] {
+        let seasonal = crate::primer::Palette::new(crate::primer::Appearance::Dark, season, true);
+        let plain =
+            crate::primer::Palette::new(crate::primer::Appearance::Dark, Season::Default, true);
+        assert_ne!(seasonal.levels[4], plain.levels[4], "{season:?}");
+    }
+}
+
+#[test]
+fn the_probe_reads_a_reply_that_shares_its_buffer() {
+    use crate::term;
+    // Every `CSI ?` is tried now, not just the first. `CSI ?2026;2$y` is the
+    // DECRQM answer for synchronized update — the mode this program itself uses —
+    // and one left in the tty queue by whatever ran before us shares the read.
+    // Taking the first occurrence missed sixel *and* the sentinel, so start-up
+    // paid the whole 250 ms deadline.
+    for reply in [
+        "\x1b[?62;4;22c",
+        "\x1b[?2026;2$y\x1b[?62;4;22c",
+        "\x1b[?0u\x1b[?62;4;22c",
+        "\x1b[?1;2$y\x1b[?4;7$y\x1b[?64;4;22c",
+    ] {
+        assert!(term::parse(reply).sixel, "sixel missed in {reply:?}");
+    }
+    // And a reply that genuinely does not claim sixel still does not.
+    assert!(!term::parse("\x1b[?2026;2$y\x1b[?64;22c").sixel);
+
+    // The `#` form of an X colour spec, which was read as "no answer" — meaning
+    // assume dark, so a light terminal got the dark palette.
+    use crate::primer::Rgb;
+    assert_eq!(
+        term::parse("\x1b]11;#0d1117\x07").background,
+        Some(Rgb(13, 17, 23))
+    );
+    assert_eq!(
+        term::parse("\x1b]11;#ffffff\x1b\\").background,
+        Some(Rgb(255, 255, 255))
+    );
+    assert_eq!(
+        term::parse("\x1b]11;#fff\x07").background,
+        Some(Rgb(255, 255, 255))
+    );
+    // Still the common form.
+    assert_eq!(
+        term::parse("\x1b]11;rgb:0d0d/1111/1717\x07").background,
+        Some(Rgb(13, 17, 23))
+    );
+    // And nonsense is still nothing.
+    assert_eq!(term::parse("\x1b]11;#12345\x07").background, None);
+}
+
+#[test]
+fn a_cell_is_the_square_github_draws_and_lands_on_whole_pixels() {
+    use crate::graphics;
+    use crate::primer::{Appearance, Palette, Season};
+
+    // github.com draws an 11px square on a 14px pitch. The border used to be
+    // drawn first and the fill inset by it, so the coloured square measured 10 on
+    // 14 — every cell about a ninth smaller than the geometry this crate takes as
+    // its north star, with a dark rim where a hairline belonged.
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    for cell in [(9u16, 19u16), (10, 20), (12, 24), (14, 28)] {
+        let image = graphics::patch(Some(4), None, &palette, cell);
+        let pitch = (
+            usize::from(cell.0) * usize::from(graphics::COLUMNS_PER_DAY),
+            usize::from(cell.1),
+        );
+        // Where the square is: any pixel the fill reaches at all.
+        let opaque = |x: usize, y: usize| image.rgba_at(x, y)[3] > 0;
+        let cols: Vec<usize> = (0..pitch.0)
+            .filter(|x| (0..pitch.1).any(|y| opaque(*x, y)))
+            .collect();
+        let rows: Vec<usize> = (0..pitch.1)
+            .filter(|y| (0..pitch.0).any(|x| opaque(x, *y)))
+            .collect();
+
+        // Square in pixels, whatever the font's aspect ratio. A half-pixel offset
+        // used to make it soft on one axis and crisp on the other — 12x11 at a
+        // 9x19 cell, where 12x12 was drawn.
+        assert_eq!(
+            cols.len(),
+            rows.len(),
+            "{cell:?}: {}x{} is not square",
+            cols.len(),
+            rows.len()
+        );
+        // And within a pixel of 11/14 of the narrower pitch.
+        let wanted = (pitch.0.min(pitch.1) as f32 * 11.0 / 14.0).round() as usize;
+        assert!(
+            cols.len().abs_diff(wanted) <= 1,
+            "{cell:?}: {} wide, wanted about {wanted}",
+            cols.len()
+        );
+        // A gap on both axes, or the year reads as one block.
+        assert!(
+            cols.len() < pitch.0 && rows.len() < pitch.1,
+            "{cell:?}: no gap"
+        );
+        // Whole pixels: the first and last covered column are fully covered.
+        let edge = image.rgba_at(cols[0], rows[rows.len() / 2])[3];
+        assert!(
+            edge > 200,
+            "{cell:?}: the left edge is a half-pixel blur ({edge})"
+        );
+    }
+}
+
+#[test]
+fn a_day_that_has_not_happened_can_still_hold_the_cursor() {
+    use crate::graphics::{patch, Ring};
+    use crate::primer::{Appearance, Palette, Season};
+    // `patch` drew nothing at all when there was no level — the ring included —
+    // so the cursor vanished in pixel mode while every bordered style showed it,
+    // and `detail` went on naming the day it was on.
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    let future = patch(None, Some(Ring::Cursor), &palette, (9, 19));
+    assert!(!future.is_blank(), "the cursor has to be somewhere");
+    // A ring and nothing else: the middle of the cell stays empty, because there
+    // is no day there to fill in.
+    assert_eq!(future.rgba_at(9, 9)[3], 0, "the inside is still empty");
+    // And a day with no level and no ring is still nothing at all.
+    assert!(patch(None, None, &palette, (9, 19)).is_blank());
+}
+
+#[test]
+fn the_measured_shade_floors_are_the_ones_the_docs_quote() {
+    use crate::primer::{Appearance, Palette, Season};
+    // Four places quoted ΔE 10.8 as the tightest adjacent pair, naming light
+    // levels 2 and 3. That pair really is 10.8 — but light + halloween levels 1
+    // and 2 are 9.1 apart, which is lower, and the guard asserted only `< 11.0`
+    // so the real floor passed unseen.
+    let readers = [Appearance::Light, Appearance::Dark, Appearance::Dimmed]
+        .into_iter()
+        .flat_map(|appearance| {
+            [Season::Default, Season::Winter, Season::Halloween]
+                .into_iter()
+                .map(move |season| Palette::new(appearance, season, true))
+        });
+
+    let mut adjacent = f32::INFINITY;
+    let mut apart = f32::INFINITY;
+    for palette in readers {
+        for low in 0..5u8 {
+            for high in (low + 1)..5u8 {
+                let delta = palette.separation(low, high);
+                if high - low == 1 {
+                    adjacent = adjacent.min(delta);
+                } else {
+                    apart = apart.min(delta);
+                }
+            }
+        }
+    }
+    assert!(
+        (9.0..9.2).contains(&adjacent),
+        "the tightest adjacent pair is 9.1, got {adjacent:.1}"
+    );
+    assert!(
+        (35.3..35.5).contains(&apart),
+        "two levels apart never drops below 35.4, got {apart:.1}"
+    );
+    // Which is the whole reason the rule is "leave two levels".
+    assert!(apart > adjacent * 3.0);
 }

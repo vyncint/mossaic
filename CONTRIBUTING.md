@@ -9,7 +9,7 @@ getting along with terminals none of us has.
 ```sh
 git clone https://github.com/vyncint/mossaic
 cd mossaic
-cargo test          # 130-odd tests, hermetic and offline
+cargo test          # 150-odd tests, hermetic and offline
 cargo run           # the chart, for whoever `gh` is logged in as
 ```
 

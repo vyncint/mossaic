@@ -9,6 +9,160 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Added
+
+- **`--today DATE` on the chart, not just the tracker.** 0.3.0 made time an input
+  for `mossaic-art` and left `mossaic` reading the clock, so the two disagreed
+  about whether time is an input at all — and the still-to-come half of the
+  rendering was reachable only from a live fetch, which is why the cursor could
+  vanish there unnoticed. With `--file` it also makes a saved year show its future
+  days, which is what a plan snapshot for next year actually is. (#38)
+- **`--palette auto` can pick winter.** `Season::on` matched only Halloween, so a
+  scale that is fully implemented in all three appearances, measured among the nine
+  palettes `Shades::worst` reads, and askable with `--palette winter` could never
+  appear by itself. GitHub does not publish the windows; December 19–25 is what it
+  has been observed using, and the code says so rather than claiming a
+  specification. (#22)
+- **The chart says when a protocol was asked for and could not be used.**
+  `--graphics kitty` without a cell size drew characters silently; `--capabilities`
+  explained it and the chart did not. (#37)
+
+### Changed
+
+- **Cells are the size github.com draws them.** The 5% border was drawn first and
+  the fill inset by it, so the coloured square measured 14px in a 20px pitch —
+  0.700, where github.com's is 11 on 14, or 0.786. Every cell was about a ninth too
+  small with a dark rim where a hairline belonged, `--png` included, which is where
+  the README's own screenshots come from. The square is now drawn at full size with
+  the hairline over its edge, and the offsets are rounded to whole pixels: at a 9x19
+  cell the opaque extent was 12x11 where 12x12 was drawn, soft on one axis and crisp
+  on the other. (#20)
+- **A current streak is the run ending on a given day**, so `Calendar::stats` takes
+  one. Both loops compared positions in a list rather than dates, so any gap read as
+  an unbroken run — ten non-adjacent Mondays reported a ten-day streak — and the
+  "quiet today" tolerance was applied to the last elapsed day of *any* year, so a
+  year that ended a decade ago reported a current streak of forty. (#18)
+- **`mossaic-glyphs` uses the shared argument parser**, so all three binaries agree
+  about what a user notices: `--color=never` is honoured rather than ignored, an
+  unknown option or a stray argument exits 2 with a message naming the binary, and a
+  missing value says so instead of quietly defaulting. (#25)
+- **`Rgb::luminance` is now `Rgb::brightness`.** It applies the luminance
+  coefficients to gamma-encoded sRGB with no linearisation, so it was not the
+  quantity its name promised — mid grey came out 0.502 where relative luminance is
+  0.216. The threshold it produces is the more useful one for choosing a terminal
+  theme; only the name was wrong. (#35)
+- **A flag that would do nothing is refused rather than ignored.** `--track` with
+  `--snapshot`, `--write` or `--repo` wrote nothing and said nothing; `--demo` with
+  `--file` silently picked the demo. Distinct from `--commits`, which tracking has no
+  use for but which is a tuning parameter rather than a side effect somebody asked
+  for. (#26)
+- **The legend says `auto:` while the chart is choosing.** Cycling with `d` past the
+  narrowest style lands back on `Auto`, which resolves to whatever fits — so the
+  press looked like it had done nothing. (#34)
+
+### Fixed
+
+- **Pixel images are bounded by columns as well as rows.** Sixel clears the
+  character cells it is about to cover by writing spaces, and did so with no idea
+  how wide the terminal was: a 53-week grid wrote 106 of them from column 6, so on
+  an 80-column terminal seven rows wrapped over the weekday gutter, the right border
+  and the rows below — and stayed wrapped, because ratatui believed it had written
+  those cells. The legend image was never bounded at all, and was clamped onto the
+  frame's last row. (#17)
+- **A shade GitHub names and this version does not is derived, not dropped.**
+  `level_of` mapped anything unrecognised to 0, and nothing downstream re-derives
+  one — so a day with forty contributions was painted exactly like an empty one
+  while the header reported a full year. The fallback is `art::level`, GitHub's own
+  rule, which the art costing already used. (#19)
+- **The keyboard cursor is visible on a day that has not happened.** `patch` drew
+  nothing at all without a level, the ring included, and `filled_rows` blanked a
+  future day before consulting the mark — so it vanished in pixel, rounded, snug and
+  squares cells while the five bordered styles showed it, and the detail line went on
+  naming the day it was on. (#21)
+- **The capability probe reads a reply that shares its buffer.** Only the first
+  `CSI ?` was tried, so a `CSI ?2026;2$y` — the DECRQM answer for synchronized
+  update, the mode this program itself uses — left in the tty queue by whatever ran
+  before us hid sixel *and* the sentinel, making every start-up pay the whole 250 ms
+  deadline. `OSC 11` now also accepts the `#rrggbb` form of an X colour spec, which
+  was read as no answer at all, so a light terminal replying that way got the dark
+  palette. (#23)
+- **`[` and `]` stay inside the years `--year` accepts.** The fallback for a year
+  outside the contribution set stepped without a bound, one `gh` subprocess per
+  keypress, and the header named years the CLI refuses to be given. (#24)
+- **At 80x24 the chart still says how to get out.** The footer was one 111-character
+  line, hard-truncated, so neither `q quit` nor `? help` was on screen; the note row
+  was not counted in the chrome budget, so at one particular height it evicted the
+  footer; and the help overlay truncated from the bottom, dropping what the terminal
+  can draw and `any key closes this` with it. The footer now drops the guessable
+  hints first and the overlay drops its cheapest lines. (#27)
+- **A click that misses a day puts the tooltip away**, instead of leaving it naming
+  an unrelated date — which on a terminal that reports clicks but not motion nothing
+  later corrected. And the mouse no longer acts behind the help overlay, where the
+  wheel changed year and started a fetch for a year the reader could not see. (#28)
+- **`--png` refuses an empty year** rather than writing a zero-width PNG, which the
+  format forbids and no viewer opens, and reporting success. (#29)
+- **The help overlay is opaque on kitty.** An image at `z=-2` draws over a cell
+  background rather than under it, and the panel sets one, so the chart showed
+  through its text. The painter now stands down while it is up. (#30)
+- **The advice line never points at a smaller style that does not exist.** From
+  `Auto` at its narrowest it said "press d for a smaller style", where `d` goes to
+  pixels — three times wider. It now names the columns a year needs. (#31)
+- **`--capabilities` honours `--cell`**, so the one command whose job is explaining
+  the pixel decision no longer reports the opposite of what the run would do. (#34)
+- **A calendar naming a day twice is refused** rather than keeping whichever record
+  an unstable sort put last, and a GraphQL error without a `message` surfaces as an
+  error rather than as "unexpected response from gh: missing field `message`".
+  `calendar::demo` no longer panics on a year no calendar can hold. (#35)
+- **The character cell is measured again on a resize**, which is also when a font
+  size changes — `docs/DESIGN.md` promises the geometry is scaled to whatever a cell
+  measures, and it was measured once at startup. (#37)
+- **Eight measured claims in the design notes, and five in the source.** The
+  tightest adjacent ΔE is 9.1 (light + halloween, levels 1 and 2), not the 10.8 that
+  five places quoted for a different pair (`src/art.rs` among them); the sixel coarsening never triggers for a
+  chart, which needs 20–27 of 256 registers; the kitty layering is two layers at
+  `z=-2` and `z=-1`, not one at `z=-1`; the probe asks five questions, not four, and
+  has a window-size fallback; the two-level gap is warned about rather than enforced;
+  the byte figures are ~5 KB and 44 KB at a 9x19 cell; the xterm-256 collision is
+  between levels 0 and 1 rather than 1 and 2, and the dimmed ramp ties rather than
+  inverts; and the layers block was missing four modules. The load-bearing claim —
+  two levels apart never below ΔE 35.4 — holds, and is now pinned by a test. (#33)
+- **Release hygiene.** `.claude/` no longer ships inside the crate,
+  `extract-changelog.sh` runs from anywhere rather than only the repository root, and
+  `docs/RELEASING.md` gained the two steps whose absence let three `action@v0.2.0`
+  references go stale: bumping them, and repointing the changelog's own link
+  definitions. (#32)
+
+### Documented
+
+- **The advice line named a window size that would not have worked.** It quoted the
+  drawable area inside mossaic's own border, so a reader with a 17-row window was
+  told it "has 15" — resizing to the 17 it asked for still did not fit. Both numbers
+  are now the ones a terminal reports. The README's figures were wrong in the other
+  direction ("about 115×26" for the bordered grid, against 166×27), and are now
+  measured in a pty: 112×19 for pixel or square cells, 165 columns for rounded
+  corners. (#31, #33)
+- **The README's screenshot was rendered with the old geometry** — the one image
+  whose entire job is showing that mossaic draws github.com's cell size. It is
+  regenerated, and the caption now names the `--png` command that produces it, so
+  the next reader can check it rather than trust it. (#20, #33)
+- **The README's terminal mock was several versions stale** — no `? help` in the
+  footer, no streak in the summary, no `auto:` on the legend, and an active-day
+  count from before `--today`. It is regenerated from the binary. (#33)
+- **Every byte figure in `docs/DESIGN.md` §4 is now the measured one**, and the
+  three places that quoted it agree: 4.9 KB on the wire for a year over kitty
+  against 38 KB of sixel, and 243 against 591 bytes for a cursor move. The table
+  said 5 KB/44 KB, §13 said 43 KB, and the tests' own comments said 8 KB/45 KB.
+  `tests/pixels.rs` prints what it measured, so the next reader does not have to
+  guess which was right. (#33)
+- **§3 says how the border is drawn**, which is the whole of #20: over the square's
+  edge, not inset into it, with the offset rounded to whole pixels. (#20, #33)
+- **Which palette the legibility numbers describe.** `Palette::separation` measures
+  the 24-bit values whatever the terminal can show, and art is read in a browser, so
+  those are the right numbers for the decision — but `docs/ART.md` now says so
+  rather than leaving a reader on a 256-colour terminal to assume the figures
+  describe what is in front of them. (#36)
+- `Esc` quits, which nothing said. (#34)
+
 ## [0.3.1] - 2026-08-20
 
 ### Added

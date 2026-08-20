@@ -82,7 +82,20 @@ fn style(screen: &Screen) -> String {
         .trim()
         .trim_end_matches('│')
         .trim()
+        // `Auto` labels itself, so that landing back on it during the `d` cycle
+        // does not look like a keypress that did nothing. The style it resolved
+        // to is what most assertions are about.
+        .trim_start_matches("auto: ")
         .to_string()
+}
+
+/// Whether the chart says it is choosing the style itself.
+#[allow(dead_code)]
+fn is_auto(screen: &Screen) -> bool {
+    screen
+        .text()
+        .lines()
+        .any(|line| line.contains("auto: ") && line.contains(" cells"))
 }
 
 /// Row of the Monday label, which is grid row 1.
@@ -166,7 +179,7 @@ fn the_cursor_moves_by_day_and_by_week() -> termlens::Result<()> {
     t.send(Key::Home)?;
     t.wait_frame(|s| s.contains("Fri, Jan 1 2027"))?;
     for _ in 0..4 {
-        t.send(Key::Up)?;
+        t.send(Key::Char('k'))?;
     }
     t.send(Key::Down)?;
     t.wait_frame(|s| s.contains("Sat, Jan 2 2027"))?;
@@ -179,6 +192,8 @@ fn cell_styles_cycle_through_every_shape() -> termlens::Result<()> {
     let first = t.wait_frame(loaded)?;
     assert_eq!(style(&first), "rounded cells", "auto picks rounded here");
 
+    assert!(is_auto(&first), "and says it chose:\n{first}");
+
     // The first press pins what auto had already chosen; from there each press
     // is a different shape. Pixels are skipped: this terminal draws none.
     for expected in [
@@ -190,11 +205,19 @@ fn cell_styles_cycle_through_every_shape() -> termlens::Result<()> {
         "blocks cells",
         "slim cells",
         "compact cells",
-        "rounded cells",
     ] {
         t.send(Key::Char('d'))?;
-        t.wait_frame(|s| style(s) == expected)?;
+        t.wait_frame(|s| style(s) == expected && !is_auto(s))?;
     }
+
+    // Round the end of the cycle: compact goes back to `Auto`, which resolves to
+    // rounded here — so the *shape* repeats, and only the label distinguishes the
+    // press from one that did nothing. That is why the label exists.
+    t.send(Key::Char('d'))?;
+    let back = t.wait_frame(is_auto)?;
+    assert_eq!(style(&back), "rounded cells", "{back}");
+    t.send(Key::Char('d'))?;
+    t.wait_frame(|s| style(s) == "rounded cells" && !is_auto(s))?;
     Ok(())
 }
 
@@ -646,5 +669,147 @@ fn a_drag_lands_on_the_day_it_ended_on() -> termlens::Result<()> {
         screen.contains("No contributions on July 28th."),
         "the tooltip should name the day the drag ended on:\n{screen}"
     );
+    Ok(())
+}
+
+#[test]
+fn a_small_terminal_still_says_how_to_get_out() -> termlens::Result<()> {
+    // At 80x24 the footer was one 111-character line, hard-truncated, so neither
+    // `q quit` nor `? help` was on screen — and the overlay that would have said
+    // so truncated from the bottom and dropped `any key closes this` too. 80x24
+    // is the canonical terminal.
+    for size in [(80u16, 24u16), (100, 24), (60, 20)] {
+        let mut t = spawn(&PREVIEW, size, |b| b)?;
+        let screen = t.wait_frame(loaded)?;
+        assert!(
+            screen.contains("q quit"),
+            "at {size:?} there is no way out on screen:\n{screen}"
+        );
+        assert!(screen.contains("? help"), "at {size:?}:\n{screen}");
+
+        t.send(Key::Char('?'))?;
+        // Waiting on the *content*, not on a heading: a short panel drops its
+        // headings before its facts, which is the right order — a fact reads on
+        // its own, a heading with nothing under it does not.
+        let help = t.wait_frame(|s| s.contains("drawing with"))?;
+        assert!(
+            help.contains("any key closes this"),
+            "at {size:?} the overlay dropped its own way out:\n{help}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn the_advice_line_never_points_at_something_smaller_that_does_not_exist() -> termlens::Result<()> {
+    // At 50x22 `Auto` is already at its narrowest, and the note said "press d for
+    // a smaller style" — where `d` from `Auto` goes to pixels, three times wider.
+    let mut t = spawn(&PREVIEW, (50, 22), |b| b)?;
+    let screen = t.wait_frame(loaded)?;
+    assert!(
+        !screen.contains("press d for a smaller style"),
+        "nothing smaller exists here:\n{screen}"
+    );
+    assert!(
+        screen.contains("at its narrowest"),
+        "it should say what a year actually needs:\n{screen}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_click_that_misses_a_day_puts_the_tooltip_away() -> termlens::Result<()> {
+    // A miss left the last tooltip on screen, still naming an unrelated date. On a
+    // terminal that reports clicks but not motion — which is the case the press arm
+    // exists for — nothing later corrects it.
+    let mut t = chart(&PREVIEW)?;
+    let ready = t.wait_frame(|s| loaded(s) && s.mouse_mode() != termlens::MouseMode::None)?;
+    let row = monday(&ready) + 2;
+
+    t.click(GRID_X + 10 * 3, row)?;
+    t.wait_frame(|s| s.text().contains(" on "))?;
+
+    // The header is not a day.
+    t.click(40, 1)?;
+    let after = t.wait_frame(|s| !s.text().contains(" on "))?;
+    assert!(
+        !after.text().contains(" on "),
+        "the tooltip outlived the day it described:\n{after}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_wheel_does_nothing_behind_the_help_overlay() -> termlens::Result<()> {
+    // `on_mouse` guarded the username prompt but not the overlay, so the wheel
+    // changed year and started a fetch for a year the reader could not see —
+    // behind a panel that says "any key closes this".
+    let mut t = chart(&["--demo"])?;
+    let ready = t.wait_frame(|s| loaded(s) && s.mouse_mode() != termlens::MouseMode::None)?;
+    let year = chrono_year(&ready);
+    let row = monday(&ready);
+
+    t.send(Key::Char('?'))?;
+    let help = t.wait_frame(|s| s.contains("This terminal"))?;
+    t.scroll(GRID_X, row, Scroll::Up)?;
+
+    // Give it frames to have acted in, then check nothing did.
+    let settled = help.repaints();
+    let after = t.wait_frame(|s| s.repaints() > settled + 2)?;
+    assert!(
+        after.contains("This terminal"),
+        "the overlay should still be up:\n{after}"
+    );
+    assert_eq!(
+        chrono_year(&after),
+        year,
+        "the wheel changed the year behind it:\n{after}"
+    );
+    Ok(())
+}
+
+/// The sizes the README's "Known limits" quotes, in the units a user's terminal
+/// reports them in — which is the drawable area plus the border mossaic draws.
+/// The in-process test pins the arithmetic; this pins that the arithmetic is
+/// about the right thing, because the two disagreed: the advice line told a
+/// reader with a 17-row window that it "has 15", so resizing to the 17 it asked
+/// for still did not fit.
+#[test]
+fn the_documented_window_sizes_are_the_ones_a_terminal_reports() -> termlens::Result<()> {
+    for (size, expected) in [
+        ((112u16, 19u16), "squares cells"),
+        ((111, 19), "compact cells"),
+        ((112, 18), "compact cells"),
+        ((165, 19), "rounded cells"),
+        ((164, 19), "squares cells"),
+    ] {
+        let mut t = spawn(&PREVIEW, size, |b| b)?;
+        // Not `loaded`: at a height where nothing fits, the advice line takes the
+        // footer's row, because "needs 19 rows" is the more actionable of the two.
+        let screen = t.wait_frame(|s| s.contains(" cells") && s.contains("contributions in"))?;
+        assert_eq!(
+            style(&screen),
+            expected,
+            "at {}x{}:\n{screen}",
+            size.0,
+            size.1
+        );
+        t.send(Key::Char('q'))?;
+        let _ = t.wait_exit()?;
+    }
+    Ok(())
+}
+
+/// And when nothing fits, the advice names a number the reader can resize to.
+#[test]
+fn the_advice_line_names_the_window_size_not_the_drawable_area() -> termlens::Result<()> {
+    let mut t = spawn(&PREVIEW, (112, 18), |b| b)?;
+    let screen = t.wait_frame(|s| s.contains("needs") && s.contains("rows"))?;
+    assert!(
+        screen.contains("the chart needs 19 rows — this window has 18"),
+        "the numbers a terminal reports, not the ones inside the border:\n{screen}"
+    );
+    t.send(Key::Char('q'))?;
+    let _ = t.wait_exit()?;
     Ok(())
 }

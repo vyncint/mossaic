@@ -1356,3 +1356,130 @@ fn tracking_a_year_that_has_not_started_is_not_a_mistake() {
     ]);
     assert!(String::from_utf8_lossy(&missed.stderr).contains("2027-03-01 is after 2026"));
 }
+
+#[test]
+fn tracking_refuses_a_flag_it_would_have_ignored() {
+    // Tracking writes nothing, so a flag asking it to write was doing nothing at
+    // all — silently, which is worse than refusing. Distinct from `--commits`,
+    // which tracking has no use for but which is a tuning parameter rather than a
+    // side effect somebody asked for.
+    for extra in [
+        vec!["--snapshot", "/tmp/mossaic-should-not-exist.json"],
+        vec!["--write"],
+        vec!["--repo", "/tmp/mossaic-should-not-exist"],
+    ] {
+        let mut args = vec![
+            "VYNCINT",
+            "--year",
+            "2026",
+            "--track",
+            "--merge",
+            "art/vyncint-2026.json",
+            "--today",
+            "2026-08-19",
+            "--no-colour",
+        ];
+        args.extend_from_slice(&extra);
+        let out = art(&args);
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(!out.status.success(), "{extra:?} was accepted");
+        assert_eq!(out.status.code(), Some(2), "{extra:?}");
+        assert!(error.contains("writes nothing"), "{extra:?}: {error}");
+        assert!(error.contains(extra[0]), "{extra:?}: {error}");
+    }
+    assert!(
+        !Path::new("/tmp/mossaic-should-not-exist.json").exists(),
+        "and nothing was written on the way to refusing"
+    );
+
+    // `--commits` is still fine, which is the distinction.
+    let fine = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--today",
+        "2026-08-19",
+        "--commits",
+        "4",
+        "--no-colour",
+    ]);
+    assert!(
+        fine.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fine.stderr)
+    );
+}
+
+#[test]
+fn every_binary_parses_arguments_the_same_way() {
+    // `cli::Args` exists "so that the tools agree about the things a user
+    // notices: that `--year 2027` and `--year=2027` are the same, that a missing
+    // value says so rather than being read as the next flag, and that every error
+    // looks like `mossaic-art: …` and exits 2". `mossaic-glyphs` parsed by hand
+    // and agreed about none of it.
+    for (name, binary) in [
+        ("mossaic", env!("CARGO_BIN_EXE_mossaic")),
+        ("mossaic-art", env!("CARGO_BIN_EXE_mossaic-art")),
+        ("mossaic-glyphs", env!("CARGO_BIN_EXE_mossaic-glyphs")),
+    ] {
+        let run = |args: &[&str]| {
+            Command::new(binary)
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .args(args)
+                .output()
+                .expect("runs")
+        };
+
+        // An unknown option is an error, and says whose.
+        let out = run(&["--definitely-not-a-flag"]);
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(out.status.code(), Some(2), "{name}: {error}");
+        assert!(error.starts_with(&format!("{name}: ")), "{name}: {error}");
+        assert!(error.contains("unknown option"), "{name}: {error}");
+
+        // `--key=value` is the same as `--key value`: forced colour reaches a pipe
+        // either way. (`mossaic` needs a source it can render without a network.)
+        let colour_args: Vec<Vec<&str>> = match name {
+            "mossaic-art" => vec![
+                vec!["--font", "--color", "always"],
+                vec!["--font", "--color=always"],
+            ],
+            "mossaic-glyphs" => vec![vec!["--color", "always"], vec!["--color=always"]],
+            // The chart's colour comes from the terminal, not a flag; check the
+            // `=` form on one it does take.
+            _ => vec![
+                vec!["--demo", "--png", "/dev/null", "--theme", "light"],
+                vec!["--demo", "--png", "/dev/null", "--theme=light"],
+            ],
+        };
+        let mut outcomes = Vec::new();
+        for args in &colour_args {
+            let out = run(&args.to_vec());
+            outcomes.push((
+                out.status.success(),
+                String::from_utf8_lossy(&out.stdout).contains('\x1b'),
+            ));
+        }
+        assert_eq!(
+            outcomes[0], outcomes[1],
+            "{name}: the `=` form behaves differently"
+        );
+        assert!(outcomes[0].0, "{name}: the spaced form should work at all");
+
+        // A missing value says so rather than swallowing the next argument.
+        let flag = match name {
+            "mossaic-glyphs" => "--color",
+            _ => "--year",
+        };
+        let out = run(&[flag]);
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(out.status.code(), Some(2), "{name} {flag}: {error}");
+        assert!(
+            error.contains("needs a value") || error.contains("wants a"),
+            "{name} {flag}: {error}"
+        );
+    }
+}

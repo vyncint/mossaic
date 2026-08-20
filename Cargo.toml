@@ -18,7 +18,7 @@ readme = "README.md"
 # The chart is what `cargo run` means; `mossaic-art` and `mossaic-glyphs` are asked for by name.
 default-run = "mossaic"
 # Kept out of the published archive: they serve the repository, not the crate.
-exclude = [".github/*", "action/*", "docs/*", "deny.toml", "rust-toolchain.toml"]
+exclude = [".github/*", ".claude/*", "action/*", "docs/*", "deny.toml", "rust-toolchain.toml"]
 
 [package.metadata.docs.rs]
 all-features = true

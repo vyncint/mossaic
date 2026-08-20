@@ -108,6 +108,55 @@ impl Image {
         }
     }
 
+    /// A rounded-rect outline `width` thick, from the same signed distance as
+    /// [`Image::rounded_rect`] so it lands in exactly the same place: the annulus
+    /// between the outer edge and that edge brought in by `width`.
+    ///
+    /// A filled rect cannot draw this, and a day that has not happened has no
+    /// square to put a ring around — but it can still hold the cursor, and the
+    /// character styles draw one there.
+    pub fn rounded_ring(
+        &mut self,
+        at: (f32, f32),
+        side: f32,
+        radius: f32,
+        width: f32,
+        color: Rgb,
+        alpha: f32,
+    ) {
+        let (x, y) = at;
+        let coverage = |px: isize, py: isize, x: f32, y: f32, side: f32, radius: f32| -> f32 {
+            let radius = radius.clamp(0.0, side / 2.0);
+            let (cx, cy) = (x + side / 2.0, y + side / 2.0);
+            let half = side / 2.0 - radius;
+            let dx = (px as f32 + 0.5 - cx).abs() - half;
+            let dy = (py as f32 + 0.5 - cy).abs() - half;
+            let outside = dx.max(0.0).hypot(dy.max(0.0));
+            let distance = outside + dx.max(dy).min(0.0) - radius;
+            (0.5 - distance).clamp(0.0, 1.0)
+        };
+        let low = |v: f32| (v.floor() as isize).max(0);
+        let high = |v: f32, limit: usize| (v.ceil() as isize + 1).min(limit as isize);
+        let inner = (side - 2.0 * width).max(0.0);
+        for py in low(y)..high(y + side, self.height) {
+            for px in low(x)..high(x + side, self.width) {
+                let outer = coverage(px, py, x, y, side, radius);
+                let hole = coverage(
+                    px,
+                    py,
+                    x + width,
+                    y + width,
+                    inner,
+                    (radius - width).max(0.0),
+                );
+                let ring = (outer - hole).clamp(0.0, 1.0) * alpha;
+                if ring > 0.0 {
+                    self.blend(px as usize, py as usize, color, ring);
+                }
+            }
+        }
+    }
+
     /// `color` over whatever is already there, straight alpha.
     fn blend(&mut self, x: usize, y: usize, color: Rgb, alpha: f32) {
         let under = self.pixels[y * self.width + x];
@@ -175,7 +224,15 @@ fn square(cell: (u16, u16)) -> (f32, f32, f32) {
     // Square regardless of the font's aspect ratio: the pitch is only square when a
     // cell is exactly twice as tall as it is wide, so take the smaller side.
     let side = (pitch_w.min(pitch_h) * SQUARE_OF_PITCH).round().max(3.0);
-    ((pitch_w - side) / 2.0, (pitch_h - side) / 2.0, side)
+    // Rounded, like the side: a half-pixel offset made the square soft on one
+    // axis and crisp on the other — at a 9x19 cell, an opaque extent of 12x11
+    // where 12x12 was drawn. Where the slack is odd one edge gets the extra
+    // pixel, which is a pixel of asymmetry instead of two of blur.
+    (
+        ((pitch_w - side) / 2.0).round(),
+        ((pitch_h - side) / 2.0).round(),
+        side,
+    )
 }
 
 /// Draw one day at `(x, y)` in image space.
@@ -204,19 +261,15 @@ fn day(
             image.rounded_rect(x + half, y + half, side - width, radius - half, fill, 1.0);
         }
         None => {
-            // The border first, then the fill inset by it: that is what a 0.5px
-            // border of a 5% colour is, and at 5% it reads as a barely-there edge
-            // rather than an outline — which is exactly how it reads in a browser.
+            // The square at its full size, then the hairline border *over* its
+            // edge. Inset instead, the border shrank every coloured cell: at a
+            // 10x20 cell the green measured 14px in a 20px pitch — 0.700 — where
+            // github.com's is 11 on 14, or 0.786. A 5%-alpha border only reads as
+            // a border when it is composited over something; over the terminal
+            // background it was invisible, so the cell simply looked smaller.
             let border = (side * BORDER_OF_SQUARE).max(0.5);
-            image.rounded_rect(x, y, side, radius, palette.edge, EDGE_ALPHA);
-            image.rounded_rect(
-                x + border,
-                y + border,
-                side - 2.0 * border,
-                radius - border,
-                fill,
-                1.0,
-            );
+            image.rounded_rect(x, y, side, radius, fill, 1.0);
+            image.rounded_ring((x, y), side, radius, border, palette.edge, EDGE_ALPHA);
         }
     }
 }
@@ -275,8 +328,23 @@ pub fn patch(level: Option<u8>, ring: Option<Ring>, palette: &Palette, cell: (u1
         usize::from(cell.0) * usize::from(COLUMNS_PER_DAY),
         usize::from(cell.1),
     );
-    if let Some(level) = level {
-        day(&mut image, dx, dy, side, palette.cell(level), palette, ring);
+    match (level, ring) {
+        (Some(level), ring) => day(&mut image, dx, dy, side, palette.cell(level), palette, ring),
+        // No square to draw, but the cursor can be walked into the future and the
+        // detail line names the day it is on. Drawing nothing at all left it
+        // invisible in pixel mode while every bordered style showed it.
+        (None, Some(ring)) => {
+            let width = (side * RING_OF_SQUARE).max(1.0);
+            image.rounded_ring(
+                (dx - width / 2.0, dy - width / 2.0),
+                side + width,
+                side * RADIUS_OF_SQUARE + width / 2.0,
+                width,
+                ring.color(palette),
+                1.0,
+            );
+        }
+        (None, None) => {}
     }
     image
 }
@@ -519,6 +587,9 @@ pub struct Painter {
     pub protocol: Protocol,
     /// One character cell in pixels, which sets the image scale.
     pub cell: (u16, u16),
+    /// Columns the terminal has, so clearing cells for a sixel cannot write past
+    /// the last one and wrap over the rows below.
+    pub width: u16,
     background: Rgb,
     base: Option<Painted>,
     marks: [Option<Mark>; 2],
@@ -531,6 +602,7 @@ impl Painter {
         Self {
             protocol,
             cell,
+            width: u16::MAX,
             background,
             base: None,
             marks: [None; 2],
@@ -670,7 +742,7 @@ impl Painter {
                 "\x1b[{};{}H\x1b[0m{}",
                 at.1 + row + 1,
                 at.0 + 1,
-                " ".repeat(usize::from(columns))
+                " ".repeat(usize::from(columns.min(self.width.saturating_sub(at.0))))
             )?;
         }
         Ok(())

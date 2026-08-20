@@ -284,7 +284,7 @@ fn describe_alphabet() -> String {
 /// without going dark for most of the year.
 ///
 /// The catch is that the difference has to be visible, and GitHub's five shades
-/// are not evenly spaced. Adjacent levels come as close as ΔE 10.8; levels two
+/// are not evenly spaced. Adjacent levels come as close as ΔE 9.1; levels two
 /// or more apart never fall below ΔE 35.4. [`Shades::worst`] measures it across
 /// every palette a reader might be looking at.
 ///

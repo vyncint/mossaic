@@ -95,7 +95,7 @@
 //!
 //! # Asking the terminal
 //!
-//! [`term::probe`] asks rather than guesses: one write, four questions, one round
+//! [`term::probe`] asks rather than guesses: one write, five questions, one round
 //! trip, and a deadline for the terminals that stay silent. What comes back
 //! decides the protocol, the image scale, and whether the palette is the light
 //! one or the dark one.

@@ -8,8 +8,11 @@
 #   .github/scripts/extract-changelog.sh v0.1.0       # tag form also fine
 #
 # tests:
-#   .github/scripts/extract-changelog.sh Unreleased   # prints current section
+#   .github/scripts/extract-changelog.sh 0.3.1        # a released section
 set -euo pipefail
+
+# Run from anywhere: the changelog lives beside this script, two levels up.
+cd "$(dirname "$0")/../.."
 
 version="${1:?usage: extract-changelog.sh <version|vX.Y.Z|Unreleased>}"
 version="${version#v}"

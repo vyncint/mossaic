@@ -28,20 +28,29 @@ Install it from https://cli.github.com, then run `gh auth login`.";
 
 /// Fetch one calendar year. Every day of the year is kept, including ones still to
 /// come; those are flagged `future` so they can be drawn as empty cells.
-pub fn fetch(login: &str, year: i32) -> Result<Calendar, String> {
+///
+/// `today` is which day the year is read as of — the clock, unless the caller was
+/// told otherwise. It decides only what counts as still to come.
+pub fn fetch(login: &str, year: i32, today: NaiveDate) -> Result<Calendar, String> {
     let from = format!("{year}-01-01T00:00:00Z");
     let to = format!("{year}-12-31T23:59:59Z");
     let body = run_query(&[("login", login), ("from", &from), ("to", &to)])?;
-    parse(year, &body, Some(Local::now().date_naive()))
+    parse(year, &body, Some(today))
 }
 
-/// Load a calendar from a saved response instead of calling gh. A snapshot has no
-/// notion of "now", so every day in it counts as elapsed and is drawn — which is
-/// what makes it useful for previewing a year that has not happened.
-pub fn from_file(path: &str) -> Result<Calendar, String> {
+/// Load a calendar from a saved response instead of calling gh.
+///
+/// `now` is `None` unless the caller was given a date to read it as of. A snapshot
+/// then has no notion of "now", so every day in it counts as elapsed and is drawn
+/// — which is what makes it useful for previewing a year that has not happened.
+pub fn from_file(path: &str, now: Option<NaiveDate>) -> Result<Calendar, String> {
     let body =
         std::fs::read_to_string(path).map_err(|error| format!("could not read {path}: {error}"))?;
-    parse(Local::now().year(), &body, None)
+    parse(
+        now.map_or_else(|| Local::now().year(), |date| date.year()),
+        &body,
+        now,
+    )
 }
 
 /// The authenticated user, used as the default when no username is given.
@@ -90,7 +99,13 @@ fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calen
 
     // Everything below this line came from somewhere else, so it is stripped of
     // control characters before it can reach a terminal.
-    if let Some(message) = resp.errors.into_iter().flatten().next().map(|e| e.message) {
+    if let Some(error) = resp.errors.into_iter().flatten().next() {
+        // `message` is what GitHub always sends and never promises. Requiring it
+        // turned a real failure into "unexpected response from gh: missing field
+        // `message`", which describes our parser rather than their answer.
+        let message = error
+            .message
+            .unwrap_or_else(|| "GitHub reported an error with no message".to_string());
         return Err(crate::printable(&message));
     }
     let user = resp
@@ -100,6 +115,8 @@ fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calen
 
     let calendar = &user.contributions.calendar;
     let mut days = Vec::with_capacity(371);
+    // Which days arrived with a shade this version has never heard of.
+    let mut unknown: Vec<bool> = Vec::with_capacity(371);
     for week in &calendar.weeks {
         for raw in &week.days {
             let date = NaiveDate::parse_from_str(&raw.date, "%Y-%m-%d")
@@ -107,12 +124,37 @@ fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calen
             days.push(Day {
                 date,
                 count: raw.count,
-                level: level_of(&raw.level),
+                // Filled in below when GitHub named a shade we do not know.
+                level: level_of(&raw.level).unwrap_or(0),
                 future: now.is_some_and(|today| date > today),
             });
+            unknown.push(level_of(&raw.level).is_none());
         }
     }
+    // A shade we do not recognise used to become level 0, so a day with hundreds
+    // of contributions was painted as an empty one — pixel-identical to a year
+    // with nothing in it, while the header reported a full one. Nothing
+    // downstream re-derives a level, so the fallback belongs here. We own the
+    // exact rule GitHub uses; `art::level` is it.
+    if unknown.iter().any(|missing| *missing) {
+        let peak = days.iter().map(|day| day.count).max().unwrap_or(0);
+        for (day, missing) in days.iter_mut().zip(&unknown) {
+            if *missing {
+                day.level = crate::art::level(day.count, peak);
+            }
+        }
+    }
+
     days.sort_unstable_by_key(|d| d.date);
+    // Two records for one day is malformed, and the grid keeps whichever the sort
+    // happened to put last — so the total exceeded the sum of the visible days and
+    // which day survived was luck. Refused rather than picked between.
+    if let Some(pair) = days.windows(2).find(|pair| pair[0].date == pair[1].date) {
+        return Err(format!(
+            "that calendar lists {} twice; a day has one record",
+            pair[0].date
+        ));
+    }
     // A calendar is one year plus the partial weeks at its ends. Without this,
     // a file naming two dates millennia apart makes the grid below allocate a
     // column for every week between them — gigabytes, from a few hundred bytes
@@ -156,13 +198,15 @@ fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calen
     ))
 }
 
-fn level_of(level: &str) -> u8 {
+/// GitHub's own name for a shade, or `None` for one this version has not met.
+fn level_of(level: &str) -> Option<u8> {
     match level {
-        "FIRST_QUARTILE" => 1,
-        "SECOND_QUARTILE" => 2,
-        "THIRD_QUARTILE" => 3,
-        "FOURTH_QUARTILE" => 4,
-        _ => 0,
+        "NONE" => Some(0),
+        "FIRST_QUARTILE" => Some(1),
+        "SECOND_QUARTILE" => Some(2),
+        "THIRD_QUARTILE" => Some(3),
+        "FOURTH_QUARTILE" => Some(4),
+        _ => None,
     }
 }
 
@@ -217,5 +261,5 @@ struct RawDay {
 
 #[derive(Deserialize)]
 struct GraphQlError {
-    message: String,
+    message: Option<String>,
 }

@@ -163,18 +163,31 @@ impl Calendar {
     }
 
     /// Streaks and totals, counted over the days that have happened.
-    pub fn stats(&self) -> Stats {
-        let days: Vec<Day> = self.elapsed().collect();
+    ///
+    /// `today` is which day "current" means. A streak is a run of *consecutive
+    /// dates*, so both loops compare dates rather than positions in a list: a
+    /// calendar that lists only its busy days — a legal saved response, and what
+    /// a hand-rolled `gh api` snapshot looks like — used to report ten
+    /// non-adjacent Mondays as a ten-day streak.
+    pub fn stats(&self, today: NaiveDate) -> Stats {
         let mut stats = Stats::default();
 
-        let mut run = 0;
-        for day in &days {
+        // The longest run, and the totals. A run continues only into the very
+        // next date; a gap in the calendar breaks it, exactly as a quiet day does.
+        let mut run = 0u32;
+        let mut previous: Option<NaiveDate> = None;
+        for day in self.elapsed() {
             if day.count == 0 {
                 run = 0;
+                previous = None;
                 continue;
             }
             stats.active_days += 1;
-            run += 1;
+            run = match previous {
+                Some(prev) if prev.succ_opt() == Some(day.date) => run + 1,
+                _ => 1,
+            };
+            previous = Some(day.date);
             if run > stats.longest_streak {
                 stats.longest_streak = run;
             }
@@ -183,13 +196,28 @@ impl Calendar {
             }
         }
 
-        // Count back from the end, tolerating a quiet final day so "today, so far" doesn't
-        // read as a broken streak. Streaks are clipped to the fetched year.
-        let mut tail = days.iter().rev().peekable();
-        if tail.peek().is_some_and(|d| d.count == 0) {
-            tail.next();
+        // The run ending today, walked back a date at a time. A quiet *today* is
+        // tolerated so "today, so far" does not read as a broken streak — which
+        // is a statement about today and not about the last day of any year: a
+        // finished year's last elapsed day is December 31st, and dropping that
+        // one unconditionally reported a decade-old year as a current streak.
+        let mut walk = today;
+        if self
+            .day(today)
+            .is_some_and(|day| !day.future && day.count == 0)
+        {
+            walk = today.pred_opt().unwrap_or(today);
         }
-        stats.current_streak = tail.take_while(|d| d.count > 0).count() as u32;
+        while let Some(day) = self.day(walk) {
+            if day.future || day.count == 0 {
+                break;
+            }
+            stats.current_streak += 1;
+            match walk.pred_opt() {
+                Some(previous) => walk = previous,
+                None => break,
+            }
+        }
 
         stats
     }
@@ -202,10 +230,16 @@ impl Calendar {
 /// way real ones do, because a demo of a contribution chart that looks nothing
 /// like a contribution chart demonstrates the wrong thing.
 pub fn demo(year: i32) -> Calendar {
-    let (first, last) = (
-        NaiveDate::from_ymd_opt(year, 1, 1).expect("a real year"),
-        NaiveDate::from_ymd_opt(year, 12, 31).expect("a real year"),
-    );
+    // A year no calendar can hold gets an empty one rather than a panic. Not
+    // reachable from either CLI — `cli::year` bounds it — but this is a public
+    // constructor, and the others in this module stopped panicking on their
+    // arguments in 0.3.0.
+    let (Some(first), Some(last)) = (
+        NaiveDate::from_ymd_opt(year, 1, 1),
+        NaiveDate::from_ymd_opt(year, 12, 31),
+    ) else {
+        return Calendar::build("demo".to_string(), year, 0, vec![year], Vec::new());
+    };
 
     let mut seed: u32 = 0x9e37_79b9 ^ (year as u32);
     let mut next = move || {

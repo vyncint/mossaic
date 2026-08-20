@@ -9,7 +9,7 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, 
 
 use crate::calendar::Calendar;
 use crate::github;
-use crate::graphics::{Mark, Painter, Protocol, Ring, Scene};
+use crate::graphics::{Mark, Painter, Protocol, Ring, Scene, COLUMNS_PER_DAY};
 use crate::primer::{Appearance, Palette, Season};
 use crate::term::{self, Caps};
 use crate::ui::{Cells, Layout};
@@ -65,6 +65,9 @@ pub struct Options {
     /// an image cannot be lined up with the labels around it, so a terminal that
     /// answers nothing gets text cells however capable it is.
     pub cell: Option<(u16, u16)>,
+    /// Which day to read the year as of. `None` is the clock — and, for a saved
+    /// calendar, means every day in it counts as elapsed.
+    pub today: Option<NaiveDate>,
 }
 
 impl Default for Options {
@@ -75,6 +78,7 @@ impl Default for Options {
             season: None,
             mouse: true,
             cell: None,
+            today: None,
         }
     }
 }
@@ -180,6 +184,9 @@ pub struct App {
     /// Where the last frame put the grid. Set by the renderer, read by the mouse
     /// and the painter.
     pub layout: Option<Layout>,
+    /// Columns the footer may use, set by the renderer each frame so it can drop
+    /// what will not fit rather than being cut mid-word.
+    pub footer_width: u16,
     /// Whether mouse reporting is on; `m` toggles it.
     pub mouse: bool,
     /// Whether the help overlay is up. `?` opens it, any key closes it.
@@ -193,6 +200,14 @@ pub struct App {
     pub tick: u64,
     /// Set when the event loop should stop.
     pub quit: bool,
+    /// Which day to read the year as of, when the clock is not the answer.
+    today: Option<NaiveDate>,
+    /// The protocol that was asked for, so the chart can say when it could not
+    /// be used rather than quietly drawing characters.
+    wanted: Graphics,
+    /// `--cell`, which outranks anything the terminal reports and survives a
+    /// re-measure.
+    cell_override: Option<(u16, u16)>,
     seq: u64,
     tx: Sender<Fetched>,
     rx: Receiver<Fetched>,
@@ -219,12 +234,16 @@ impl App {
             caps: Caps::default(),
             gfx: None,
             layout: None,
+            footer_width: 0,
             mouse: false,
             help: false,
             redraw: false,
             source,
             tick: 0,
             quit: false,
+            today: None,
+            wanted: Graphics::Auto,
+            cell_override: None,
             seq: 0,
             tx,
             rx,
@@ -237,6 +256,9 @@ impl App {
     pub fn configure(&mut self, caps: Caps, options: Options) {
         self.caps = caps;
         self.mouse = options.mouse;
+        self.today = options.today;
+        self.wanted = options.graphics;
+        self.cell_override = options.cell;
         let appearance = options
             .appearance
             .or_else(|| caps.background.map(Appearance::from_background))
@@ -248,9 +270,52 @@ impl App {
         self.gfx = painter(&caps, &options, &self.palette);
     }
 
+    /// Which day the chart is read as of: `--today` when it was given, otherwise
+    /// the clock. An input rather than an ambient fact, the way the tracker's has
+    /// been since 0.3.0.
+    pub fn today(&self) -> NaiveDate {
+        self.today.unwrap_or_else(|| Local::now().date_naive())
+    }
+
+    /// What a saved calendar should be read as of: nothing, unless a date was
+    /// given. A snapshot of a year that has not happened is the point of `--file`,
+    /// and it only works while every day in it counts as elapsed.
+    fn file_now(&self) -> Option<NaiveDate> {
+        self.today
+    }
+
     /// Whether this terminal can draw pixel cells.
     pub fn pixels_available(&self) -> bool {
         self.gfx.is_some()
+    }
+
+    /// Whether a protocol was asked for and could not be used. The chart says so
+    /// under the legend: asking for pixels and silently getting characters is the
+    /// one outcome `--capabilities` explains and the chart did not.
+    pub fn graphics_refused(&self) -> Option<&'static str> {
+        match (self.wanted, self.gfx.is_some()) {
+            (Graphics::Kitty, false) => Some("kitty"),
+            (Graphics::Sixel, false) => Some("sixel"),
+            _ => None,
+        }
+    }
+
+    /// Ask the terminal how big a character cell is again.
+    ///
+    /// The size was read once at startup, so changing the font left the painter
+    /// scaling a stale geometry — and `docs/DESIGN.md` promises the ratios are
+    /// "scaled to whatever a character cell measures". `TIOCGWINSZ` answers this
+    /// without another probe, so a resize can afford to ask.
+    pub fn remeasure(&mut self) {
+        let Some(painter) = self.gfx.as_mut() else {
+            return;
+        };
+        if let Some(cell) = self.cell_override.or_else(|| term::cell_size(&self.caps)) {
+            if cell != painter.cell {
+                painter.cell = cell;
+                painter.invalidate();
+            }
+        }
     }
 
     /// The protocol in use, or `text` where there is none.
@@ -264,6 +329,7 @@ impl App {
         let (seq, tx) = (self.seq, self.tx.clone());
         let (login, year) = (self.login.clone(), self.year);
         let source = self.source.clone();
+        let (today, file_now) = (self.today(), self.file_now());
         self.load = Load::Loading;
         self.hover = None;
         // The chart is about to be replaced by a spinner, and the rows it occupied
@@ -272,8 +338,8 @@ impl App {
         self.redraw = true;
         thread::spawn(move || {
             let result = match source {
-                Source::GitHub => github::fetch(&login, year),
-                Source::File(path) => github::from_file(&path),
+                Source::GitHub => github::fetch(&login, year, today),
+                Source::File(path) => github::from_file(&path, file_now),
                 Source::Demo => Ok(crate::calendar::demo(year)),
             };
             let _ = tx.send(Fetched { seq, result });
@@ -294,7 +360,7 @@ impl App {
                     self.login = calendar.login.clone();
                     self.year = calendar.year;
                     // Start on today when it is in range, otherwise the newest day shown.
-                    let today = Local::now().date_naive();
+                    let today = self.today();
                     self.cursor = if calendar.day(today).is_some() {
                         today
                     } else {
@@ -365,7 +431,10 @@ impl App {
                 self.cells = self.cells.next(self.pixels_available());
                 self.redraw = true;
             }
-            KeyCode::Char('?') | KeyCode::F(1) => self.help = true,
+            KeyCode::Char('?') | KeyCode::F(1) => {
+                self.help = true;
+                self.redraw = true;
+            }
             KeyCode::Char('m') => {
                 self.mouse = !self.mouse;
                 self.hover = None;
@@ -406,19 +475,27 @@ impl App {
     /// three: `1003` motion tracking is the one that makes hovering work, and where
     /// it is missing — Terminal.app, some multiplexers — a click still lands.
     pub fn on_mouse(&mut self, event: MouseEvent) {
-        if matches!(self.mode, Mode::Input(_)) {
+        // The overlay says "any key closes this", and a wheel notch is not a key.
+        // Acting behind it changed the year and started a fetch for a year the
+        // reader could not see.
+        if matches!(self.mode, Mode::Input(_)) || self.help {
             return;
         }
         match event.kind {
             MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left) => {
                 self.hover = self.day_at(event.column, event.row);
             }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(date) = self.day_at(event.column, event.row) {
+            MouseEventKind::Down(MouseButton::Left) => match self.day_at(event.column, event.row) {
+                Some(date) => {
                     self.cursor = date;
                     self.hover = Some(date);
                 }
-            }
+                // A click that misses a day used to leave the last tooltip on
+                // screen, still pointing at an unrelated date. On a terminal that
+                // reports clicks but not motion — which is the case this arm
+                // exists for — no later event corrects it.
+                None => self.hover = None,
+            },
             MouseEventKind::ScrollUp => self.change_year(-1),
             MouseEventKind::ScrollDown => self.change_year(1),
             _ => {}
@@ -464,7 +541,7 @@ impl App {
             Edge::First => calendar.first_date(),
             Edge::Last => calendar.last_date(),
             Edge::Today => {
-                let today = Local::now().date_naive();
+                let today = self.today();
                 calendar.day(today).map(|_| today)
             }
         };
@@ -487,8 +564,13 @@ impl App {
                 self.years[next as usize]
             }
             // Still loading, or a year outside the contribution set (--year 2010):
-            // fall back to stepping by one so those years stay reachable.
-            Err(_) => self.year + delta,
+            // fall back to stepping by one so those years stay reachable — but
+            // only as far as `--year` itself would accept. Walking past it was a
+            // `gh` subprocess per keypress for a year the CLI refuses to be given.
+            Err(_) => match self.year.checked_add(delta) {
+                Some(year) if crate::cli::YEARS.contains(&year) => year,
+                _ => return,
+            },
         };
         if target != self.year {
             self.year = target;
@@ -502,16 +584,24 @@ impl App {
     pub fn paint(&mut self, out: &mut impl Write) -> io::Result<()> {
         // Split borrows: the scene reads the loaded year and the palette, the
         // painter is mutated. Disjoint fields, so both can be held at once.
-        let scene = scene(
-            &self.load,
-            self.layout,
-            &self.palette,
-            self.cursor,
-            self.hover,
-        );
+        // Nothing while the overlay is up. A kitty image sits at `z=-2`, which
+        // draws *over* a cell background rather than under it, and the help panel
+        // sets one — so the chart showed through its text.
+        let scene = match self.help {
+            true => None,
+            false => scene(
+                &self.load,
+                self.layout,
+                &self.palette,
+                self.cursor,
+                self.hover,
+            ),
+        };
+        let width = self.layout.map_or(u16::MAX, |layout| layout.right);
         let Some(painter) = self.gfx.as_mut() else {
             return Ok(());
         };
+        painter.width = width;
         match scene {
             Some(scene) => painter.paint(out, &scene),
             None => painter.clear(out),
@@ -558,6 +648,12 @@ fn scene<'a>(
     hover: Option<NaiveDate>,
 ) -> Option<Scene<'a>> {
     let layout = layout.filter(|layout| layout.cells == Cells::Pixels && layout.has_room())?;
+    // The legend swatches are an image too, and `has_room` only ever covered the
+    // grid — so they were placed off-screen and the terminal clamped them onto
+    // whatever row was last, leaving a hole in the frame.
+    let legend = layout
+        .legend
+        .filter(|(x, y)| *y < layout.bottom && x + 5 * COLUMNS_PER_DAY <= layout.right);
     let Load::Ready(calendar) = load else {
         return None;
     };
@@ -601,7 +697,7 @@ fn scene<'a>(
         key: key(&calendar.login, calendar.year, palette, &levels),
         palette,
         grid: (layout.x, layout.y),
-        legend: layout.legend,
+        legend,
         levels,
         marks: [cursored, hovered],
     })
