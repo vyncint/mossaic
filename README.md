@@ -17,10 +17,12 @@ colours, with a tooltip that follows the mouse.
 
 ![a year of contributions drawn as rounded squares, spelling VYNCINT](art/pixel-cells.png)
 
-That is a real year, drawn in a real terminal. Every cell is an image:
-anti-aliased rounded squares at github.com's own geometry, sent over the kitty
-graphics protocol or sixel, lined up exactly with the character cells so the
-labels around them stay text.
+That is a real year, and those are the pixels a terminal gets: the image above is
+`mossaic --file art/vyncint-2026.json --cell 9x19 --png art/pixel-cells.png`,
+which runs the same rasteriser the chart sends over the wire. Every cell is an
+image — anti-aliased rounded squares at github.com's own geometry, sent over the
+kitty graphics protocol or sixel, lined up exactly with the character cells so
+the labels around them stay text.
 
 ## Contents
 

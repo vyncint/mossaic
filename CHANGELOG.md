@@ -141,6 +141,10 @@ listed under a **Changed** or **Removed** heading.
   direction ("about 115×26" for the bordered grid, against 166×27), and are now
   measured in a pty: 112×19 for pixel or square cells, 165 columns for rounded
   corners. (#31, #33)
+- **The README's screenshot was rendered with the old geometry** — the one image
+  whose entire job is showing that mossaic draws github.com's cell size. It is
+  regenerated, and the caption now names the `--png` command that produces it, so
+  the next reader can check it rather than trust it. (#20, #33)
 - **The README's terminal mock was several versions stale** — no `? help` in the
   footer, no streak in the summary, no `auto:` on the legend, and an active-day
   count from before `--today`. It is regenerated from the binary. (#33)
