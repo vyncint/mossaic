@@ -9,6 +9,8 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-20
+
 ### Added
 
 - **`--today DATE` on the chart, not just the tracker.** 0.3.0 made time an input
@@ -530,7 +532,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/vyncint/mossaic/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vyncint/mossaic/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vyncint/mossaic/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vyncint/mossaic/compare/v0.1.1...v0.2.0
