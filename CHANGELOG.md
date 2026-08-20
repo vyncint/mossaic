@@ -134,6 +134,11 @@ listed under a **Changed** or **Removed** heading.
 
 ### Documented
 
+- **The column and row minimums the README quotes were both wrong** — "about 112
+  columns" and "about 115×26" against a measured 110×17 and 164×25. The chart's own
+  advice line names the number it wants (#31), so the two disagreed in front of the
+  same reader. Both figures are now asserted in `auto_picks_the_most_faithful_style_that_fits`.
+  (#33)
 - **Which palette the legibility numbers describe.** `Palette::separation` measures
   the 24-bit values whatever the terminal can show, and art is read in a browser, so
   those are the right numbers for the decision — but `docs/ART.md` now says so

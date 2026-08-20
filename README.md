@@ -107,8 +107,8 @@ cells      kitty
   `xterm -ti vt340` all draw one of them; GNOME Terminal and Ptyxis draw
   neither, because VTE ships sixel switched off. Nothing is lost but the
   pixels — the chart still draws in block sextants.
-- **A window under 112 columns** falls back too, and the chart says so under
-  the legend rather than leaving you guessing.
+- **A window under 110 columns** falls back too, and the chart says so under
+  the legend rather than leaving you guessing — naming the number it wants.
 - Either way, `mossaic --png chart.png` renders the same image to a file from
   any terminal at all.
 
@@ -312,10 +312,10 @@ palette is degraded on purpose, and what the capability probe actually sends.
   clipped at the year boundary — and the *current* streak is the run ending on
   the day the year is read as of, so a year that has ended has none. `--today`
   moves that day.
-- Pixel and square cells need about 112 columns, the bordered grid about 115×26.
-  Below that `Auto` drops to a borderless style, where a future day and a day off the
-  end of the year both look blank; `d` still forces the others if you would rather
-  they clipped.
+- A 53-week year needs 110 columns and 17 rows for pixel or square cells, 163 for
+  rounded corners, and 164×25 for the bordered grid. Below that `Auto` drops to a
+  borderless style, where a future day and a day off the end of the year both look
+  blank; `d` still forces the others if you would rather they clipped.
 - Private contributions appear only if the authenticated user can see them.
 
 ## Layout

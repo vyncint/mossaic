@@ -48,7 +48,7 @@ const ROUND: &str = "\u{1FB2B}\u{1FB1B}";
 /// `chart` could push ten, so at a height of exactly `cells.height() + 11` the
 /// note evicted the only line that lists the keys. Budgeting it costs a slightly
 /// smaller style at that one height, which is the better of the two failures.
-const CHROME_ROWS: usize = 10;
+pub(crate) const CHROME_ROWS: usize = 10;
 
 /// A concrete cell layout, resolved from a [`CellStyle`] and the space available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

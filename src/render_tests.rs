@@ -155,6 +155,10 @@ fn auto_picks_the_most_faithful_style_that_fits() {
     assert_eq!(SQUARES.height(), 7);
     assert_eq!(ROUNDED.height(), 7);
     assert_eq!(GRID.height(), 15);
+    // The README's "Known limits" quotes these as terminal sizes, so they are the
+    // grid plus the chrome around it. If one moves, that line moves with it.
+    assert_eq!(SQUARES.height() + crate::ui::CHROME_ROWS, 17);
+    assert_eq!(GRID.height() + crate::ui::CHROME_ROWS, 25);
 
     let auto = |width, height| resolve(CellStyle::Auto, 53, width, height, false);
     assert_eq!(
