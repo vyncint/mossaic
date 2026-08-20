@@ -335,6 +335,7 @@ palette is degraded on purpose, and what the capability probe actually sends.
 | `src/bin/mossaic-glyphs.rs` | what a terminal makes of the fallback cells |
 | `src/render_tests.rs` | in-process tests: layout, colour, encoders, art, PNG |
 | `tests/smoke.rs` | the chart in a real pty, through [termlens] |
+| `tests/pixels.rs` | the pixel path in a pty that answers the probe |
 | `tests/art_cli.rs` | the other two binaries, run as a user runs them |
 | `action/` | the GitHub Action, and the guide to scheduling it |
 | `docs/` | [the art guide](docs/ART.md), [design notes](docs/DESIGN.md), [releasing](docs/RELEASING.md) |
@@ -345,13 +346,18 @@ palette is degraded on purpose, and what the capability probe actually sends.
 cargo test                          # everything, no network
 cargo test --lib                    # grid maths, colour, the encoders, the art font
 cargo test --test smoke             # the real binary, in a real pty
+cargo test --test pixels            # …in a pty that says it can draw pixels
 cargo test -- --ignored             # the two that call the GitHub API
 ```
 
-Two layers, because they catch different things: in-process tests check what is
+Three layers, because they catch different things. In-process tests check what is
 a function of its inputs, and the encoders are checked *against the formats* —
 the sixel is decoded back into pixels and compared to what the rasteriser drew.
-Out of process, [termlens] spawns the real binary in a real PTY.
+Out of process, [termlens] spawns the real binary in a real PTY. And because that
+PTY can be told which terminal it is simulating, the pixel path runs its own
+probe rather than being handed the answer: `tests/pixels.rs` asserts what goes out
+on the wire, including that a year over sixel really is an order of magnitude more
+bytes than the same year over kitty.
 
 [What belongs in which layer, and the two mistakes that make tests flaky, is in
 CONTRIBUTING.md §3](CONTRIBUTING.md#3-testing-policy).

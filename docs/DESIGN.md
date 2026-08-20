@@ -283,7 +283,7 @@ four for reasons that look like magic.
 
 ## 13. Testing
 
-Two layers, because they catch different things.
+Three layers, because they catch different things.
 
 **In process** covers what is a function of its inputs: layout, hit-testing,
 palettes, the art font, and both encoders — tested against the formats rather
@@ -297,9 +297,21 @@ around ratatui rather than through it. The theme test is the shape to copy — n
 flags, the terminal simply answers white to `OSC 11`, and the assertion reads
 Primer's light scale back off the screen.
 
-What the harness cannot reach is the image *bytes*: its emulator consumes DCS
-and APC strings, as a terminal that draws no pixels would. That is why the
-encoders are covered in process, and why `--png` exists — it renders the same
+**Out of process, with pixels** (`tests/pixels.rs`) is the layer that used to be
+unreachable rather than merely unasserted. mossaic decides whether to draw pixels
+by *asking* the terminal, so a harness answering no to every question could only
+be driven down the text path; the suite worked around that with
+`--graphics sixel --cell 10x20`, which forces the protocol and hands over the cell
+size — skipping the probe, the fallbacks and the auto choice. termlens 0.5 states
+which terminal is being simulated (`graphics(Graphics::Kitty)`,
+`cell_size(9, 19)`), so the real decision runs, and reports the payloads that went
+out by protocol and in bytes. The budgets in §4 and the diffing in §5 are checked
+against the wire because of it, rather than against the rasteriser.
+
+What the harness still cannot reach is what the images *look like*: its emulator
+consumes DCS and APC strings without rendering them, so it can say that 43 KB of
+sixel went out in three payloads and nothing at all about the picture. That is why
+the encoders are covered in process, and why `--png` exists — it renders the same
 image to a file, which separates "the rasteriser is wrong" from "the emission is
 wrong".
 
