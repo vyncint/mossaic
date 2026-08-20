@@ -9,6 +9,13 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- `Esc` no longer quits the chart in normal mode; it cancels the username
+  prompt and dismisses the help overlay, as the UI implies. `q` remains the
+  only quit key.
+
+
 ## [0.3.1] - 2026-08-20
 
 ### Added
