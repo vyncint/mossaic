@@ -9,7 +9,7 @@ getting along with terminals none of us has.
 ```sh
 git clone https://github.com/vyncint/mossaic
 cd mossaic
-cargo test          # 50-odd tests, hermetic and offline
+cargo test          # 130-odd tests, hermetic and offline
 cargo run           # the chart, for whoever `gh` is logged in as
 ```
 
@@ -36,14 +36,15 @@ that is `rust-version` in `Cargo.toml`, verified by the `msrv` job.
 | `src/{art,png}.rs` | the 5×5 font and its costing; a small PNG encoder |
 | `src/render_tests.rs` | in-process tests: layout, colour, encoders, art, PNG |
 | `tests/smoke.rs` | out-of-process tests: the real binary in a real PTY |
+| `tests/pixels.rs` | the same, in a PTY that answers the graphics probe |
 | `docs/ART.md` | drawing text into a graph, and tracking the plan |
 | `docs/DESIGN.md` | why the pixel path is shaped the way it is |
 | `docs/RELEASING.md` | how a version gets cut |
 
 ## 3. Testing policy
 
-Every behavioural change needs a test, and which of the two layers it belongs in
-is usually obvious:
+Every behavioural change needs a test, and which of the three layers it belongs
+in is usually obvious:
 
 - **In process** (`src/render_tests.rs`) for anything that is a function of
   inputs: layout maths, hit-testing, palettes, the encoders, the art font.
@@ -52,6 +53,14 @@ is usually obvious:
 - **Out of process** (`tests/smoke.rs`, through
   [termlens](https://crates.io/crates/termlens)) for anything that involves the
   event loop, the PTY, or escapes written around ratatui rather than through it.
+- **Out of process, with pixels** (`tests/pixels.rs`) for anything that depends on
+  the terminal *answering* the capability probe. Declare what is being simulated —
+  `.graphics(Graphics::Kitty).cell_size(9, 19)` — rather than forcing the outcome
+  with `--graphics`/`--cell`, so the probe, the fallbacks and the auto choice all
+  run. `Screen::graphics()` then reports what went out, by protocol and in bytes,
+  which is how a claim about the wire gets a check behind it. What it cannot tell
+  you is what the image *looks* like; that stays with the in-process encoder tests
+  and `--png`.
 
 Two rules that are easy to get wrong:
 
@@ -71,8 +80,9 @@ Two rules that are easy to get wrong:
   under `TZ=Pacific/Kiritimati`, which is a backstop rather than the rule.
 
 Anything user-visible in the terminal deserves a look in a real one too. The
-harness is a VT emulator; it agrees with terminals about text and knows nothing
-about pixels.
+harness is a VT emulator: it agrees with terminals about text, and about *whether*
+an image was sent and how large it was, but it does not draw one — so nothing in
+it can tell you the picture is right.
 
 If a change touches frames, waits or the event loop, run the flake hunter before
 asking for review — it is the whole suite, a hundred times, on both OSes:

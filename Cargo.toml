@@ -39,7 +39,7 @@ libc = "0.2"
 [dev-dependencies]
 # The end-to-end suite: the real binary, in a real PTY, asserted on the rendered
 # screen.
-termlens = "0.4.2"
+termlens = "0.5.0"
 
 [profile.release]
 lto = true

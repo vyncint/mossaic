@@ -9,6 +9,40 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Added
+
+- **`tests/pixels.rs`: the pixel path, end to end.** Eight tests over the half of
+  the program that was not merely unasserted but *unreachable*. mossaic decides
+  whether to draw pixels by asking the terminal, so a harness that answered no to
+  every question could only be driven down the text path — the suite worked around
+  that with `--graphics sixel --cell 10x20`, which forces the protocol and hands
+  over the cell size, skipping the probe, the fallbacks and the auto choice.
+  termlens 0.5 states which terminal is being simulated, so the real decision runs.
+
+  What that buys, beyond the probe itself: the byte budgets in `docs/DESIGN.md` §4
+  are now checked against the wire (a year is ~5 KB over kitty against ~44 KB of
+  sixel, and the test holds the order of magnitude the design decision rests on);
+  the diffing in §5 is checked the same way, since one cursor move costs under a
+  tenth of a year rather than re-sending it; the cell contract in §3 is asserted
+  through a terminal for the first time, with all seven grid rows left to the
+  painter while the month labels stay text; `--graphics text` is checked to send no
+  image at all on a terminal that could draw one; `Auto` is checked never to place
+  an image too wide to fit; and `--capabilities`, which had no test at all because
+  no harness could answer the questions it asks, is checked to agree with what the
+  chart then does.
+- **Two tests for behaviour no content assertion can see.** An idle chart repaints
+  on an 80 ms timer so the loading spinner can turn, and every one of those frames
+  shows exactly the right content — `printable_chars` is what shows that a settled
+  chart writes nothing at all. And mossaic ignores keys it does not bind silently,
+  which used to be the same screen as refusing them with a bell; `bells()` tells
+  the two apart.
+
+### Changed
+
+- **termlens 0.4.2 → 0.5.0** (dev-dependency). `send`, `send_str` and `paste`
+  return `Result` rather than panicking, so every input call in the suite now
+  propagates with `?` — 24 call sites, which is the whole migration.
+
 ## [0.3.0] - 2026-08-19
 
 ### Added

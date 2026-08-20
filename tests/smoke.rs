@@ -122,7 +122,7 @@ fn the_chart_draws_and_quits_cleanly() -> termlens::Result<()> {
     assert!(screen.contains("preview"), "{screen}");
     assert!(!screen.contains("[ ] year"), "{screen}");
 
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q'))?;
     let exit = t.wait_exit()?;
     assert!(exit.success(), "clean exit, got {exit:?}");
     assert!(
@@ -142,7 +142,7 @@ fn the_cursor_moves_by_day_and_by_week() -> termlens::Result<()> {
     // current year eventually — and every relative assertion below it shifts by
     // however far into the year that is. `End` is the same key the test exercises
     // later, so this costs no coverage.
-    t.send(Key::End);
+    t.send(Key::End)?;
     t.wait_frame(|s| s.contains("Fri, Dec 31 2027"))?;
 
     for (key, expected) in [
@@ -157,18 +157,18 @@ fn the_cursor_moves_by_day_and_by_week() -> termlens::Result<()> {
         (Key::Home, "Fri, Jan 1 2027"),
         (Key::End, "Fri, Dec 31 2027"),
     ] {
-        t.send(key);
+        t.send(key)?;
         t.wait_frame(|s| s.contains(expected))?;
     }
 
     // The range is a hard edge, not a wrap: four days back off the first day is
     // still the first day, so one day forward from there is the second.
-    t.send(Key::Home);
+    t.send(Key::Home)?;
     t.wait_frame(|s| s.contains("Fri, Jan 1 2027"))?;
     for _ in 0..4 {
-        t.send(Key::Up);
+        t.send(Key::Up)?;
     }
-    t.send(Key::Down);
+    t.send(Key::Down)?;
     t.wait_frame(|s| s.contains("Sat, Jan 2 2027"))?;
     Ok(())
 }
@@ -192,7 +192,7 @@ fn cell_styles_cycle_through_every_shape() -> termlens::Result<()> {
         "compact cells",
         "rounded cells",
     ] {
-        t.send(Key::Char('d'));
+        t.send(Key::Char('d'))?;
         t.wait_frame(|s| style(s) == expected)?;
     }
     Ok(())
@@ -262,10 +262,10 @@ fn mouse_reporting_can_be_given_back() -> termlens::Result<()> {
 
     // Mouse tracking takes click-to-select away from the terminal, so it has to
     // be possible to hand it back — and the footer has to say which state it is in.
-    t.send(Key::Char('m'));
+    t.send(Key::Char('m'))?;
     t.wait_frame(|s| s.mouse_mode() == termlens::MouseMode::None && s.contains("m mouse on"))?;
 
-    t.send(Key::Char('m'));
+    t.send(Key::Char('m'))?;
     t.wait_frame(|s| s.mouse_mode() != termlens::MouseMode::None && s.contains("m mouse off"))?;
     Ok(())
 }
@@ -407,7 +407,7 @@ fn a_missing_file_is_reported_not_swallowed() -> termlens::Result<()> {
         screen.contains("retry"),
         "and it offers a way out:\n{screen}"
     );
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q'))?;
     assert!(t.wait_exit()?.success());
     Ok(())
 }
@@ -418,7 +418,7 @@ fn the_help_overlay_answers_what_this_terminal_can_do() -> termlens::Result<()> 
     t.wait_frame(loaded)?;
     assert!(t.screen().contains("? help"), "the footer points at it");
 
-    t.send(Key::Char('?'));
+    t.send(Key::Char('?'))?;
     let help = t.wait_frame(|s| s.contains("This terminal"))?;
     for wanted in [
         "Moving",
@@ -447,7 +447,7 @@ fn the_help_overlay_answers_what_this_terminal_can_do() -> termlens::Result<()> 
     }
 
     // Modal and forgiving: whatever you press to get out of it, gets you out.
-    t.send(Key::Char('j'));
+    t.send(Key::Char('j'))?;
     t.wait_frame(|s| !s.contains("This terminal"))?;
     assert!(
         t.screen().contains("Less"),
@@ -478,7 +478,7 @@ fn the_demo_needs_no_account_and_no_network() -> termlens::Result<()> {
         "one year only, so no year keys"
     );
 
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q'))?;
     assert!(t.wait_exit()?.success());
     Ok(())
 }
@@ -500,12 +500,12 @@ fn years_users_and_errors() -> termlens::Result<()> {
     let year = chrono_year(&screen);
 
     // `[` and `]` step through the years GitHub reports contributions for.
-    t.send(Key::Char('['));
+    t.send(Key::Char('['))?;
     // The header shows the new year while the fetch is still in flight, so wait
     // for a frame that has the chart as well as the number.
     let earlier = t.wait_frame(|s| chrono_year(s) < year && loaded(s))?;
     assert!(earlier.contains("Dec 31"), "{earlier}");
-    t.send(Key::Char(']'));
+    t.send(Key::Char(']'))?;
     t.wait_frame(|s| chrono_year(s) == year && loaded(s))?;
 
     // The wheel does the same thing, for a hand already on the mouse.
@@ -517,25 +517,25 @@ fn years_users_and_errors() -> termlens::Result<()> {
     t.wait_frame(|s| chrono_year(s) == year && loaded(s))?;
 
     // A different user, then one that cannot exist.
-    t.send(Key::Char('u'));
+    t.send(Key::Char('u'))?;
     t.wait_frame(|s| s.contains("esc cancel"))?;
     for _ in 0..40 {
-        t.send(Key::Backspace);
+        t.send(Key::Backspace)?;
     }
-    t.send_str("octocat");
-    t.send(Key::Enter);
+    t.send_str("octocat")?;
+    t.send(Key::Enter)?;
     t.wait_frame(|s| s.contains("octocat") && loaded(s))?;
 
-    t.send(Key::Char('u'));
+    t.send(Key::Char('u'))?;
     t.wait_frame(|s| s.contains("esc cancel"))?;
     for _ in 0..40 {
-        t.send(Key::Backspace);
+        t.send(Key::Backspace)?;
     }
-    t.send_str("zz-no-such-user-9x8");
-    t.send(Key::Enter);
+    t.send_str("zz-no-such-user-9x8")?;
+    t.send(Key::Enter)?;
     t.wait_frame(|s| s.contains("Could not resolve"))?;
 
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q'))?;
     assert!(t.wait_exit()?.success());
     Ok(())
 }
@@ -550,4 +550,101 @@ fn chrono_year(screen: &Screen) -> i32 {
             rest.split("  ·  ").next()?.trim().parse().ok()
         })
         .unwrap_or_default()
+}
+
+#[test]
+fn an_idle_chart_stops_writing() -> termlens::Result<()> {
+    // The chart repaints on a timer — 80 ms, so the loading spinner can turn —
+    // which means a frame goes out whether or not anything changed. What must
+    // *not* happen is that each of those frames rewrites the screen: ratatui
+    // diffs its buffer and the painter diffs the images, so a settled chart
+    // should cost a pair of synchronized-update brackets and nothing else.
+    //
+    // Invisible to every content predicate, because each of those frames shows
+    // exactly the right content. `printable_chars` is what sees it.
+    let mut t = chart(&PREVIEW)?;
+    t.wait_frame(loaded)?;
+    let settled = t.screen().repaints();
+    // Let several more frames go by with no input at all.
+    t.wait_frame(|s| s.repaints() >= settled + 4)?;
+
+    let idle: Vec<u32> = t
+        .frame_timings()
+        .iter()
+        .filter(|frame| frame.index() > settled)
+        .map(|frame| frame.printable_chars())
+        .collect();
+    assert!(
+        idle.len() >= 3,
+        "expected several idle frames to inspect, got {idle:?}"
+    );
+    assert!(
+        idle.iter().all(|written| *written == 0),
+        "an idle chart rewrote the screen: printable characters per frame {idle:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn nothing_rings_the_bell() -> termlens::Result<()> {
+    // The bell is often the only feedback a rejected key produces, so "this key
+    // does nothing" and "this key is refused with a bell" are the same screen.
+    // mossaic ignores what it does not bind — silently, on purpose — and this is
+    // the assertion that says so rather than assuming it.
+    let mut t = chart(&PREVIEW)?;
+    t.wait_frame(loaded)?;
+
+    // Keys it binds, keys it does not, and a couple that mean something only in
+    // the username prompt.
+    for key in [
+        Key::Char('d'),
+        Key::Char('x'),
+        Key::Char('9'),
+        Key::Char('Z'),
+        Key::Tab,
+        Key::Backspace,
+        Key::Char('m'),
+        Key::Char('r'),
+        Key::Char('?'),
+        Key::Char('j'),
+    ] {
+        t.send(key)?;
+    }
+    // A frame after the last of them, so every key has been through the loop.
+    let settled = t.screen().repaints();
+    let screen = t.wait_frame(|s| s.repaints() > settled + 1)?;
+    assert_eq!(
+        screen.bells(),
+        0,
+        "mossaic rang the bell {} time(s)",
+        screen.bells()
+    );
+    Ok(())
+}
+
+#[test]
+fn a_drag_lands_on_the_day_it_ended_on() -> termlens::Result<()> {
+    // A drag reports one motion per cell crossed, so this is twenty events
+    // arriving faster than frames. The tooltip has to end up on the day under
+    // the pointer, not several cells behind it — which is the whole reason the
+    // event loop drains the queue rather than taking one event per frame.
+    let mut t = chart(&PREVIEW)?;
+    let ready = t.wait_frame(|s| loaded(s) && s.mouse_mode() != termlens::MouseMode::None)?;
+
+    // Rounded cells are three columns a week; row Monday+2 is Wednesday. Week 30
+    // Wednesday is 2027-07-28 in this fixture, which holds no contributions.
+    let row = monday(&ready) + 2;
+    let stride = 3;
+    t.drag(
+        MouseButton::Left,
+        (GRID_X + 10 * stride, row),
+        (GRID_X + 30 * stride, row),
+    )?;
+
+    let screen = t.wait_frame(|s| s.contains(" on "))?;
+    assert!(
+        screen.contains("No contributions on July 28th."),
+        "the tooltip should name the day the drag ended on:\n{screen}"
+    );
+    Ok(())
 }
