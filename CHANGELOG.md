@@ -11,6 +11,13 @@ listed under a **Changed** or **Removed** heading.
 
 ## [0.4.0] - 2026-08-20
 
+### Fixed
+
+- `Esc` no longer quits the chart in normal mode; it cancels the username
+  prompt and dismisses the help overlay, as the UI implies. `q` remains the
+  only quit key.
+  
+
 ### Added
 
 - **`--today DATE` on the chart, not just the tracker.** 0.3.0 made time an input

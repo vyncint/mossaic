@@ -410,7 +410,7 @@ impl App {
             return;
         }
         match code {
-            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            KeyCode::Char('q') => self.quit = true,
             KeyCode::Left | KeyCode::Char('h') => self.move_cursor(-7),
             KeyCode::Right | KeyCode::Char('l') => self.move_cursor(7),
             KeyCode::Up | KeyCode::Char('k') => self.move_cursor(-1),
