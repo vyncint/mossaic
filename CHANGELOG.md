@@ -9,14 +9,16 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Changed
+
+- **`Esc` no longer quits the chart.** It cancels the username prompt and
+  dismisses the help overlay, which is all the UI ever implied it did, and `q`
+  is the only quit key. 0.4.0 took the other half of #34's suggestion and
+  documented `Esc` instead, which left the complaint the issue opens with
+  untouched: pressing `Esc` to dismiss a tooltip exited the program. Documenting
+  a surprise is not the same as removing it. (#34, #44)
+
 ## [0.4.0] - 2026-08-20
-
-### Fixed
-
-- `Esc` no longer quits the chart in normal mode; it cancels the username
-  prompt and dismisses the help overlay, as the UI implies. `q` remains the
-  only quit key.
-  
 
 ### Added
 

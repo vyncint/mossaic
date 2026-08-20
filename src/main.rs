@@ -59,7 +59,7 @@ in the chart:
   [ ] · PgUp PgDn   previous / next year
   hover a day       its tooltip; click moves the cursor; wheel changes year
   d                 cycle cell style        m  mouse reporting off/on
-  t  today          r  reload               q / Esc  quit
+  t  today          r  reload               q  quit
 
 also installed:
   mossaic-art      write text into a contribution graph, and track the plan
