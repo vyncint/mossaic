@@ -195,7 +195,7 @@ fn report_capabilities(options: Options) {
     // the probe runs after the terminal is set up.
     let raw = ratatui::crossterm::terminal::enable_raw_mode();
     let caps = term::probe(PROBE);
-    let cell = term::cell_size(&caps);
+    let cell = options.cell.or_else(|| term::cell_size(&caps));
     if raw.is_ok() {
         let _ = ratatui::crossterm::terminal::disable_raw_mode();
     }

@@ -191,6 +191,7 @@ fn cell_styles_cycle_through_every_shape() -> termlens::Result<()> {
         "slim cells",
         "compact cells",
         "rounded cells",
+        "snug cells",
     ] {
         t.send(Key::Char('d'))?;
         t.wait_frame(|s| style(s) == expected)?;
