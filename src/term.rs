@@ -5,13 +5,14 @@
 //! inside tmux or ssh where the escape never arrives. So mossaic asks the terminal
 //! itself and reads the reply, with a deadline for the terminals that stay silent.
 //!
-//! One write, four questions, one round trip:
+//! One write, five questions, one round trip:
 //!
 //! | query | answer | tells us |
 //! | --- | --- | --- |
 //! | `APC _Gi=…,a=q` | `_Gi=…;OK` | it speaks the kitty graphics protocol |
-//! | `OSC 11 ?` | `rgb:rrrr/gggg/bbbb` | the background colour, so light/dark is not a guess |
+//! | `OSC 11 ?` | `rgb:rrrr/gggg/bbbb` or `#rrggbb` | the background colour, so light/dark is not a guess |
 //! | `CSI 16 t` | `CSI 6;h;w t` | one character cell in pixels |
+//! | `CSI 14 t` | `CSI 4;h;w t` | the window, for terminals that answer that and not the cell |
 //! | `CSI c` | `CSI ?…;4;… c` | attribute 4 is sixel — and this reply is the sentinel |
 //!
 //! The device-attributes reply comes last and every terminal answers it, so it
@@ -144,13 +145,20 @@ pub fn parse(reply: &str) -> Caps {
 }
 
 /// The body of a primary device attributes reply, `CSI ? … c`.
+///
+/// Every `CSI ?` in the buffer is tried, not just the first. A terminal answers
+/// more than one question with this prefix — `CSI ?2026;2$y` is the DECRQM reply
+/// for synchronized update, the mode this program itself uses — and a reply left
+/// in the tty queue by whatever ran before us shares the read. Taking the first
+/// occurrence then missed sixel *and* the sentinel, so every start-up paid the
+/// whole probe deadline instead of a millisecond.
 fn attributes(reply: &str) -> Option<&str> {
-    let rest = reply.split("\x1b[?").nth(1)?;
-    let end = rest.find('c')?;
-    let body = &rest[..end];
-    body.chars()
-        .all(|c| c.is_ascii_digit() || c == ';')
-        .then_some(body)
+    reply.split("\x1b[?").skip(1).find_map(|rest| {
+        let body = &rest[..rest.find('c')?];
+        body.chars()
+            .all(|c| c.is_ascii_digit() || c == ';')
+            .then_some(body)
+    })
 }
 
 /// A two-number `CSI` report, e.g. `CSI 6 ; 20 ; 10 t`.
@@ -162,23 +170,43 @@ fn report(reply: &str, prefix: &str) -> Option<(u16, u16)> {
     (first > 0 && second > 0).then_some((first, second))
 }
 
-/// `OSC 11 ; rgb:rrrr/gggg/bbbb`, terminated by BEL or ST, with 1 to 4 hex digits
-/// per channel — 16 bits per channel is the common answer, so scale rather than
-/// truncate.
+/// `OSC 11 ; <colour>`, terminated by BEL or ST.
+///
+/// Both forms an X colour specification may take, because a terminal picks:
+/// `rgb:rrrr/gggg/bbbb` with 1 to 4 hex digits a channel — 16 bits is the common
+/// answer, so scale rather than truncate — and the `#rrggbb` family, which was
+/// unrecognised and therefore read as "no answer", i.e. assume dark. A light
+/// terminal that replies that way got the dark palette.
 fn background(reply: &str) -> Option<Rgb> {
     let rest = reply.split("\x1b]11;").nth(1)?;
     let body = rest.split(['\x07', '\x1b']).next()?;
-    let channels = body
-        .strip_prefix("rgb:")
-        .or_else(|| body.strip_prefix("rgba:"))?;
-    let mut scaled = channels.split('/').take(3).map(|channel| {
-        let value = u32::from_str_radix(channel, 16).ok()?;
-        let full = ((1u32 << (4 * channel.len().min(4))) - 1).max(1);
-        // Rounded, not truncated: half of a 16-bit channel is 0x8000, and that is
-        // 128 rather than 127.
+
+    /// One channel of `digits` hex, scaled to 8 bits. Rounded, not truncated:
+    /// half of a 16-bit channel is 0x8000, and that is 128 rather than 127.
+    fn channel(text: &str) -> Option<u8> {
+        let value = u32::from_str_radix(text, 16).ok()?;
+        let full = ((1u32 << (4 * text.len().min(4))) - 1).max(1);
         Some(((value * 255 + full / 2) / full) as u8)
-    });
-    Some(Rgb(scaled.next()??, scaled.next()??, scaled.next()??))
+    }
+
+    if let Some(channels) = body
+        .strip_prefix("rgb:")
+        .or_else(|| body.strip_prefix("rgba:"))
+    {
+        let mut scaled = channels.split('/').take(3).map(channel);
+        return Some(Rgb(scaled.next()??, scaled.next()??, scaled.next()??));
+    }
+    // `#rgb`, `#rrggbb`, `#rrrgggbbb`, `#rrrrggggbbbb`: equal-width channels.
+    let hex = body.strip_prefix('#')?;
+    if hex.is_empty() || !hex.len().is_multiple_of(3) || hex.len() > 12 {
+        return None;
+    }
+    let each = hex.len() / 3;
+    Some(Rgb(
+        channel(&hex[..each])?,
+        channel(&hex[each..each * 2])?,
+        channel(&hex[each * 2..])?,
+    ))
 }
 
 /// The largest character cell taken seriously, in pixels. Real ones are 6 to 30

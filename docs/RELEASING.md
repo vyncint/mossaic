@@ -27,8 +27,15 @@ gh run watch
 # 1. Bump `version` in Cargo.toml, and refresh the lockfile entry.
 cargo check                      # rewrites Cargo.lock's mossaic version
 
-# 2. Move the CHANGELOG section: [Unreleased] -> [X.Y.Z] - YYYY-MM-DD,
-#    leaving an empty [Unreleased] above it.
+# 2. Move the CHANGELOG section: [Unreleased] -> [X.Y.Z] - YYYY-MM-DD, leaving an
+#    empty [Unreleased] above it — and repoint the link definitions at the foot of
+#    the file, or the new heading renders as literal `[X.Y.Z]` text:
+#      [Unreleased]: …/compare/vX.Y.Z...HEAD
+#      [X.Y.Z]:      …/compare/vPREV...vX.Y.Z
+
+# 2b. Bump the `action@vPREV` references, which point at a release and are the
+#     lines people copy. 0.3.0 shipped with three of them a version behind:
+grep -rn "mossaic/action@v" docs action
 
 # 3. Land it.
 git switch -c release/vX.Y.Z && git commit -am "release: vX.Y.Z" && gh pr create
@@ -40,7 +47,9 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 
 The tag triggers `release.yml`, which:
 
-1. fails unless the tag matches the crate version,
+1. fails unless the tag matches the crate version — `extract-changelog.sh` builds
+   the notes from `CHANGELOG.md` and runs from anywhere, so a missing section is
+   the one failure it will report,
 2. re-runs the full CI gates (`workflow_call` into `ci.yml`),
 3. runs `cargo-semver-checks` against the last published release — skipped
    gracefully on the first one, since there is no baseline,

@@ -41,8 +41,14 @@ const SQUARE: &str = "▀";
 /// ```
 const ROUND: &str = "\u{1FB2B}\u{1FB1B}";
 /// Rows the chart needs besides the cells: header, blank, months, blank, detail,
-/// legend, summary, blank, footer.
-const CHROME_ROWS: usize = 9;
+/// legend, summary, blank, footer — and the note under the legend, which
+/// `chart` adds whenever it has something to say.
+///
+/// Counting the note is what keeps the footer on screen. `fits` budgeted nine and
+/// `chart` could push ten, so at a height of exactly `cells.height() + 11` the
+/// note evicted the only line that lists the keys. Budgeting it costs a slightly
+/// smaller style at that one height, which is the better of the two failures.
+const CHROME_ROWS: usize = 10;
 
 /// A concrete cell layout, resolved from a [`CellStyle`] and the space available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,12 +189,20 @@ pub struct Layout {
     /// row scrolls the screen out from under everything else — worth one comparison
     /// to rule out, since `d` can ask for cells the terminal has no room for.
     pub bottom: u16,
+    /// The column past the right edge, for exactly the same reason. Sixel clears
+    /// the character cells it is about to cover, and it did that by writing spaces
+    /// with no idea how wide the terminal was: a 53-week grid wrote 106 of them
+    /// from column 6, so on an 80-column terminal seven rows wrapped over the
+    /// gutter, the border and the rows below — and ratatui, believing it had
+    /// written those cells, never repainted them.
+    pub right: u16,
 }
 
 impl Layout {
     /// Whether the cells fit on the screen from where they start.
     pub fn has_room(&self) -> bool {
         self.y + self.cells.height() as u16 <= self.bottom
+            && self.x + self.weeks * COLUMNS_PER_DAY <= self.right
     }
 
     /// Which day a character cell belongs to. Deliberately forgiving: a click on the
@@ -266,6 +280,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    app.footer_width = inner.width;
     let (lines, layout) = body(app, inner);
     frame.render_widget(Paragraph::new(lines), inner);
     app.layout = layout;
@@ -286,43 +301,64 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
     let text = Style::new().fg(palette.ansi(palette.fg));
     let muted = Style::new().fg(palette.ansi(palette.muted));
 
-    let heading = |title: &'static str| Line::styled(title, muted);
-    let row = |keys: &'static str, what: &'static str| {
-        Line::from(vec![
-            Span::styled(format!("  {keys:<16}"), key),
-            Span::styled(what, text),
-        ])
-    };
-    let fact = |name: &'static str, value: String| {
-        Line::from(vec![
-            Span::styled(format!("  {name:<16}"), muted),
-            Span::styled(value, text),
-        ])
-    };
-
     let cells = app.layout.map_or("—", |layout| layout.cells.name());
     let yes_no = |flag: bool| if flag { "yes" } else { "no" };
+
+    // Every line with what it is worth, because a short terminal cannot have all
+    // of them and truncating from the bottom dropped the most valuable ones: the
+    // answer about this terminal, and how to close the panel. Higher survives.
+    const SPACER: u8 = 0;
+    const HINT: u8 = 1;
+    const HEADING: u8 = 2;
+    const KEY: u8 = 3;
+    const FACT: u8 = 4;
+    const DECISION: u8 = 5;
+    const WAY_OUT: u8 = 6;
+
+    let heading = |title: &'static str| (HEADING, Line::styled(title, muted));
+    let row = |keys: &'static str, what: &'static str| {
+        (
+            KEY,
+            Line::from(vec![
+                Span::styled(format!("  {keys:<16}"), key),
+                Span::styled(what, text),
+            ]),
+        )
+    };
+    let fact = |rank: u8, name: &'static str, value: String| {
+        (
+            rank,
+            Line::from(vec![
+                Span::styled(format!("  {name:<16}"), muted),
+                Span::styled(value, text),
+            ]),
+        )
+    };
+    let blank = || (SPACER, Line::raw(""));
+
     let mut lines = vec![
         heading(" Moving"),
         row("← → / h l", "previous / next week"),
         row("↑ ↓ / k j", "previous / next day"),
         row("[ ] · PgUp PgDn", "previous / next year"),
         row("t · Home End", "today · first / last day"),
-        Line::raw(""),
+        blank(),
         heading(" Mouse"),
         row("hover a day", "its tooltip, as github.com writes it"),
         row("click", "move the cursor there"),
         row("wheel", "previous / next year"),
         row("m", "mouse reporting off / on"),
-        Line::raw(""),
+        blank(),
         heading(" Chart"),
         row("d", "cycle cell style"),
-        row("u · r · q", "another user · reload · quit"),
-        Line::raw(""),
+        row("u · r", "another user · reload"),
+        row("q · Esc", "quit"),
+        blank(),
         heading(" This terminal"),
-        fact("kitty graphics", yes_no(app.caps.kitty).to_string()),
-        fact("sixel", yes_no(app.caps.sixel).to_string()),
+        fact(FACT, "kitty graphics", yes_no(app.caps.kitty).to_string()),
+        fact(FACT, "sixel", yes_no(app.caps.sixel).to_string()),
         fact(
+            FACT,
             "character cell",
             app.gfx.as_ref().map_or_else(
                 || "not reported".to_string(),
@@ -330,6 +366,7 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
             ),
         ),
         fact(
+            DECISION,
             "drawing with",
             match app.pixels_available() {
                 true => format!("{cells} cells ({})", app.protocol_name()),
@@ -338,18 +375,36 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
         ),
     ];
     if !app.pixels_available() && app.caps.answered {
-        lines.push(Line::raw(""));
-        lines.push(Line::styled(
-            "  kitty, Ghostty, WezTerm, foot, Konsole, iTerm2 and",
-            muted,
+        lines.push(blank());
+        lines.push((
+            HINT,
+            Line::styled(
+                "  kitty, Ghostty, WezTerm, foot, Konsole, iTerm2 and",
+                muted,
+            ),
         ));
-        lines.push(Line::styled(
-            "  xterm -ti vt340 draw one protocol or the other.",
-            muted,
+        lines.push((
+            HINT,
+            Line::styled("  xterm -ti vt340 draw one protocol or the other.", muted),
         ));
     }
-    lines.push(Line::raw(""));
-    lines.push(Line::styled("  any key closes this", muted));
+    lines.push(blank());
+    lines.push((WAY_OUT, Line::styled("  any key closes this", muted)));
+
+    // Drop the cheapest lines until it fits. The panel is a border plus its
+    // contents, so three rows of chrome.
+    while lines.len() as u16 + 3 > inner.height && lines.len() > 1 {
+        let Some(cheapest) = lines
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, (rank, _))| (*rank, std::cmp::Reverse(*index)))
+            .map(|(index, _)| index)
+        else {
+            break;
+        };
+        lines.remove(cheapest);
+    }
+    let lines: Vec<Line<'static>> = lines.into_iter().map(|(_, line)| line).collect();
 
     // Centred, and never larger than the frame it floats over.
     // Wide enough for the longest line at a 16-column key gutter, and never
@@ -467,6 +522,7 @@ fn chart(
         cells,
         legend: legend_at,
         bottom: inner.bottom(),
+        right: inner.right(),
     };
     (lines, Some(layout))
 }
@@ -480,9 +536,33 @@ fn note(
     height: usize,
 ) -> Option<Line<'static>> {
     let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
-    if !cells.fits(weeks, width, height) {
+    // Asking for a protocol and getting characters is the one outcome
+    // `--capabilities` explained and the chart did not.
+    if let Some(protocol) = app.graphics_refused() {
         return Some(Line::styled(
-            "(too small for these cells — press d for a smaller style)",
+            format!("({protocol} was asked for, but no cell size is known — pass --cell WxH)"),
+            muted,
+        ));
+    }
+    if !cells.fits(weeks, width, height) {
+        // Telling someone to press `d` for something smaller only helps while
+        // something smaller exists. From `Auto` at its narrowest, `d` goes to
+        // pixels — three times wider — so the advice made it worse.
+        let smallest = Cells::Solid { fill: 1, gap: 0 };
+        let short = smallest.height() + CHROME_ROWS > height;
+        let narrow = smallest.width(weeks) > width;
+        return Some(Line::styled(
+            match (narrow, short) {
+                (true, _) => format!(
+                    "(a year needs {} columns even at its narrowest — this window has {width})",
+                    smallest.width(weeks)
+                ),
+                (false, true) => format!(
+                    "(the chart needs {} rows — this window has {height})",
+                    smallest.height() + CHROME_ROWS
+                ),
+                _ => "(too small for these cells — press d for a smaller style)".to_string(),
+            },
             muted,
         ));
     }
@@ -599,9 +679,21 @@ fn filled_rows(
             spans.push(weekday(app, row));
             for week in &calendar.weeks {
                 match week.days[row] {
-                    // Outside the year, or not yet happened: nothing to draw.
+                    // Outside the year: nothing to draw.
                     None => spans.push(Span::raw(blank.clone())),
-                    Some(day) if day.future => spans.push(Span::raw(blank.clone())),
+                    // Not yet happened. Nothing is drawn *unless* it is marked —
+                    // the cursor can be walked into the future, `detail` names the
+                    // day, and it used to vanish here while the bordered styles
+                    // showed it.
+                    Some(day) if day.future => match mark(app, day.date) {
+                        Some(color) => {
+                            spans.push(Span::styled(glyph, Style::new().fg(color)));
+                            if gap > 0 {
+                                spans.push(Span::raw(" ".repeat(gap)));
+                            }
+                        }
+                        None => spans.push(Span::raw(blank.clone())),
+                    },
                     Some(day) => {
                         // A background would fill the gap, so a marked day shows as a
                         // colour rather than the shaded-over cell the grid uses.
@@ -740,10 +832,17 @@ fn legend(
     }
     // Naming the protocol matters here: "pixel cells (sixel)" is the difference
     // between a chart that looks right and knowing why it looks right.
+    // Naming `auto` matters: pressing `d` from the narrowest style lands back on
+    // it, and if the line read the same as the style auto happens to resolve to,
+    // the keypress looked like it had done nothing.
+    let chosen = match matches!(app.cells, CellStyle::Auto) {
+        true => format!("auto: {}", cells.name()),
+        false => cells.name().to_string(),
+    };
     spans.push(Span::styled(
         match cells {
-            Cells::Pixels => format!("   ·   {} cells ({})", cells.name(), app.protocol_name()),
-            _ => format!("   ·   {} cells", cells.name()),
+            Cells::Pixels => format!("   ·   {chosen} cells ({})", app.protocol_name()),
+            _ => format!("   ·   {chosen} cells"),
         },
         muted,
     ));
@@ -756,7 +855,7 @@ fn summary(app: &App, calendar: &Calendar) -> Line<'static> {
     if !calendar.has_elapsed_days() {
         return Line::styled(format!("{} hasn't started yet", calendar.year), muted);
     }
-    let stats = calendar.stats();
+    let stats = calendar.stats(app.today());
     let mut parts = vec![format!("{} active days", thousands(stats.active_days))];
     if stats.current_streak > 0 {
         parts.push(format!("{}-day streak", stats.current_streak));
@@ -902,6 +1001,11 @@ fn footer(app: &App) -> Line<'static> {
             Span::styled("   enter load  ·  esc cancel", muted),
         ]),
         Mode::Normal => {
+            // Assembled longest-first and then trimmed, because the one thing
+            // that must survive a narrow terminal is how to get out of it. At 80
+            // columns the joined line was cut mid-word and took `q quit` and
+            // `? help` with it, while the overlay that would have said so was
+            // itself truncated.
             let mut keys = vec!["←→↑↓ day/week"];
             if !app.previewing() {
                 keys.push("[ ] year");
@@ -919,12 +1023,27 @@ fn footer(app: &App) -> Line<'static> {
             keys.push("r reload");
             keys.push("q quit");
             keys.push("? help");
-            let mut line = keys.join("  ·  ");
             if let Some(label) = app.source_label() {
-                line.push_str("  ·  ");
-                line.push_str(label);
+                keys.push(label);
             }
-            Line::styled(line, muted)
+
+            const JOIN: &str = "  ·  ";
+            // Columns, not bytes: the separator's `·` is two bytes wide and one
+            // column, and it is the width that has to fit.
+            const JOIN_COLUMNS: usize = 5;
+            let width = usize::from(app.footer_width);
+            let fits = |items: &[&str]| {
+                items.iter().map(|item| item.chars().count()).sum::<usize>()
+                    + JOIN_COLUMNS * items.len().saturating_sub(1)
+                    <= width
+            };
+            // Dropped from the front, where the movement hints are — those are the
+            // guessable ones — and never past the last two, which are `q quit`
+            // and `? help`.
+            while !fits(&keys) && keys.len() > 2 {
+                keys.remove(0);
+            }
+            Line::styled(keys.join(JOIN), muted)
         }
     }
 }

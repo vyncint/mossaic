@@ -21,7 +21,7 @@ fn main() {
     };
 
     // A saved `gh api graphql` response, which is what `mossaic-art --snapshot` writes.
-    let calendar = github::from_file(&calendar).unwrap_or_else(|error| {
+    let calendar = github::from_file(&calendar, None).unwrap_or_else(|error| {
         eprintln!("chart_to_png: {error}");
         std::process::exit(1);
     });

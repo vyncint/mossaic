@@ -5,7 +5,7 @@
 use std::io;
 use std::time::Duration;
 
-use chrono::{Datelike, Local};
+use chrono::{Datelike, Local, NaiveDate};
 use ratatui::backend::Backend;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
@@ -42,6 +42,9 @@ options:
   -g, --graphics M  auto | kitty | sixel | text  (default: ask the terminal)
       --cell WxH    size of one character cell in pixels, when the terminal
                     will not say (e.g. --cell 10x20)
+      --today DATE  what \"today\" means, as YYYY-MM-DD (default: the clock). It
+                    decides which days count as still to come — and, with --file,
+                    makes a saved year show them at all
       --theme M     auto | dark | light | dimmed (default: ask the terminal)
       --palette P   auto | default | winter | halloween — GitHub's own seasonal
                     colours; auto follows the calendar, as github.com does
@@ -56,7 +59,7 @@ in the chart:
   [ ] · PgUp PgDn   previous / next year
   hover a day       its tooltip; click moves the cursor; wheel changes year
   d                 cycle cell style        m  mouse reporting off/on
-  t  today          r  reload               q  quit
+  t  today          r  reload               q / Esc  quit
 
 also installed:
   mossaic-art      write text into a contribution graph, and track the plan
@@ -169,7 +172,12 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
                         app.on_key(key.code, key.modifiers);
                     }
                     Event::Mouse(event) => app.on_mouse(event),
-                    Event::Resize(..) => app.redraw = true,
+                    Event::Resize(..) => {
+                        // A resize is also the moment a font size may have
+                        // changed, and the cell was measured once at startup.
+                        app.remeasure();
+                        app.redraw = true;
+                    }
                     _ => {}
                 }
                 if app.quit || !event::poll(Duration::ZERO)? {
@@ -195,7 +203,10 @@ fn report_capabilities(options: Options) {
     // the probe runs after the terminal is set up.
     let raw = ratatui::crossterm::terminal::enable_raw_mode();
     let caps = term::probe(PROBE);
-    let cell = term::cell_size(&caps);
+    // `--cell` outranks the terminal here exactly as it does in the chart. Ignoring
+    // it made the one command whose job is explaining the pixel decision report the
+    // opposite of what the run would do.
+    let cell = options.cell.or_else(|| term::cell_size(&caps));
     if raw.is_ok() {
         let _ = ratatui::crossterm::terminal::disable_raw_mode();
     }
@@ -306,6 +317,20 @@ fn parse_args() -> Option<Invocation> {
                     )),
                 }
             }
+            "--today" => {
+                let raw = args.value("--today");
+                let date = NaiveDate::parse_from_str(&raw, "%Y-%m-%d").unwrap_or_else(|_| {
+                    fail(&format!("--today wants a date as YYYY-MM-DD, not {raw:?}"))
+                });
+                if !mossaic::cli::YEARS.contains(&date.year()) {
+                    fail(&format!(
+                        "--today {raw} is outside the years these tools work in, {} to {}",
+                        mossaic::cli::YEARS.start(),
+                        mossaic::cli::YEARS.end()
+                    ));
+                }
+                options.today = Some(date);
+            }
             "--no-mouse" => options.mouse = false,
             "--cell" => options.cell = Some(parse_cell(&args.value("--cell"))),
             "--png" => png = Some(args.value("--png")),
@@ -321,6 +346,12 @@ fn parse_args() -> Option<Invocation> {
     if capabilities {
         report_capabilities(options);
         return None;
+    }
+
+    // Two sources, and picking one silently is a guess. The demo used to win with
+    // nothing said, so a `--file` that was meant to be read was ignored.
+    if demo && file.is_some() {
+        fail("--demo makes a year up and --file reads one — pick one");
     }
 
     // The demo makes its own year up, so it needs no account and no network.
@@ -367,8 +398,15 @@ fn parse_args() -> Option<Invocation> {
 /// would have drawn, not an approximation of it.
 fn write_png(invocation: &Invocation, path: &str) {
     let calendar = match &invocation.source {
-        Source::GitHub => github::fetch(&invocation.login, invocation.year),
-        Source::File(file) => github::from_file(file),
+        Source::GitHub => github::fetch(
+            &invocation.login,
+            invocation.year,
+            invocation
+                .options
+                .today
+                .unwrap_or_else(|| Local::now().date_naive()),
+        ),
+        Source::File(file) => github::from_file(file, invocation.options.today),
         Source::Demo => Ok(mossaic::calendar::demo(invocation.year)),
     }
     .unwrap_or_else(|error| fail(&error));
@@ -395,6 +433,16 @@ fn write_png(invocation: &Invocation, path: &str) {
             column
         })
         .collect();
+
+    // A calendar with no weeks has no image, and a PNG cannot be zero pixels wide
+    // — it wrote one anyway and called it success, so no viewer could open it. The
+    // chart says this in words rather than drawing nothing; so does this.
+    if calendar.weeks.is_empty() {
+        fail(&format!(
+            "no contribution data for {} — nothing to draw",
+            calendar.year
+        ));
+    }
 
     let image = graphics::grid(&levels, &palette, cell);
     png::write(std::path::Path::new(path), &image, palette.canvas)

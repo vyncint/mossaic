@@ -32,8 +32,15 @@ impl Rgb {
         )
     }
 
-    /// Relative luminance, 0..1 — enough to tell a light terminal from a dark one.
-    pub fn luminance(self) -> f32 {
+    /// Rough brightness, 0..1 — enough to tell a light terminal from a dark one.
+    ///
+    /// **Not** WCAG relative luminance: the coefficients are applied to
+    /// gamma-encoded sRGB with no linearisation, unlike [`Rgb::lab`] below, so mid
+    /// grey comes out 0.502 where relative luminance is 0.216. That puts the
+    /// light/dark threshold at `#808080` rather than `#bcbcbc`, which is the more
+    /// useful place for choosing a terminal theme — but it is not the quantity the
+    /// old name claimed.
+    pub fn brightness(self) -> f32 {
         let c = |v: u8| f32::from(v) / 255.0;
         0.2126 * c(self.0) + 0.7152 * c(self.1) + 0.0722 * c(self.2)
     }
@@ -77,8 +84,9 @@ impl Rgb {
     ///
     /// Roughly: under 2 is invisible, 10 is "you would have to be told", and
     /// anything past 35 reads as two different colours at a glance. Measured
-    /// across every palette GitHub ships, adjacent contribution levels fall as
-    /// low as **10.8** and levels two apart never below **35.4** — which is why
+    /// across every palette GitHub ships, adjacent contribution levels fall as low
+    /// as **9.1** — light + halloween, levels 1 and 2 — and levels two or more
+    /// apart never below **35.4**, which is why
     /// [`Shades`](crate::art::Shades) wants a gap of two.
     ///
     /// ```
@@ -154,7 +162,7 @@ pub enum Appearance {
 impl Appearance {
     /// Pick from the terminal's own background, the way a browser follows the OS.
     pub fn from_background(background: Rgb) -> Self {
-        if background.luminance() > 0.5 {
+        if background.brightness() > 0.5 {
             Self::Light
         } else {
             Self::Dark
@@ -176,9 +184,19 @@ pub enum Season {
 
 impl Season {
     /// What github.com would be showing on `date`.
+    ///
+    /// The winter arm was missing, so `--palette auto` could never pick a scale
+    /// that is fully implemented, measured for legibility among the nine
+    /// [`crate::art::Shades::worst`] reads, and asked for by `--palette winter`.
+    ///
+    /// GitHub does not publish the windows, so these are the dates it has been
+    /// observed using: the week to Christmas for the blue scale, and the last week
+    /// of October for the orange one. Treat them as a best reading of github.com
+    /// rather than as a specification.
     pub fn on(date: NaiveDate) -> Self {
         match (date.month(), date.day()) {
             (10, 25..=31) => Self::Halloween,
+            (12, 19..=25) => Self::Winter,
             _ => Self::Default,
         }
     }
@@ -314,13 +332,15 @@ impl Palette {
 
     /// A level's colour, which is the one place converting is not good enough.
     ///
-    /// The 256-colour cube has six steps per channel and GitHub's dark greens fall
-    /// between two of them: `#033a16` and `#196c2e` both round to the same entry,
-    /// and the nearest colour to either is a *grey* — near enough numerically,
-    /// flat on screen, and in the dimmed theme not even monotonic. So the five
-    /// levels are chosen rather than derived, because a legible ramp beats an
-    /// accurate one that cannot be read. Everything else still converts: no other
-    /// colour has to stay distinct from its neighbour.
+    /// The 256-colour cube has six steps per channel, and derived indices collide
+    /// where it matters most: in the dark theme levels **0 and 1** (`#151b23` and
+    /// `#033a16`) both land on grey 234, and in the dimmed theme levels 0 and 1
+    /// both land on grey 236 — an empty day and a quiet one drawn identically. The
+    /// dimmed ramp is otherwise non-decreasing in luminance, so the defect is the
+    /// tie rather than an inversion. So the five levels are chosen rather than
+    /// derived, because a legible ramp beats an accurate one that cannot be read.
+    /// Everything else still converts: no other colour has to stay distinct from
+    /// its neighbour.
     pub fn level(&self, level: u8) -> Color {
         let level = usize::from(level).min(4);
         if self.truecolor {
@@ -365,8 +385,8 @@ impl Palette {
 /// How well two shades tell each other apart.
 ///
 /// The bands come from measuring every palette GitHub ships rather than from
-/// taste: adjacent contribution levels fall as low as ΔE 10.8 (light, levels 2
-/// and 3), while levels two or more apart never drop below ΔE 35.4.
+/// taste: adjacent contribution levels fall as low as ΔE 9.1 (light + halloween,
+/// levels 1 and 2), while levels two or more apart never drop below ΔE 35.4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Legibility {
     /// Under ΔE 20. The art is there, but a reader has to be told where to look.

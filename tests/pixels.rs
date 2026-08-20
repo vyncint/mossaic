@@ -76,7 +76,20 @@ fn style(screen: &Screen) -> String {
         .trim()
         .trim_end_matches('│')
         .trim()
+        // `Auto` labels itself, so that landing back on it during the `d` cycle
+        // does not look like a keypress that did nothing. The style it resolved
+        // to is what most assertions are about.
+        .trim_start_matches("auto: ")
         .to_string()
+}
+
+/// Whether the chart says it is choosing the style itself.
+#[allow(dead_code)]
+fn is_auto(screen: &Screen) -> bool {
+    screen
+        .text()
+        .lines()
+        .any(|line| line.contains("auto: ") && line.contains(" cells"))
 }
 
 /// Row of the Monday label, which is grid row 1.
@@ -392,6 +405,78 @@ fn a_flood_of_motion_is_drained_not_replayed() -> termlens::Result<()> {
         bytes * 4 < base.bytes(),
         "crossing {CROSSED} cells cost {bytes} bytes against a {}-byte year",
         base.bytes()
+    );
+    Ok(())
+}
+
+#[test]
+fn pixel_cells_are_refused_rather_than_written_past_the_edge() -> termlens::Result<()> {
+    // Sixel clears the character cells it is about to cover by writing spaces, and
+    // it did that with no idea how wide the terminal was: a 53-week grid wrote 106
+    // of them from column 6, so on an 80-column terminal seven rows wrapped over
+    // the weekday gutter, the right border and the rows below — and stayed that
+    // way, because ratatui believed it had written those cells.
+    //
+    // `d` pins pixel cells even where they clip, which is the documented promise
+    // ("d forces them, clipped"), so this is the path that reached it.
+    let mut terminal = chart(Graphics::Sixel, Some(CELL), (176, 34), &PREVIEW)?;
+    terminal.wait_frame(|screen| style(screen) == "pixel cells (sixel)")?;
+    terminal.resize(80, 24)?;
+
+    // Whatever it settles on, the frame has to still be a frame: the gutter, the
+    // border and the footer all intact.
+    let narrow = terminal.wait_frame(|screen| loaded(screen) && screen.cols() == 80)?;
+    assert!(
+        narrow.contains("Mon") && narrow.contains("Wed"),
+        "the weekday gutter was overwritten:\n{narrow}"
+    );
+    assert!(
+        narrow.contains("q quit"),
+        "the footer was overwritten:\n{narrow}"
+    );
+    // Every row of the frame is closed on both sides.
+    for row in 0..narrow.rows() {
+        let line = narrow.row_text(row);
+        if !line.trim().is_empty() && line.starts_with('│') {
+            assert!(
+                line.trim_end().ends_with('│'),
+                "row {row} lost its right border:\n{narrow}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_year_that_has_not_happened_can_be_asked_what_it_will_look_like() -> termlens::Result<()> {
+    // `--today` on the chart, which the tracker has had since 0.3.0. A saved
+    // calendar has no notion of now — that is what makes it useful for previewing
+    // a year that has not happened — so this is the only way to see the
+    // still-to-come half of the rendering at all, and the only way to test it.
+    let mut plain = chart(Graphics::None, None, SIZE, &PREVIEW)?;
+    let all_elapsed = plain.wait_frame(loaded)?;
+    assert!(
+        !all_elapsed.contains("still to come"),
+        "with no date, every day of a saved year is drawn:\n{all_elapsed}"
+    );
+
+    let mut dated = chart(
+        Graphics::None,
+        None,
+        SIZE,
+        &["--file", "art/vyncint-2027.json", "--today", "2027-06-30"],
+    )?;
+    let half = dated.wait_frame(loaded)?;
+    assert!(
+        half.contains("blank = still to come"),
+        "half the year is ahead now, and the legend says so:\n{half}"
+    );
+    // And the cursor can be walked into it, which is where it used to vanish.
+    dated.send(Key::End)?;
+    let ahead = dated.wait_frame(|screen| screen.contains("still to come"))?;
+    assert!(
+        ahead.contains("Fri, Dec 31 2027"),
+        "the detail line names the day:\n{ahead}"
     );
     Ok(())
 }

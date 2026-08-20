@@ -24,13 +24,20 @@ Two consequences worth stating:
 ## 2. Layers
 
 ```
-github.rs   one GraphQL call            ->  Calendar
-calendar.rs Sunday-aligned grid, stats  ->  Calendar
-primer.rs   which colours               ->  Palette
-term.rs     what the terminal can do    ->  Caps
-ui.rs       what goes where             ->  Layout + text
-graphics.rs what the pixels are         ->  Image -> kitty | sixel
-app.rs      state, keys, mouse          ->  Scene
+the chart
+  github.rs   one GraphQL call            ->  Calendar
+  calendar.rs Sunday-aligned grid, stats  ->  Calendar
+  primer.rs   which colours               ->  Palette
+  term.rs     what the terminal can do    ->  Caps
+  ui.rs       what goes where             ->  Layout + text
+  graphics.rs what the pixels are         ->  Image -> kitty | sixel
+  png.rs      the same image, to a file   ->  PNG
+  app.rs      state, keys, mouse          ->  Scene
+
+the art
+  art.rs      the 5x5 font, placement, what a shade costs
+  plan.rs     a plan against what was actually contributed
+  cli.rs      the argument parsing all three binaries share
 ```
 
 `ui.rs` draws text through ratatui and hands back a [`Layout`]. `app.rs` turns
@@ -41,9 +48,13 @@ protocols.
 Three decisions in the data layer are worth stating, because none of them is
 visible from the diagram:
 
-- **Levels come from GitHub, not from arithmetic.** The API returns a
-  `contributionLevel` per day and that is what is drawn. Re-deriving it from
-  counts would be one more place to disagree with github.com.
+- **Levels come from GitHub, not from arithmetic** — but only while GitHub names
+  one we know. The API returns a `contributionLevel` per day and that is what is
+  drawn, because re-deriving it would be one more place to disagree with
+  github.com. A name we have never met falls back to `art::level(count, peak)`,
+  which is GitHub's own rule and the one the art costing already uses: mapping the
+  unknown to level 0 painted a day with forty contributions exactly like an empty
+  one, while the header reported a full year.
 - **Fetches carry a sequence number.** They run on a background thread, and
   holding `[` down starts several; without the number a slow early response
   could overwrite a newer one and show the wrong year.
@@ -85,13 +96,16 @@ The rasteriser produces straight-alpha RGBA once. What differs is the wire:
 | transparency | a real alpha channel; corners blend into any background | one bit — "leave this pixel alone" — so edges are composited against the background the terminal reported |
 | colour | 32-bit RGBA | 8-bit palette, components in *percent* |
 | placement | pinned to an exact number of columns and rows (`c`/`r`), so it cannot drift out of step with the labels | wherever the cursor is |
-| a year | 507 KB raw → **8 KB** zlib'd | **45 KB**, run-length encoded |
-| one cell | ~240 bytes | ~490 bytes |
-| layering | `z=-1`: under text, over the background | pixels are pixels |
+| a year | 507 KB raw → **5 KB** zlib'd, ~7 KB on the wire | **44 KB**, run-length encoded |
+| one cell | ~224 bytes | ~489 bytes |
+| layering | two layers, both under text: the year and legend at `z=-2`, the cursor and hover rings at `z=-1` | pixels are pixels |
 
-Sixel's palette is the one place the image is degraded on purpose: anti-aliasing
-a year produces far more shades than 256 registers hold, so blends are snapped
-to a coarser grid until they fit, starting at full precision. See `indexed()`.
+Sixel's palette is the one place the image *may* be degraded on purpose. Blends
+are snapped to a coarser grid until they fit, starting at full precision — and at
+full precision a whole year needs 20 to 27 of the 256 registers (26 at a 9x19
+cell), so in practice `indexed()` returns on its first pass and nothing is ever
+lost. The ladder is there for a palette that would not have fit, not for the
+chart. See `indexed()`.
 
 ## 5. The painter is a diff
 
@@ -115,14 +129,22 @@ real background rather than the one we guessed at.
 
 `TERM` sniffing gets this wrong in both directions: it misses terminals nobody
 has heard of, and claims support inside tmux or ssh where the escape never
-arrives. So `term::probe` asks — one write, four questions, one round trip:
+arrives. So `term::probe` asks — one write, five questions, one round trip:
 
 | query | answer | tells us |
 | --- | --- | --- |
 | `APC _Gi=…,a=q` | `_Gi=…;OK` | it speaks the kitty graphics protocol |
-| `OSC 11 ?` | `rgb:…` | the background, so light or dark is not a guess |
+| `OSC 11 ?` | `rgb:…` or `#rrggbb` | the background, so light or dark is not a guess |
 | `CSI 16 t` | `CSI 6;h;w t` | one character cell in pixels |
+| `CSI 14 t` | `CSI 4;h;w t` | the whole window, for terminals that answer that and not the cell |
 | `CSI c` | `CSI ?…;4;… c` | attribute 4 is sixel |
+
+Every `CSI ?` in the buffer is tried for the attributes, not just the first: a
+terminal answers more than one question with that prefix — `CSI ?2026;2$y` is the
+DECRQM reply for synchronized update, the mode this program itself uses — and a
+reply left in the tty queue by whatever ran before us shares the read. Taking the
+first occurrence missed sixel *and* the sentinel, so start-up paid the whole
+deadline rather than a millisecond.
 
 Device attributes come last and **every** terminal answers them, so that reply
 doubles as the "everything that is coming has come" marker. The read is from
@@ -135,8 +157,13 @@ transmission medium answers `ENOTSUPPORTED`, and would then be sent images it
 cannot draw.
 
 **Without a cell size there are no pixels.** An image that cannot be lined up
-with the labels around it is worse than no image, so a terminal that will not
-say gets text cells — or you measure it yourself and pass `--cell 10x20`.
+with the labels around it is worse than no image, so a terminal that will not say
+gets text cells — and the chart says so under the legend rather than leaving a
+`--graphics kitty` looking ignored. There are three places the size can come
+from, in order: `TIOCGWINSZ`, the `CSI 16 t` reply, and the window size from
+`CSI 14 t` divided by the grid. Or you measure it yourself and pass
+`--cell 10x20`, which outranks all three. A resize re-asks, because that is also
+when a font size changes.
 
 ## 7. The tooltip sits above the grid
 
@@ -187,12 +214,13 @@ The five shades, as github.com serves them:
 | dimmed | `#2a313c` | `#1b4721` | `#2b6a30` | `#46954a` | `#6bc46d` |
 
 The five levels are the one place a converted colour is not good enough. The
-256-colour cube has six steps per channel, and GitHub's dark greens fall between
-two of them: `#033a16` and `#196c2e` round to the same entry, and the nearest
-colour to either is a *grey* — accurate to within a few units, flat on screen,
-and in the dimmed theme not even monotonic. So the levels are **chosen** for
-that mode and everything else is converted. A legible ramp beats an accurate one
-that cannot be read.
+256-colour cube has six steps per channel, and deriving indices collides exactly
+where it must not: in the dark theme levels **0 and 1** (`#151b23` and `#033a16`)
+both land on grey 234, and in the dimmed theme levels 0 and 1 both land on grey
+236 — an empty day and a quiet one drawn identically. The dimmed ramp is otherwise
+non-decreasing in luminance, so the defect is that tie rather than an inversion.
+So the levels are **chosen** for that mode and everything else is converted. A
+legible ramp beats an accurate one that cannot be read.
 
 ## 10. Art is two shades, and the gap between them is measured
 
@@ -209,11 +237,13 @@ and reports CIE76 ΔE.
 The threshold is measured, not chosen. Across the nine palettes GitHub ships
 (three appearances × three seasons):
 
-- **adjacent levels fall as low as ΔE 10.8** — light theme, levels 2 and 3,
+- **adjacent levels fall as low as ΔE 9.1** — light + halloween, levels 1 and 2,
 - **levels two or more apart never fall below ΔE 35.4.**
 
-Hence the rule the CLI enforces and the docs repeat: leave two levels between
-the field and the ink. `Shades::worst` reports the worst palette rather than
+Hence the rule the CLI *warns about* and the docs repeat: leave two levels
+between the field and the ink. One level apart is drawn, with the ΔE and the word
+`faint` next to it — the two combinations that produce no art at all are the ones
+refused outright, and they are further down. `Shades::worst` reports the worst palette rather than
 the current one, because art is drawn once and read by everyone — and for a
 few weeks a year GitHub switches everybody to a seasonal ramp regardless.
 

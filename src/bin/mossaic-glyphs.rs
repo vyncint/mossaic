@@ -13,6 +13,7 @@
 //! None of this applies when the terminal draws pixels: `mossaic
 //! --capabilities` says whether yours does.
 
+use mossaic::cli::Args;
 use mossaic::primer::{Appearance, Palette, Rgb, Season};
 use mossaic::Colour;
 
@@ -26,36 +27,49 @@ const STYLES: [(&str, &str, &str); 3] = [
     ("blocks ", "██", "U+2588           full block"),
 ];
 
+const HELP: &str = "\
+mossaic-glyphs — show the cells mossaic falls back to
+
+usage:
+  mossaic-glyphs [options]
+
+  --color WHEN   (--colour) auto (default), always or never
+  --no-color     (--no-colour) the same as --color never
+  -V, --version  print the version
+  -h, --help     show this help
+
+Terminals that draw pixels never use these. `mossaic --capabilities` says
+whether yours does.";
+
 fn main() {
-    match std::env::args().nth(1).as_deref() {
-        Some("-h" | "--help") => {
-            println!(
-                "mossaic-glyphs — show the cells mossaic falls back to\n\n\
-                 usage:\n  mossaic-glyphs [--color WHEN]\n\n\
-                 Terminals that draw pixels never use these. `mossaic \
-                 --capabilities`\nsays whether yours does.\n\n  \
-                 --color WHEN   auto (default), always or never\n  \
-                 -V, --version  print the version\n  \
-                 -h, --help     show this help"
-            );
-            return;
+    // The shared parser, like the other two binaries. Parsing by hand made this
+    // one disagree with them about everything a user notices: `--color=never` was
+    // silently ignored, an unknown option exited 0, a stray argument was dropped,
+    // and a missing value defaulted instead of saying so.
+    let mut args = Args::from_env("mossaic-glyphs");
+    let mut colour = Colour::default();
+    while let Some(arg) = args.next_arg() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                println!("{HELP}");
+                return;
+            }
+            "-V" | "--version" => {
+                println!("mossaic-glyphs {}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            "--color" | "--colour" => {
+                let raw = args.value("--color");
+                colour = Colour::parse(&raw).unwrap_or_else(|| {
+                    args.fail(&format!("--color wants auto, always or never, not {raw:?}"))
+                });
+            }
+            "--no-color" | "--no-colour" => colour = Colour::Never,
+            other => args.fail(&format!("unknown option {other:?} — try --help")),
         }
-        Some("-V" | "--version") => {
-            println!("mossaic-glyphs {}", env!("CARGO_PKG_VERSION"));
-            return;
-        }
-        _ => {}
     }
-    // `--color never` for a pipe, and NO_COLOR because that is the convention.
-    let choice = match std::env::args().nth(1).as_deref() {
-        Some("--color" | "--colour") => std::env::args()
-            .nth(2)
-            .and_then(|value| Colour::parse(&value))
-            .unwrap_or_default(),
-        Some("--no-colour" | "--no-color") => Colour::Never,
-        _ => Colour::default(),
-    };
-    let colourful = choice.enabled();
+
+    let colourful = colour.enabled();
     let palette = Palette::new(Appearance::Dark, Season::Default, true);
     let paint = |glyph: &str, colour: Rgb| {
         if !colourful {
