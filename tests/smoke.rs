@@ -436,6 +436,49 @@ fn a_missing_file_is_reported_not_swallowed() -> termlens::Result<()> {
 }
 
 #[test]
+fn esc_does_not_quit_the_chart() -> termlens::Result<()> {
+    let mut t = chart(&PREVIEW)?;
+    t.wait_frame(loaded)?;
+    // `Esc` used to be a second quit key, so pressing it to dismiss a tooltip
+    // exited the program. It is now unbound in normal mode, and an unbound key is
+    // ignored — which is only observable by the chart still answering a bound one.
+    t.send(Key::Esc)?;
+    t.send(Key::End)?;
+    let after = t.wait_frame(|s| s.contains("Fri, Dec 31 2027"))?;
+    assert!(
+        after.alternate_screen(),
+        "the chart still owns the screen after Esc:\n{after}"
+    );
+    // And `q` is still the way out.
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success());
+    Ok(())
+}
+
+/// The `?` overlay has to agree with `on_key_normal` about the quit key. Three
+/// surfaces claimed `Esc` quits — this one, `--help` and the README — and nothing
+/// tied any of them to the binding, so all three were free to go stale the moment
+/// the binding changed. This pins the one a reader in the chart actually consults.
+#[test]
+fn the_help_surfaces_do_not_promise_a_key_that_does_nothing() -> termlens::Result<()> {
+    let mut t = chart(&PREVIEW)?;
+    t.wait_frame(loaded)?;
+    t.send(Key::Char('?'))?;
+    let help = t.wait_frame(|s| s.contains("This terminal"))?;
+    let quit = help
+        .text()
+        .lines()
+        .find(|line| line.contains("quit"))
+        .expect("the overlay lists the quit key")
+        .to_string();
+    assert!(
+        !quit.contains("Esc"),
+        "the overlay still offers Esc as a quit key:\n{quit}"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_help_overlay_answers_what_this_terminal_can_do() -> termlens::Result<()> {
     let mut t = chart(&PREVIEW)?;
     t.wait_frame(loaded)?;

@@ -361,7 +361,7 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
         heading(" Chart"),
         row("d", "cycle cell style"),
         row("u · r", "another user · reload"),
-        row("q · Esc", "quit"),
+        row("q", "quit"),
         blank(),
         heading(" This terminal"),
         fact(FACT, "kitty graphics", yes_no(app.caps.kitty).to_string()),

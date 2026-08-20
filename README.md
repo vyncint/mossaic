@@ -198,7 +198,7 @@ the same commands.
 | `d` | cycle cell style — auto / pixel / rounded / snug / squares / grid / spaced / blocks / slim / compact. The legend names it, and says `auto:` while the chart is still choosing |
 | `m` | mouse reporting on or off — off gives the terminal its own selection back |
 | `r` | reload |
-| `q` / `Esc` | quit |
+| `q` | quit — `Esc` cancels the username prompt and closes the help overlay, and does nothing else |
 
 ## Mouse
 
