@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.2.0
+        uses: vyncint/mossaic/action@v0.3.1
         with:
           text: VYNCINT
           year: "2027"
