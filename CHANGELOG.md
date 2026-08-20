@@ -143,13 +143,20 @@ listed under a **Changed** or **Removed** heading.
   direction ("about 115×26" for the bordered grid, against 166×27), and are now
   measured in a pty: 112×19 for pixel or square cells, 165 columns for rounded
   corners. (#31, #33)
-- **The README's screenshot was rendered with the old geometry** — the one image
-  whose entire job is showing that mossaic draws github.com's cell size. It is
-  regenerated, and the caption now names the `--png` command that produces it, so
-  the next reader can check it rather than trust it. (#20, #33)
-- **The README's terminal mock was several versions stale** — no `? help` in the
-  footer, no streak in the summary, no `auto:` on the legend, and an active-day
-  count from before `--today`. It is regenerated from the binary. (#33)
+- **The README is a quarter shorter and both its pictures are 2027.** The headline
+  claim is *"2027 should read VYNCINT"* and the screenshot was a 2026 calendar, so
+  the first thing a reader saw disagreed with the first thing they read. Both
+  images are now the same planned 2027 year — once in pixels, once in sextants —
+  and the screenshot draws the letters on a **level-1 field** rather than on an
+  empty graph, which is the option the guide recommends and the old picture never
+  showed. Its caption is the two commands that reproduce it byte for byte.
+  It was also rendered with the pre-#20 geometry, so the one image whose entire
+  job is showing that mossaic draws github.com's cell size was showing cells a
+  ninth too small; and the terminal mock was several versions stale — no `? help`
+  in the footer, no streak in the summary, no `auto:` on the legend, and an
+  active-day count from before `--today`. Both are regenerated from the binary.
+  The file-layout and test-layer sections, which duplicated `CONTRIBUTING.md`,
+  are now links to it. (#20, #33)
 - **Every byte figure in `docs/DESIGN.md` §4 is now the measured one**, and the
   three places that quoted it agree: 4.9 KB on the wire for a year over kitty
   against 38 KB of sixel, and 243 against 591 bytes for a cursor move. The table
