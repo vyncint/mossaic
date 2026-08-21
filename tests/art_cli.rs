@@ -406,6 +406,55 @@ fn a_shape_survives_the_json_the_action_reads() {
     assert_eq!(parsed["text"], "\u{2665}", "{text}");
 }
 
+/// The font sheet in the README has to be the font the crate ships.
+///
+/// An image of the alphabet is documentation that cannot be spot-checked by
+/// reading it: a glyph gets added, the picture keeps showing the old set, and
+/// nothing says so. So the picture is regenerated here and compared with the
+/// committed one, byte for byte — the same input through the same encoder is
+/// the same file.
+#[test]
+fn the_font_sheet_in_the_readme_is_the_font() {
+    let committed = Path::new(env!("CARGO_MANIFEST_DIR")).join("art/font.png");
+    let fresh = scratch("font-sheet.png");
+    let _ = std::fs::remove_file(&fresh);
+
+    let out = art(&["--font", "--png", &fresh.to_string_lossy()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout(&out).contains("76 glyphs"), "{}", stdout(&out));
+
+    let drawn = std::fs::read(&fresh).expect("the sheet it just wrote");
+    let shipped = std::fs::read(&committed).expect("art/font.png");
+    assert_eq!(
+        drawn.len(),
+        shipped.len(),
+        "art/font.png is {} bytes and the font now draws {} — regenerate it:\n  \
+         cargo run --bin mossaic-art -- --font --png art/font.png",
+        shipped.len(),
+        drawn.len()
+    );
+    assert!(
+        drawn == shipped,
+        "art/font.png is not what the font draws — regenerate it:\n  \
+         cargo run --bin mossaic-art -- --font --png art/font.png"
+    );
+
+    // It is a PNG, and the README points at it.
+    assert_eq!(&shipped[..8], b"\x89PNG\r\n\x1a\n");
+    let readme = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("a README");
+    assert!(
+        readme.contains("](art/font.png)"),
+        "the README shows the sheet"
+    );
+
+    let _ = std::fs::remove_file(&fresh);
+}
+
 #[test]
 fn an_unknown_character_says_what_there_is() {
     let out = art(&["HI~THERE", "--year", "2027"]);

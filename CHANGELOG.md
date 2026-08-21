@@ -25,10 +25,23 @@ listed under a **Changed** or **Removed** heading.
   behind.
 - **Punctuation**: `!` `?` `,` `'` `"` `+` `=` `<` `>` `(` `)` `/` `\` `*` `_`
   `@` `&` `#` `%`. The font is 77 glyphs where it was 39.
-- **[A list of everything the font can draw](README.md#what-you-can-draw)**, in
-  the README — and a test that checks it against the font, symbol by symbol and
-  emoji by emoji. A table of glyphs is exactly the documentation that rots, and
-  it is the only place most people will look.
+- **[A picture of everything the font can draw](README.md#what-you-can-draw)**,
+  in the README and in `docs/ART.md` — every glyph rendered as contribution
+  cells by the same rasteriser that draws the chart, in real Primer greens on a
+  level-1 field. An image rather than a table of characters for the same reason
+  the sextant chart is gone: half of these symbols are ones a browser may have
+  no font for, and a picture of the cells has nothing to be missing.
+- **`mossaic-art --font --png PATH`**, which writes that sheet. The terminal
+  view is still `--font` on its own.
+- **`graphics::sheet`**, the rasteriser generalised from a calendar's seven
+  rows to any rectangle — so the sheet is drawn by the code that draws the
+  chart rather than by a second one that would drift from it. `graphics::grid`
+  is now a call to it and draws identical pixels.
+- **A list of everything the font can draw** in the README as text as well, and
+  tests that check both against the font: every symbol and emoji in the table,
+  and the image itself, regenerated and compared byte for byte. A table of
+  glyphs is exactly the documentation that rots, and it is the only place most
+  people will look.
 
 ### Changed
 

@@ -2120,6 +2120,57 @@ fn the_font_has_what_the_documentation_says_it_has() {
     }
 }
 
+/// The rasteriser draws a rectangle of any shape, not only a calendar's seven
+/// rows — which is what lets the font sheet be drawn by the same code that
+/// draws the chart rather than by a second one that would drift from it.
+#[test]
+fn a_sheet_is_a_grid_of_any_height() {
+    use crate::graphics;
+    use crate::primer::{Appearance, Palette, Season};
+
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    let cell = (9u16, 19u16);
+
+    // Same cells, expressed both ways: a sheet seven rows tall has to be
+    // pixel-for-pixel what the grid draws, or the sheet is a second renderer.
+    let weeks: Vec<[Option<u8>; 7]> = (0..4)
+        .map(|week| {
+            let mut column = [None; 7];
+            for (row, level) in column.iter_mut().enumerate() {
+                *level = (row % 2 == 0).then_some((week % 5) as u8);
+            }
+            column
+        })
+        .collect();
+    let as_sheet: Vec<Vec<Option<u8>>> = weeks.iter().map(|week| week.to_vec()).collect();
+
+    let grid = graphics::grid(&weeks, &palette, cell);
+    let sheet = graphics::sheet(&as_sheet, &palette, cell);
+    assert_eq!((sheet.width, sheet.height), (grid.width, grid.height));
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            assert_eq!(sheet.rgba_at(x, y), grid.rgba_at(x, y), "at {x},{y}");
+        }
+    }
+
+    // And a shape no calendar has: two columns, forty rows.
+    let tall: Vec<Vec<Option<u8>>> = vec![vec![Some(4); 40], vec![None; 40]];
+    let image = graphics::sheet(&tall, &palette, cell);
+    assert_eq!(image.height, 40 * usize::from(cell.1));
+    assert_eq!(image.width, 2 * 2 * usize::from(cell.0));
+    assert!(!image.is_blank());
+
+    // Ragged is allowed: a column that runs out is nothing, not a panic.
+    let ragged: Vec<Vec<Option<u8>>> = vec![vec![Some(4); 3], vec![Some(4)]];
+    assert_eq!(
+        graphics::sheet(&ragged, &palette, cell).height,
+        3 * usize::from(cell.1)
+    );
+
+    // Nothing at all is an empty image rather than a panic.
+    assert!(graphics::sheet(&[], &palette, cell).is_blank());
+}
+
 #[test]
 fn a_glyph_is_looked_up_as_written_before_folding() {
     use crate::art;

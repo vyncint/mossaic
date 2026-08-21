@@ -34,6 +34,13 @@ day gets.
 
 ### Shapes
 
+![Every glyph mossaic can draw, rendered as contribution cells: A-Z, 0-9,
+punctuation, and nineteen shapes, in bright green on a light green field](../art/font.png)
+
+The whole font, drawn by the rasteriser that draws the chart — `mossaic-art
+--font --png art/font.png` writes it, and `mossaic-art --font` prints the same
+set in a terminal. The shapes are the last nineteen.
+
 A shape is written between colons, so it can be typed on any keyboard:
 
 ```sh

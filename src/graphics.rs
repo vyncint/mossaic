@@ -277,17 +277,54 @@ fn day(
 /// The whole year. `levels[week][weekday]` is `None` for a day outside the year or
 /// one still to come, both of which draw nothing at all.
 pub fn grid(levels: &[[Option<u8>; 7]], palette: &Palette, cell: (u16, u16)) -> Image {
+    rectangle(
+        levels.len(),
+        7,
+        |week, weekday| levels[week][weekday],
+        palette,
+        cell,
+    )
+}
+
+/// Any rectangle of days, drawn exactly as the year is drawn — same square,
+/// same pitch, same hairline border. `levels[column][row]`, ragged allowed.
+///
+/// A year is seven rows by definition and a sheet of glyphs is not, which is
+/// the whole reason this is separate from [`grid`]. It draws no calendar and
+/// knows no dates: what it is for is showing cells that mean something other
+/// than a day, at the size and colour a day is drawn at.
+#[must_use]
+pub fn sheet(levels: &[Vec<Option<u8>>], palette: &Palette, cell: (u16, u16)) -> Image {
+    let rows = levels.iter().map(Vec::len).max().unwrap_or(0);
+    rectangle(
+        levels.len(),
+        rows,
+        |column, row| levels[column].get(row).copied().flatten(),
+        palette,
+        cell,
+    )
+}
+
+/// The one loop both of the above are: `at(column, row)` says what to draw,
+/// and `None` draws nothing at all.
+fn rectangle(
+    columns: usize,
+    rows: usize,
+    at: impl Fn(usize, usize) -> Option<u8>,
+    palette: &Palette,
+    cell: (u16, u16),
+) -> Image {
     let (dx, dy, side) = square(cell);
-    let mut image = Image::new(
-        levels.len() * usize::from(cell.0) * usize::from(COLUMNS_PER_DAY),
-        7 * usize::from(cell.1),
-    );
-    for (week, column) in levels.iter().enumerate() {
-        for (weekday, level) in column.iter().enumerate() {
-            let Some(level) = level else { continue };
-            let x = (week * usize::from(cell.0) * usize::from(COLUMNS_PER_DAY)) as f32 + dx;
-            let y = (weekday * usize::from(cell.1)) as f32 + dy;
-            day(&mut image, x, y, side, palette.cell(*level), palette, None);
+    let stride = usize::from(cell.0) * usize::from(COLUMNS_PER_DAY);
+    let mut image = Image::new(columns * stride, rows * usize::from(cell.1));
+    for column in 0..columns {
+        for row in 0..rows {
+            let Some(level) = at(column, row) else {
+                continue;
+            };
+            let x = (column * stride) as f32 + dx;
+            let y = (row * usize::from(cell.1)) as f32 + dy;
+            day(&mut image, x, y, side, palette.cell(level), palette, None);
         }
     }
     image

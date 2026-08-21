@@ -191,7 +191,22 @@ the same commands.
 
 A glyph is 5×5 days with a blank column between, placed on Mon–Fri so the
 weekends stay clear. That makes **eight glyphs the limit** for one year.
-`mossaic-art --font` draws the whole set in your own terminal.
+
+![Every glyph mossaic can draw, rendered as contribution cells: A-Z, 0-9,
+punctuation, and nineteen shapes, in bright green on a light green field](art/font.png)
+
+That is the whole font, drawn by the same rasteriser that draws the chart — real
+Primer greens, github.com's own square on github.com's own pitch, bright glyphs
+on a level-1 field. It is an image rather than a table of characters for the
+same reason the sextant chart is no longer on this page: half of these symbols
+are ones a browser may have no font for, and a picture of the cells has nothing
+to be missing. `mossaic-art --font` draws the same set in your own terminal, and
+`--png` writes this file:
+
+```sh
+mossaic-art --font                      # in the terminal
+mossaic-art --font --png art/font.png   # the sheet above
+```
 
 **Letters and digits.** Lowercase draws the uppercase glyph, so `vyncint` and
 `VYNCINT` are the same picture:
@@ -207,9 +222,10 @@ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
 - . ! ? , ' " + = < > ( ) / \ * _ @ & # %
 ```
 
-**Shapes**, written between colons — `mossaic-art "I :heart: RUST"`. The name is
-the reliable way in; paste the symbol or the emoji instead if you can type one,
-and it draws the same glyph:
+**Shapes**, written between colons — `mossaic-art "I :heart: RUST"`. They are
+the last nineteen glyphs of the sheet above, in this order. The name is the
+reliable way in; paste the symbol or the emoji instead if you can type one, and
+it draws the same glyph:
 
 | | write | or paste |
 | --- | --- | --- |
