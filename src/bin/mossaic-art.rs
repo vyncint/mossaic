@@ -10,13 +10,13 @@
 //! name; pushing is a separate command it prints for you to run.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Local, NaiveDate};
 use mossaic::art::{self, Grid};
 use mossaic::cli::{Args, YEARS};
 use mossaic::primer::{Appearance, Palette, Season};
-use mossaic::{github, plan, primer, thousands, Colour};
+use mossaic::{github, graphics, plan, png, primer, thousands, Colour};
 
 const HELP: &str = "\
 mossaic-art — write text into a GitHub contribution graph by dating commits
@@ -24,7 +24,10 @@ mossaic-art — write text into a GitHub contribution graph by dating commits
 usage:
   mossaic-art TEXT [options]
 
-  TEXT                what to draw, e.g. VYNCINT (A-Z, 0-9, space, - and .)
+  TEXT                what to draw, e.g. VYNCINT. Letters, digits, punctuation
+                      and shapes: `I :heart: RUST`. A shape is written between
+                      colons, or pasted as the symbol or emoji it depicts.
+                      --font lists everything
   --year YEAR         which year's calendar (default: this one)
   --commits N         commits per lit day (default 4); keep it uniform for one
                       flat shade
@@ -61,6 +64,8 @@ usage:
                       (default: mossaic-plan.json)
   --save              write the plan, so later runs need no flags at all
   --font              print every glyph the font has, and exit
+  --png PATH          with --font, write the glyphs to a PNG instead of the
+                      terminal — the sheet the README shows
   --track [USER]      compare the plan with what has actually been contributed:
                       how far along, what today owes, and whether the text can
                       still be drawn at all. Reads --merge if given, otherwise
@@ -79,7 +84,9 @@ examples:
   mossaic-art VYNCINT --year 2027 --repo ../art --write   local commits, never pushed
   mossaic-art --backfill --repo ../art --write        commit just what the plan is short
   mossaic-art --track --today 2027-06-01              what that day will owe
+  mossaic-art \"I :heart: RUST\" --year 2027            a shape among the letters
   mossaic-art --font                                  every glyph, side by side
+  mossaic-art --font --png art/font.png               the same sheet, as an image
 
 Save the plan once and later runs need no flags at all:
 
@@ -947,14 +954,7 @@ fn show_font(colour: bool) {
     for chunk in characters.chunks(PER_ROW) {
         let labels: Vec<String> = chunk
             .iter()
-            .map(|character| {
-                let name = if *character == ' ' {
-                    "space".to_string()
-                } else {
-                    character.to_string()
-                };
-                format!("{name:<12}")
-            })
+            .map(|character| format!("{:<12}", art::label(*character)))
             .collect();
         println!("  {}", labels.join("").trim_end());
         for row in 0..art::GLYPH_ROWS {
@@ -970,6 +970,63 @@ fn show_font(colour: bool) {
         }
         println!();
     }
+}
+
+/// Every glyph the font has, drawn as contribution cells and written to a PNG.
+///
+/// The font view above is for a terminal; this is for everywhere else. A
+/// README cannot show block sextants — too few systems have a font for them —
+/// and it cannot show the symbols either, since half of them are
+/// ambiguous-width. An image of the real rasteriser's output has neither
+/// problem, and it is what the glyphs will actually look like on a graph.
+fn write_font_sheet(path: &Path) {
+    /// Glyphs to a row. Thirteen is what makes the sheet about twice as wide
+    /// as it is tall, which is the shape a README column wants.
+    const PER_ROW: usize = 13;
+    /// Bright glyphs on a light-green field, which is how the art at the top
+    /// of the README is drawn — and the arrangement that keeps every day of a
+    /// year green rather than leaving 300 of them dark.
+    const INK: u8 = 4;
+    const FIELD: u8 = 1;
+
+    // Space draws nothing, so a blank block in the middle of the sheet would
+    // read as a mistake rather than as a glyph.
+    let characters: Vec<char> = art::alphabet().filter(|c| !c.is_whitespace()).collect();
+    /// Field between glyphs, and around them. One cell was not enough: with
+    /// the gutter the same shade as the field, neighbouring glyphs had no
+    /// boundary and a row of letters read as one long smear.
+    const GAP: usize = 2;
+    let rows = characters.len().div_ceil(PER_ROW);
+    let width = PER_ROW * (art::GLYPH_COLS + GAP) + GAP;
+    let height = rows * (art::GLYPH_ROWS + GAP) + GAP;
+
+    // The field first, so the gaps between glyphs are the field rather than
+    // holes in it, then each glyph's lit days over the top.
+    let mut levels: Vec<Vec<Option<u8>>> = vec![vec![Some(FIELD); height]; width];
+    for (index, character) in characters.iter().enumerate() {
+        let glyph = art::glyph(*character).expect("from the font itself");
+        let left = GAP + (index % PER_ROW) * (art::GLYPH_COLS + GAP);
+        let top = GAP + (index / PER_ROW) * (art::GLYPH_ROWS + GAP);
+        for (row, line) in glyph.iter().enumerate() {
+            for (column, lit) in line.chars().enumerate() {
+                if lit == '#' {
+                    levels[left + column][top + row] = Some(INK);
+                }
+            }
+        }
+    }
+
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    let image = graphics::sheet(&levels, &palette, (9, 19));
+    png::write(path, &image, palette.canvas)
+        .unwrap_or_else(|error| fail(&format!("could not write {}: {error}", path.display())));
+    println!(
+        "wrote {} — {}x{} px, {} glyphs",
+        path.display(),
+        image.width,
+        image.height,
+        characters.len()
+    );
 }
 
 /// Existing contributions from a saved `gh api graphql` response.
@@ -1077,6 +1134,7 @@ fn parse_args() -> Option<Options> {
     };
 
     let mut font = false;
+    let mut png_path: Option<PathBuf> = None;
     let mut track = false;
     let mut tracking: Option<String> = None;
     let mut args = Args::from_env("mossaic-art");
@@ -1161,6 +1219,7 @@ fn parse_args() -> Option<Options> {
             "--plan" => options.plan_path = args.value("--plan").into(),
             "--save" => options.save = true,
             "--font" => font = true,
+            "--png" => png_path = Some(PathBuf::from(args.value("--png"))),
             "--track" => {
                 track = true;
                 // An optional user follows, if the next argument is not a flag.
@@ -1171,14 +1230,22 @@ fn parse_args() -> Option<Options> {
             other if other.starts_with('-') => {
                 fail(&format!("unknown option {other:?} — try --help"))
             }
-            other if options.text.is_empty() => options.text = other.to_string(),
+            other if options.text.is_empty() => {
+                // Expanded here rather than at every use: the plan is saved
+                // uppercased and read back by the tracker, and `:star:` has to
+                // survive both. A character does.
+                options.text = art::canonical(other).unwrap_or_else(|error| fail(&error));
+            }
             other => fail(&format!("unexpected argument {other:?}")),
         }
     }
 
     // After the loop, so that flags on either side of it are all in hand.
     if font {
-        show_font(options.colour.enabled());
+        match &png_path {
+            Some(path) => write_font_sheet(path),
+            None => show_font(options.colour.enabled()),
+        }
         return None;
     }
     // A saved plan fills in whatever was not typed. Typed flags always win, so

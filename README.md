@@ -36,7 +36,8 @@ labels around them stay text.
 [Writing text into the graph](docs/ART.md) ·
 [The GitHub Action](action/README.md)
 
-**Reference** · [Usage](#usage) · [Keys](#keys) · [Mouse](#mouse) ·
+**Reference** · [Usage](#usage) · [What you can draw](#what-you-can-draw) ·
+[Keys](#keys) · [Mouse](#mouse) ·
 [How it works](#how-it-works) · [Known limits](#known-limits) ·
 [Design notes](docs/DESIGN.md) · [Contributing](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
@@ -175,6 +176,8 @@ mossaic --no-mouse               # leave mouse reporting alone
 
 ```sh
 mossaic-art VYNCINT --year 2027 --background 1   # draw text on a field
+mossaic-art "I :heart: RUST" --year 2027         # shapes, among the letters
+mossaic-art --font                               # every glyph it can draw
 mossaic-art --track                              # how far along the plan is
 mossaic-art --track --today 2027-06-01           # what a day still to come will owe
 mossaic-art --backfill --repo ../art             # commit just what the plan is short
@@ -183,6 +186,73 @@ mossaic-glyphs                                   # this terminal's fallback cell
 
 From a checkout, `cargo run -- …` and `cargo run --bin mossaic-art -- …` are
 the same commands.
+
+## What you can draw
+
+A glyph is 5×5 days with a blank column between, placed on Mon–Fri so the
+weekends stay clear. That makes **eight glyphs the limit** for one year.
+
+![Every glyph mossaic can draw, rendered as contribution cells: A-Z, 0-9,
+punctuation, and nineteen shapes, in bright green on a light green field](art/font.png)
+
+That is the whole font, drawn by the same rasteriser that draws the chart — real
+Primer greens, github.com's own square on github.com's own pitch, bright glyphs
+on a level-1 field. It is an image rather than a table of characters for the
+same reason the sextant chart is no longer on this page: half of these symbols
+are ones a browser may have no font for, and a picture of the cells has nothing
+to be missing. `mossaic-art --font` draws the same set in your own terminal, and
+`--png` writes this file:
+
+```sh
+mossaic-art --font                      # in the terminal
+mossaic-art --font --png art/font.png   # the sheet above
+```
+
+**Letters and digits.** Lowercase draws the uppercase glyph, so `vyncint` and
+`VYNCINT` are the same picture:
+
+```
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+0 1 2 3 4 5 6 7 8 9
+```
+
+**Punctuation**, and space:
+
+```
+- . ! ? , ' " + = < > ( ) / \ * _ @ & # %
+```
+
+**Shapes**, written between colons — `mossaic-art "I :heart: RUST"`. They are
+the last nineteen glyphs of the sheet above, in this order. The name is the
+reliable way in; paste the symbol or the emoji instead if you can type one, and
+it draws the same glyph:
+
+| | write | or paste |
+| --- | --- | --- |
+| ★ | `:star:` | ⭐ ☆ ✩ ✭ |
+| ♥ | `:heart:` `:love:` | ❤ ♡ 💙 💚 💜 🧡 |
+| ☺ | `:smile:` `:happy:` | ☻ 😀 😃 🙂 😊 |
+| ☹ | `:sad:` `:cry:` `:frown:` | 🙁 😢 😭 |
+| ✓ | `:check:` `:tick:` | ✔ ✅ |
+| ● | `:circle:` `:dot:` | ○ ⬤ |
+| □ | `:square:` | ■ ◻ ◼ |
+| ▲ | `:triangle:` | △ |
+| ◆ | `:diamond:` | ◇ |
+| ♪ | `:note:` `:music:` | ♫ 🎵 |
+| ☀ | `:sun:` | 🌞 |
+| ☾ | `:moon:` | 🌙 ☽ |
+| ⚡ | `:bolt:` `:zap:` | 🗲 |
+| ↑ ↓ ← → | `:up:` `:down:` `:left:` `:right:` | |
+| ☠ | `:skull:` | 💀 |
+| ✿ | `:flower:` | 🌸 🌷 |
+
+A colon always opens a shape name, so `:` has no glyph of its own — which is
+what keeps the grammar to one reading. A name nobody has drawn, or a colon that
+closes nothing, is refused with the list above rather than guessed at.
+
+Adding a glyph is one table entry in `src/art.rs` — the shape rules are checked
+when the crate compiles. See
+[CONTRIBUTING.md](CONTRIBUTING.md#7-adding-a-glyph-to-the-font).
 
 ## Keys
 
@@ -210,30 +280,24 @@ the same commands.
 
 ## Without a terminal that draws pixels
 
-Nothing is lost but the pixels. The same year as the image above, in block
-sextants — same layout, same colours, same tooltip. The field means every day of
-2027 is green, which is what the 365-day streak is:
+Nothing is lost but the pixels. The chart falls back to block sextants: the same
+layout, the same Primer colours, the same tooltip with the same wording, and a
+day still two character columns wide and one row tall — so the month labels and
+the weekday gutter line up exactly as they do over the images. Drawn with
+`--background 1`, the field means every day of the year is green, which is what
+a 365-day streak looks like.
 
+One command shows it, in any terminal at all:
+
+```sh
+mossaic --demo --graphics text
 ```
-┌ mossaic ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│vyncint  ·  2027  ·  590 contributions in 2027                                                                                                                              │
-│                                                                               ▐ 1 contribution on July 28th. ▌                                                             │
-│    Jan               Feb         Mar         Apr         May            Jun         Jul       ▼ Aug            Sep         Oct            Nov         Dec                  │
-│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
-│Mon    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
-│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
-│Wed    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
-│       🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
-│Fri 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛          │
-│    🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛             │
-│                                                                                                                                                                            │
-│Fri, Dec 31 2027  ·  1 contribution                                                                                                                                         │
-│Less 🬫🬛 🬫🬛 🬫🬛 🬫🬛 🬫🬛 More   ·   auto: rounded cells                                                                                                                          │
-│365 active days  ·  365-day streak  ·  longest 365  ·  best Feb 8 (4)                                                                                                       │
-│                                                                                                                                                                            │
-│←→↑↓ day/week  ·  t today  ·  d cells  ·  m mouse off  ·  r reload  ·  q quit  ·  ? help  ·  preview                                                                        │
-└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+It is not printed on this page because it is drawn with block-sextant characters
+(`U+1FB2B`, `U+1FB1B`, added in Unicode 13) that too few systems have a font
+for. Where one is missing the browser substitutes a font of a different width
+and shears every row of a 176-column chart apart — a worse advertisement for the
+fallback than no picture at all.
 
 ## How it works
 

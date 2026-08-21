@@ -143,45 +143,52 @@ outside contributor can send. If the chart looks wrong on your terminal:
 
 ## 7. Adding a glyph to the font
 
-The `mossaic-art` binary draws text with a 5×5 font in `src/art.rs`. It has A–Z, 0–9,
-space, `-` and `.` — everything else is a gap someone can fill, and filling one
-is a single table entry:
+The `mossaic-art` binary draws text with a 5×5 font in `src/art.rs`. It has A–Z,
+0–9, punctuation, and a set of named shapes — everything else is a gap someone
+can fill, and filling one is a single table entry:
 
 ```rust
-('!', ["..#..", "..#..", "..#..", ".....", "..#.."]),
+('^', ["..#..", ".#.#.", ".....", ".....", "....."]),
 ```
+
+A **shape** is two entries, because a symbol nobody can type is a shape nobody
+can draw. The glyph goes in `FONT` keyed by its character, and its name — or
+names — go in `SHAPES` beside it:
+
+```rust
+('\u{2601}', ["..##.", ".####", "#####", ".....", "....."]),   // FONT
+("cloud", '\u{2601}'),                                          // SHAPES
+```
+
+That is what makes `mossaic-art ":cloud:"` work. If the shape has a common
+emoji spelling, one line in `FOLD` points it at the same glyph, so someone who
+pastes 🌥 gets what they meant rather than an error about a codepoint.
 
 See what you made:
 
 ```sh
-cargo run --bin mossaic-art -- --font          # every glyph, side by side
-cargo run --bin mossaic-art -- "HI!" --year 2027   # in a year, at the real size
+cargo run --bin mossaic-art -- --font                # every glyph, side by side
+cargo run --bin mossaic-art -- "HI!" --year 2027     # in a year, at the real size
+cargo run --bin mossaic-art -- ":cloud:" --year 2027 # a shape, at the real size
 ```
 
-Three rules are checked **when the crate compiles**, so a mistake is a build
+Six rules are checked **when the crate compiles**, so a mistake is a build
 failure with the reason rather than a panic for whoever draws it first:
 
 1. exactly five rows of exactly five characters,
 2. only `#` and `.`,
-3. no character twice.
+3. no character twice,
+4. a shape name names a character the font actually has,
+5. shape names are lowercase ASCII, and no name twice — `:STAR:` has to fold to
+   one thing, because every plan is stored uppercased,
+6. nothing folds to a character the font lacks, and a folded character is not
+   itself in the font — one bitmap per shape.
 
-Two more are checked by `cargo test --lib`, because a compiler cannot judge
-them: a glyph must draw *something* and not everything, and no two characters
-may draw the same pixels — two that do are indistinguishable once they are on
-the graph.
-
-Beyond that it is a judgement call, and the bar is legibility at five pixels
-square next to its neighbours. `--font` is the argument to make in the PR: paste
-what it prints.
-
-Two things to know before proposing something bigger:
-
-- **Width is uniform on purpose.** `6N - 1` describes the width of any text, and
-  the placement, the centring and the eight-character limit all rest on it. A
-  variable-width font is a real design change, not a glyph.
-- **The table is uppercase**, and lookup tries the character as written before
-  folding — so lowercase glyphs can be added later without touching anything
-  else.
+Two more rules are checked by the tests rather than the compiler, because they
+are judgement rather than shape: no glyph may be blank or a solid block (either
+reads as no character at all), and no two glyphs may draw the same pixels. The
+README's list of what the font can draw is checked against the font too, so a
+new glyph that is not documented fails the suite.
 
 ## 8. Code style
 

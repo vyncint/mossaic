@@ -22,13 +22,46 @@ mossaic-art VYNCINT --year 2027 \
     --repo ../vyncint-art --write                             # local commits
 ```
 
-Letters are a 5×5 font (A–Z, 0–9, space, `-`, `.`), one blank column between them,
-placed on rows Mon–Fri so Sunday and Saturday stay clear. `mossaic-art --font` prints the
-whole set; adding to it is one table entry in `src/art.rs`, with the shape rules
-checked when the crate compiles — see
-[CONTRIBUTING.md §7](../CONTRIBUTING.md#7-adding-a-glyph-to-the-font). `VYNCINT` is 41 of the
-year's 53 columns and is centred by default; `--start-week` and `--top` move it,
-`--commits` sets how many commits each lit day gets.
+Glyphs are a 5×5 font — letters, digits, punctuation and shapes — one blank
+column between them, placed on rows Mon–Fri so Sunday and Saturday stay clear.
+`mossaic-art --font` prints the whole set and the
+[README lists it](../README.md#what-you-can-draw); adding to it is one table
+entry in `src/art.rs`, with the shape rules checked when the crate compiles —
+see [CONTRIBUTING.md §7](../CONTRIBUTING.md#7-adding-a-glyph-to-the-font).
+`VYNCINT` is 41 of the year's 53 columns and is centred by default;
+`--start-week` and `--top` move it, `--commits` sets how many commits each lit
+day gets.
+
+### Shapes
+
+![Every glyph mossaic can draw, rendered as contribution cells: A-Z, 0-9,
+punctuation, and nineteen shapes, in bright green on a light green field](../art/font.png)
+
+The whole font, drawn by the rasteriser that draws the chart — `mossaic-art
+--font --png art/font.png` writes it, and `mossaic-art --font` prints the same
+set in a terminal. The shapes are the last nineteen.
+
+A shape is written between colons, so it can be typed on any keyboard:
+
+```sh
+mossaic-art "I :heart: RUST" --year 2027
+mossaic-art ":star::star::star:" --year 2027
+```
+
+The symbol itself works where you can type one — `mossaic-art "I \u{2665} RUST"` — and so
+does a pasted emoji, variation selector and all: ⭐ draws `:star:`, 😢 draws
+`:cry:`. All three spellings become the same character before anything else
+sees them, which is what lets a shape survive being written to a plan,
+uppercased, and read back by `--track` every morning.
+
+Because a colon always opens a shape name, `:` has no glyph of its own. A name
+nobody has drawn, or a colon that closes nothing, is refused with the list of
+shapes rather than guessed at:
+
+```
+mossaic-art: no shape called "wombat" — the font has the shapes :star: :heart: …
+mossaic-art: unclosed ':' — a shape is written :name:, and the font has …
+```
 
 **Eight characters is the limit**, whatever the year. Nine fit on paper — five
 columns a letter plus one between is `6N − 1`, and nine of those is 53, exactly a

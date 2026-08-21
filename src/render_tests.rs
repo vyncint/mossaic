@@ -1599,8 +1599,8 @@ fn letters_are_five_columns_with_one_between() {
     assert_eq!(art::bitmap("ABCDEFGHI").unwrap().len(), 53);
     assert!(art::bitmap("a").is_ok(), "case is not a distinction here");
 
-    let error = art::bitmap("A+B").unwrap_err();
-    assert!(error.contains('+'), "unknown glyphs are named: {error}");
+    let error = art::bitmap("A~B").unwrap_err();
+    assert!(error.contains('~'), "unknown glyphs are named: {error}");
     // Every character the font claims to have, it has.
     for character in art::alphabet() {
         assert!(art::glyph(character).is_some());
@@ -1957,6 +1957,220 @@ fn the_font_stays_readable_as_it_grows() {
     assert!(art::alphabet().count() >= 39);
 }
 
+/// Every shape the font names can be drawn by that name, and every alias
+/// draws the same picture as the name it stands beside.
+#[test]
+fn every_shape_name_draws_its_shape() {
+    use crate::art;
+
+    for (name, character) in art::shapes() {
+        let glyph = art::glyph(character)
+            .unwrap_or_else(|| panic!(":{name}: names {character:?}, which the font cannot draw"));
+
+        // Through the grammar, which is how anyone will actually reach it.
+        let columns =
+            art::bitmap(&format!(":{name}:")).unwrap_or_else(|error| panic!(":{name}: — {error}"));
+        assert_eq!(columns.len(), art::GLYPH_COLS, ":{name}: is one glyph wide");
+
+        for (index, column) in columns.iter().enumerate() {
+            for (row, lit) in column.iter().enumerate() {
+                assert_eq!(
+                    *lit,
+                    glyph[row].as_bytes()[index] == b'#',
+                    ":{name}: drew something other than {character:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A name is matched without regard to case, because every plan is stored
+/// uppercased and read back by the tracker. `:STAR:` reaching the font as
+/// nothing at all would break the round trip for anyone who typed a shape.
+#[test]
+fn a_shape_survives_the_uppercasing_a_plan_goes_through() {
+    use crate::art;
+
+    let typed = art::canonical("i :heart: rust").expect("a heart");
+    let stored = typed.to_uppercase();
+    assert_eq!(stored, "I \u{2665} RUST", "the character, not the name");
+    assert_eq!(
+        art::bitmap(&stored).unwrap().len(),
+        art::bitmap(&typed).unwrap().len(),
+        "and it still draws after the round trip"
+    );
+
+    // The name itself folds too, for a plan written by hand.
+    assert_eq!(
+        art::canonical(":STAR:").unwrap(),
+        art::canonical(":star:").unwrap()
+    );
+}
+
+/// The shape grammar, including every way of getting it wrong.
+#[test]
+fn the_shape_grammar_is_two_colons_and_says_so_when_it_is_not() {
+    use crate::art;
+
+    // Text with no colon in it is returned unchanged — the common case pays
+    // nothing for the grammar existing.
+    assert_eq!(art::canonical("VYNCINT").unwrap(), "VYNCINT");
+    assert_eq!(art::canonical("").unwrap(), "");
+
+    // One shape, several shapes, and shapes among letters.
+    assert_eq!(art::canonical(":star:").unwrap(), "\u{2605}");
+    assert_eq!(art::canonical(":star::star:").unwrap(), "\u{2605}\u{2605}");
+    assert_eq!(art::canonical("A:star:B").unwrap(), "A\u{2605}B");
+
+    // A name nobody has drawn names what there is, rather than drawing
+    // something approximate.
+    let unknown = art::canonical(":wombat:").unwrap_err();
+    assert!(unknown.contains("wombat"), "{unknown}");
+    assert!(unknown.contains(":star:"), "it lists the shapes: {unknown}");
+
+    // An empty name is a typo, not a shape.
+    assert!(art::canonical("::").is_err());
+
+    // A lone colon cannot be drawn — `:` has no glyph, deliberately, so that
+    // the grammar has exactly one reading. The message says what a colon is
+    // for rather than "no glyph for ':'", which would be true and useless.
+    let unclosed = art::canonical("12:30").unwrap_err();
+    assert!(unclosed.contains("unclosed"), "{unclosed}");
+    assert!(unclosed.contains(":name:"), "{unclosed}");
+    assert!(
+        art::glyph(':').is_none(),
+        "':' opens a shape, it is not one"
+    );
+}
+
+/// Someone who pastes an emoji has said what they meant.
+#[test]
+fn a_pasted_emoji_draws_the_shape_it_depicts() {
+    use crate::art;
+
+    for (pasted, name) in [
+        ("\u{2b50}", "star"),
+        ("\u{2764}", "heart"),
+        ("\u{1f499}", "heart"),
+        ("\u{1f600}", "smile"),
+        ("\u{1f622}", "cry"),
+        ("\u{2714}", "check"),
+        ("\u{1f319}", "moon"),
+        ("\u{1f337}", "flower"),
+    ] {
+        let wanted = art::shape(name).expect("a shape by that name");
+        assert_eq!(
+            art::bitmap(pasted).unwrap(),
+            art::bitmap(&wanted.to_string()).unwrap(),
+            "{pasted:?} should draw :{name}:"
+        );
+    }
+
+    // An emoji keyboard adds a variation selector, which says how to draw the
+    // character before it and nothing about which character it is. Dropped
+    // rather than refused: it is invisible, so the error would name a
+    // character the person cannot see.
+    assert_eq!(
+        art::canonical("\u{2764}\u{fe0f}").unwrap(),
+        art::canonical(":heart:").unwrap()
+    );
+}
+
+/// What a character is called in a message. Shapes are named because a name
+/// renders in every terminal and every browser, and several of the symbols do
+/// not — which is the whole reason the grammar exists.
+#[test]
+fn a_shape_is_named_rather_than_printed() {
+    use crate::art;
+
+    assert_eq!(art::label('\u{2605}'), ":star:");
+    assert_eq!(art::label('A'), "A");
+    assert_eq!(art::label(' '), "space");
+    assert_eq!(art::shape_name('\u{2665}'), Some("heart"));
+    assert_eq!(art::shape_name('A'), None);
+
+    // Several names may point at one character; the first is the one printed.
+    assert_eq!(art::shape("love"), art::shape("heart"));
+    assert_eq!(art::label(art::shape("love").unwrap()), ":heart:");
+    assert_eq!(art::shape("cry"), art::shape("sad"));
+}
+
+/// The set the README promises, and the shapes the error messages promise.
+#[test]
+fn the_font_has_what_the_documentation_says_it_has() {
+    use crate::art;
+
+    for expected in ('A'..='Z').chain('0'..='9').chain([
+        ' ', '-', '.', '!', '?', ',', '+', '=', '(', ')', '/', '*', '@', '#', '%',
+    ]) {
+        assert!(art::glyph(expected).is_some(), "the font lost {expected:?}");
+    }
+    for named in [
+        "star", "heart", "smile", "cry", "check", "circle", "square", "triangle", "diamond",
+        "note", "sun", "moon", "bolt", "up", "down", "left", "right", "skull", "flower",
+    ] {
+        assert!(art::shape(named).is_some(), "the font lost :{named}:");
+    }
+
+    // Every shape is reachable both ways round: named, and by the character
+    // the name resolves to.
+    for (name, character) in art::shapes() {
+        assert_eq!(art::shape(name), Some(character));
+        assert!(art::glyph(character).is_some());
+    }
+}
+
+/// The rasteriser draws a rectangle of any shape, not only a calendar's seven
+/// rows — which is what lets the font sheet be drawn by the same code that
+/// draws the chart rather than by a second one that would drift from it.
+#[test]
+fn a_sheet_is_a_grid_of_any_height() {
+    use crate::graphics;
+    use crate::primer::{Appearance, Palette, Season};
+
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    let cell = (9u16, 19u16);
+
+    // Same cells, expressed both ways: a sheet seven rows tall has to be
+    // pixel-for-pixel what the grid draws, or the sheet is a second renderer.
+    let weeks: Vec<[Option<u8>; 7]> = (0..4)
+        .map(|week| {
+            let mut column = [None; 7];
+            for (row, level) in column.iter_mut().enumerate() {
+                *level = (row % 2 == 0).then_some((week % 5) as u8);
+            }
+            column
+        })
+        .collect();
+    let as_sheet: Vec<Vec<Option<u8>>> = weeks.iter().map(|week| week.to_vec()).collect();
+
+    let grid = graphics::grid(&weeks, &palette, cell);
+    let sheet = graphics::sheet(&as_sheet, &palette, cell);
+    assert_eq!((sheet.width, sheet.height), (grid.width, grid.height));
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            assert_eq!(sheet.rgba_at(x, y), grid.rgba_at(x, y), "at {x},{y}");
+        }
+    }
+
+    // And a shape no calendar has: two columns, forty rows.
+    let tall: Vec<Vec<Option<u8>>> = vec![vec![Some(4); 40], vec![None; 40]];
+    let image = graphics::sheet(&tall, &palette, cell);
+    assert_eq!(image.height, 40 * usize::from(cell.1));
+    assert_eq!(image.width, 2 * 2 * usize::from(cell.0));
+    assert!(!image.is_blank());
+
+    // Ragged is allowed: a column that runs out is nothing, not a panic.
+    let ragged: Vec<Vec<Option<u8>>> = vec![vec![Some(4); 3], vec![Some(4)]];
+    assert_eq!(
+        graphics::sheet(&ragged, &palette, cell).height,
+        3 * usize::from(cell.1)
+    );
+
+    // Nothing at all is an empty image rather than a panic.
+    assert!(graphics::sheet(&[], &palette, cell).is_blank());
+}
+
 #[test]
 fn a_glyph_is_looked_up_as_written_before_folding() {
     use crate::art;
@@ -1971,8 +2185,8 @@ fn a_glyph_is_looked_up_as_written_before_folding() {
     );
 
     // And the message for a character nobody has drawn yet says what there is.
-    let error = art::bitmap("A+B").unwrap_err();
-    assert!(error.contains('+'), "{error}");
+    let error = art::bitmap("A~B").unwrap_err();
+    assert!(error.contains('~'), "{error}");
     assert!(
         error.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
         "it should name the alphabet: {error}"
