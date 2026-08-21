@@ -899,6 +899,14 @@ fn levels_of(calendar: &Calendar) -> Vec<[Option<u8>; 7]> {
 
 /// Read a sixel back into pixels, so the encoder is checked against the format
 /// rather than against itself.
+///
+/// "Against itself" is a real risk here and not a slogan: this decoder used to
+/// convert a percentage back with `p * 255 / 100`, which is the exact inverse
+/// of the encoder's own rounding, so a systematic disagreement with what a
+/// terminal does would have round-tripped perfectly. Terminals round
+/// (`(p * 255 + 50) / 100`), so this rounds, and the assertions carry the one
+/// step of slack that costs. The other check on the same encoder now runs
+/// through a decoder nobody here wrote — `tests/pixels.rs`, off the wire.
 fn decode_sixel(payload: &str) -> (usize, usize, Vec<Option<[u8; 3]>>) {
     let body = payload
         .strip_prefix("\x1bP0;1;0q")
@@ -941,9 +949,9 @@ fn decode_sixel(payload: &str) -> (usize, usize, Vec<Option<[u8; 3]>>) {
                     palette.insert(
                         colour,
                         [
-                            (parts[1] * 255 / 100) as u8,
-                            (parts[2] * 255 / 100) as u8,
-                            (parts[3] * 255 / 100) as u8,
+                            ((parts[1] * 255 + 50) / 100) as u8,
+                            ((parts[2] * 255 + 50) / 100) as u8,
+                            ((parts[3] * 255 + 50) / 100) as u8,
                         ],
                     );
                 }
