@@ -182,7 +182,21 @@ fn a_shape_round_trips_through_a_saved_plan() {
     );
 
     // And read back by the tracker, which is the run that happens every day.
-    let tracked = run(&["--track", "--no-colour", "--today", "2027-06-01"]);
+    // Against a saved calendar rather than the network: without `--merge` this
+    // asks `gh` whose graph to read, which is not a question a test may ask.
+    // The path is absolute because the run happens in the scratch directory.
+    let calendar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("art/vyncint-2027.json")
+        .to_string_lossy()
+        .into_owned();
+    let tracked = run(&[
+        "--track",
+        "--merge",
+        &calendar,
+        "--no-colour",
+        "--today",
+        "2027-06-01",
+    ]);
     assert!(
         tracked.status.success(),
         "{}",
