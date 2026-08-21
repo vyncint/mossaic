@@ -92,6 +92,137 @@ const FONT: &[(char, [&str; GLYPH_ROWS])] = &[
     (' ', [".....", ".....", ".....", ".....", "....."]),
     ('-', [".....", ".....", "#####", ".....", "....."]),
     ('.', [".....", ".....", ".....", ".....", "..#.."]),
+    ('!', ["..#..", "..#..", "..#..", ".....", "..#.."]),
+    ('?', [".###.", "#...#", "..##.", ".....", "..#.."]),
+    (',', [".....", ".....", ".....", "..#..", ".#..."]),
+    ('\'', ["..#..", "..#..", ".....", ".....", "....."]),
+    ('"', [".#.#.", ".#.#.", ".....", ".....", "....."]),
+    ('+', [".....", "..#..", "#####", "..#..", "....."]),
+    ('=', [".....", "#####", ".....", "#####", "....."]),
+    ('<', ["...#.", "..#..", ".#...", "..#..", "...#."]),
+    ('>', [".#...", "..#..", "...#.", "..#..", ".#..."]),
+    ('(', ["..##.", ".#...", ".#...", ".#...", "..##."]),
+    (')', [".##..", "...#.", "...#.", "...#.", ".##.."]),
+    ('/', ["....#", "...#.", "..#..", ".#...", "#...."]),
+    ('\\', ["#....", ".#...", "..#..", "...#.", "....#"]),
+    ('*', [".....", "#.#.#", ".###.", "#.#.#", "....."]),
+    ('_', [".....", ".....", ".....", ".....", "#####"]),
+    ('@', [".###.", "#...#", "#.##.", "#....", ".###."]),
+    ('&', [".##..", "#..#.", ".##..", "#..#.", ".##.#"]),
+    ('#', [".#.#.", "#####", ".#.#.", "#####", ".#.#."]),
+    ('%', ["#...#", "...#.", "..#..", ".#...", "#...#"]),
+    // ------------------------------------------------------------- shapes
+    //
+    // Keyed by the symbol itself, so `mossaic-art "I \u{2665} RUST"` works if you
+    // can type one; `:heart:` is the way in if you cannot. Every one is
+    // named in `SHAPES` below, which is what the previews and the error
+    // messages print — a name renders in every terminal and every browser,
+    // and several of these symbols do not.
+    ('\u{2605}', ["..#..", ".###.", "#####", ".#.#.", "#...#"]),
+    ('\u{2665}', [".#.#.", "#####", "#####", ".###.", "..#.."]),
+    ('\u{263a}', [".###.", "#.#.#", "#####", ".###.", "#...#"]),
+    ('\u{2639}', [".###.", "#.#.#", "#####", "#...#", ".###."]),
+    ('\u{2713}', [".....", "....#", "...#.", "#.#..", ".#..."]),
+    ('\u{25cf}', [".###.", "#####", "#####", "#####", ".###."]),
+    ('\u{25a1}', ["#####", "#...#", "#...#", "#...#", "#####"]),
+    ('\u{25b2}', ["..#..", "..#..", ".###.", ".###.", "#####"]),
+    ('\u{25c6}', ["..#..", ".###.", "#####", ".###.", "..#.."]),
+    ('\u{266a}', ["...##", "...#.", "...#.", ".###.", ".##.."]),
+    ('\u{2600}', ["#.#.#", ".###.", "#####", ".###.", "#.#.#"]),
+    ('\u{263e}', [".###.", "##...", "##...", "##...", ".###."]),
+    ('\u{26a1}', ["...##", "..##.", ".###.", "..#..", ".#..."]),
+    ('\u{2191}', ["..#..", ".###.", "#.#.#", "..#..", "..#.."]),
+    ('\u{2193}', ["..#..", "..#..", "#.#.#", ".###.", "..#.."]),
+    ('\u{2190}', ["..#..", ".#...", "#####", ".#...", "..#.."]),
+    ('\u{2192}', ["..#..", "...#.", "#####", "...#.", "..#.."]),
+    ('\u{2620}', [".###.", "#####", "#.#.#", ".###.", ".#.#."]),
+    ('\u{273f}', [".#.#.", "#####", ".###.", "..#..", "..#.."]),
+];
+
+/// The shapes, by the name you type between colons.
+///
+/// # Adding a shape
+///
+/// Two lines: the glyph goes in [`FONT`] keyed by its symbol, and its name or
+/// names go here. Both are checked when the crate compiles — a name for a
+/// character the font does not have, a name that is not lowercase ASCII, and
+/// the same name twice are all build failures.
+///
+/// Several names may point at one character; the **first** is the one the
+/// previews and the error messages print.
+const SHAPES: &[(&str, char)] = &[
+    ("star", '\u{2605}'),
+    ("heart", '\u{2665}'),
+    ("love", '\u{2665}'),
+    ("smile", '\u{263a}'),
+    ("happy", '\u{263a}'),
+    ("sad", '\u{2639}'),
+    ("cry", '\u{2639}'),
+    ("frown", '\u{2639}'),
+    ("check", '\u{2713}'),
+    ("tick", '\u{2713}'),
+    ("circle", '\u{25cf}'),
+    ("dot", '\u{25cf}'),
+    ("square", '\u{25a1}'),
+    ("triangle", '\u{25b2}'),
+    ("diamond", '\u{25c6}'),
+    ("note", '\u{266a}'),
+    ("music", '\u{266a}'),
+    ("sun", '\u{2600}'),
+    ("moon", '\u{263e}'),
+    ("bolt", '\u{26a1}'),
+    ("zap", '\u{26a1}'),
+    ("up", '\u{2191}'),
+    ("down", '\u{2193}'),
+    ("left", '\u{2190}'),
+    ("right", '\u{2192}'),
+    ("skull", '\u{2620}'),
+    ("flower", '\u{273f}'),
+];
+
+/// Characters that mean a shape the font already draws.
+///
+/// Someone who pastes an emoji has said exactly what they meant, and refusing
+/// it over a codepoint would be pedantry: \u{2b50} is a star, \u{2764} is a heart, and
+/// neither is the codepoint the font is keyed by. Folded rather than added to
+/// the font, so there is still one bitmap per shape.
+const FOLD: &[(char, char)] = &[
+    ('\u{2b50}', '\u{2605}'),
+    ('\u{2606}', '\u{2605}'),
+    ('\u{2729}', '\u{2605}'),
+    ('\u{272d}', '\u{2605}'),
+    ('\u{2764}', '\u{2665}'),
+    ('\u{2661}', '\u{2665}'),
+    ('\u{1f499}', '\u{2665}'),
+    ('\u{1f49a}', '\u{2665}'),
+    ('\u{1f49c}', '\u{2665}'),
+    ('\u{1f9e1}', '\u{2665}'),
+    ('\u{263b}', '\u{263a}'),
+    ('\u{1f600}', '\u{263a}'),
+    ('\u{1f603}', '\u{263a}'),
+    ('\u{1f642}', '\u{263a}'),
+    ('\u{1f60a}', '\u{263a}'),
+    ('\u{1f641}', '\u{2639}'),
+    ('\u{1f622}', '\u{2639}'),
+    ('\u{1f62d}', '\u{2639}'),
+    ('\u{2714}', '\u{2713}'),
+    ('\u{2705}', '\u{2713}'),
+    ('\u{25cb}', '\u{25cf}'),
+    ('\u{2b24}', '\u{25cf}'),
+    ('\u{25fb}', '\u{25a1}'),
+    ('\u{25a0}', '\u{25a1}'),
+    ('\u{25fc}', '\u{25a1}'),
+    ('\u{25b3}', '\u{25b2}'),
+    ('\u{25c7}', '\u{25c6}'),
+    ('\u{266b}', '\u{266a}'),
+    ('\u{1f3b5}', '\u{266a}'),
+    ('\u{1f31e}', '\u{2600}'),
+    ('\u{1f319}', '\u{263e}'),
+    ('\u{263d}', '\u{263e}'),
+    ('\u{1f5f2}', '\u{26a1}'),
+    ('\u{1f480}', '\u{2620}'),
+    ('\u{1f338}', '\u{273f}'),
+    ('\u{1f337}', '\u{273f}'),
 ];
 
 /// The font's rules, enforced at compile time. A glyph contributed with a row a
@@ -130,7 +261,79 @@ const _: () = {
         }
         index += 1;
     }
+
+    // A shape name has to name a character the font can actually draw, be
+    // typeable between colons, and mean one thing.
+    let mut index = 0;
+    while index < SHAPES.len() {
+        let (name, character) = SHAPES[index];
+        assert!(
+            in_font(character),
+            "a shape names a character the font lacks"
+        );
+
+        let bytes = name.as_bytes();
+        assert!(!bytes.is_empty(), "a shape name must not be empty");
+        let mut byte = 0;
+        while byte < bytes.len() {
+            assert!(
+                (bytes[byte] >= b'a' && bytes[byte] <= b'z') || bytes[byte] == b'-',
+                "shape names are lowercase ASCII, so :NAME: folds to one thing"
+            );
+            byte += 1;
+        }
+
+        let mut other = 0;
+        while other < index {
+            assert!(!same(SHAPES[other].0, name), "the same shape name twice");
+            other += 1;
+        }
+        index += 1;
+    }
+
+    // Nothing may fold to a character the font cannot draw, and a character
+    // that folds must not also be in the font — one bitmap per shape.
+    let mut index = 0;
+    while index < FOLD.len() {
+        let (from, to) = FOLD[index];
+        assert!(in_font(to), "a fold points at a character the font lacks");
+        assert!(!in_font(from), "a folded character is also in the font");
+        let mut other = 0;
+        while other < index {
+            assert!(FOLD[other].0 as u32 != from as u32, "the same fold twice");
+            other += 1;
+        }
+        index += 1;
+    }
 };
+
+/// Whether the font has `character`, at compile time.
+const fn in_font(character: char) -> bool {
+    let mut index = 0;
+    while index < FONT.len() {
+        if FONT[index].0 as u32 == character as u32 {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+/// Whether two names are the same, at compile time.
+const fn same(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
 
 /// The glyph for a character, if the font has one.
 ///
@@ -144,7 +347,95 @@ pub fn glyph(character: char) -> Option<[&'static str; GLYPH_ROWS]> {
             .find(|(candidate, _)| *candidate == wanted)
             .map(|(_, rows)| *rows)
     };
-    exact(character).or_else(|| character.to_uppercase().find_map(exact))
+    exact(character)
+        .or_else(|| folded(character).and_then(exact))
+        .or_else(|| character.to_uppercase().find_map(exact))
+}
+
+/// The character `character` stands in for, if it is one the font draws under
+/// another codepoint — a pasted \u{2b50} for the font's \u{2605}.
+fn folded(character: char) -> Option<char> {
+    FOLD.iter()
+        .find(|(from, _)| *from == character)
+        .map(|(_, to)| *to)
+}
+
+/// The character a shape name draws, matched without regard to case so that
+/// the uppercasing every plan goes through leaves `:STAR:` meaning a star.
+#[must_use]
+pub fn shape(name: &str) -> Option<char> {
+    SHAPES
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        .map(|(_, character)| *character)
+}
+
+/// Every shape name, with the character it draws, in the order they are
+/// declared — so the first name for a character comes first.
+pub fn shapes() -> impl Iterator<Item = (&'static str, char)> {
+    SHAPES.iter().copied()
+}
+
+/// What to call `character` in a message: `:star:` for a shape, the character
+/// itself for anything else.
+///
+/// Shapes are named rather than printed because a name renders in every
+/// terminal and every browser, and several of the symbols do not.
+#[must_use]
+pub fn label(character: char) -> String {
+    match shape_name(character) {
+        Some(name) => format!(":{name}:"),
+        None if character == ' ' => "space".to_string(),
+        None => character.to_string(),
+    }
+}
+
+/// Reduce text to the characters the font is keyed by: expand `:name:`, drop
+/// the variation selectors an emoji keyboard adds, and fold a pasted symbol
+/// onto the one the font draws it with.
+///
+/// This is the whole of the shape grammar: a colon opens a name and the next
+/// one closes it. `:` therefore has no glyph of its own — an unclosed one is
+/// refused with the list of names rather than drawn, which is the more useful
+/// of the two answers by a distance.
+///
+/// Everything downstream — the uppercasing, the saved plan, the tracker's
+/// report — then works on characters, and three spellings of one heart are one
+/// heart by the time any of them see it.
+pub fn canonical(text: &str) -> Result<String, String> {
+    let text: String = text
+        .chars()
+        // U+FE0F and U+FE0E only say how the character before them should be
+        // drawn, and nothing here draws two ways.
+        .filter(|character| !matches!(character, '\u{fe0f}' | '\u{fe0e}'))
+        .map(|character| folded(character).unwrap_or(character))
+        .collect();
+
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(open) = rest.find(':') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let Some(close) = after.find(':') else {
+            return Err(format!(
+                "unclosed ':' — a shape is written :name:, and the font has {}",
+                describe_shapes()
+            ));
+        };
+        let name = &after[..close];
+        match shape(name) {
+            Some(character) => out.push(character),
+            None => {
+                return Err(format!(
+                    "no shape called {name:?} — the font has {}",
+                    describe_shapes()
+                ))
+            }
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// Every character the font can draw, in order.
@@ -230,6 +521,7 @@ impl Grid {
 /// Columns of the rendered text, each `GLYPH_ROWS` tall, with one blank column
 /// between letters.
 pub fn bitmap(text: &str) -> Result<Vec<[bool; GLYPH_ROWS]>, String> {
+    let text = canonical(text)?;
     let unknown: Vec<char> = text.chars().filter(|c| glyph(*c).is_none()).collect();
     if !unknown.is_empty() {
         let names: Vec<String> = unknown.iter().map(|c| format!("{c:?}")).collect();
@@ -262,13 +554,31 @@ pub fn bitmap(text: &str) -> Result<Vec<[bool; GLYPH_ROWS]>, String> {
 /// The font's contents, for the message someone sees after a typo.
 fn describe_alphabet() -> String {
     let printable: String = alphabet()
-        .filter(|c| !c.is_whitespace())
+        .filter(|character| !character.is_whitespace())
+        // Shapes are listed by name below; a symbol in the middle of this run
+        // would be the one part of the message a terminal might not draw.
+        .filter(|character| shape_name(*character).is_none())
         .collect::<Vec<char>>()
         .chunks(36)
         .map(|chunk| chunk.iter().collect::<String>())
         .collect::<Vec<String>>()
         .join(" ");
-    format!("{printable} and space")
+    format!("{printable} and space, and {}", describe_shapes())
+}
+
+/// The shape names, for the same message.
+fn describe_shapes() -> String {
+    let names: Vec<String> = SHAPES.iter().map(|(name, _)| format!(":{name}:")).collect();
+    format!("the shapes {}", names.join(" "))
+}
+
+/// The first name declared for `character`, if it is a shape.
+#[must_use]
+pub fn shape_name(character: char) -> Option<&'static str> {
+    SHAPES
+        .iter()
+        .find(|(_, candidate)| *candidate == character)
+        .map(|(name, _)| *name)
 }
 
 /// The two shades contribution art is drawn in.

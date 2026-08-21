@@ -35,7 +35,16 @@ fn the_font_can_be_looked_at() {
     let out = art(&["--font", "--no-colour"]);
     assert!(out.status.success());
     let text = stdout(&out);
-    assert!(text.contains("39 glyphs, 5x5 each"), "{text}");
+    // A lower bound, like the unit test's: adding a glyph is the point of the
+    // font, and a test that counted them would fail on the one contribution it
+    // exists to protect.
+    let count: usize = text
+        .split_whitespace()
+        .next()
+        .and_then(|word| word.parse().ok())
+        .unwrap_or_else(|| panic!("no glyph count in {text}"));
+    assert!(count >= 39, "{count} glyphs: {text}");
+    assert!(text.contains("glyphs, 5x5 each"), "{text}");
     assert!(text.contains("add one to FONT in src/art.rs"), "{text}");
     // Every character it claims, drawn.
     for character in ['A', 'Z', '0', '9', '-', '.'] {
@@ -50,12 +59,345 @@ fn the_font_can_be_looked_at() {
     );
 }
 
+/// A shape, typed the way anyone without a symbol keyboard has to type it.
+#[test]
+fn a_shape_can_be_written_between_colons() {
+    let out = art(&["I :HEART: RUST", "--year", "2027", "--no-colour"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    // The header echoes the character, not the name it was typed as: the plan
+    // is stored that way, and the tracker reads it back.
+    assert!(text.contains("I \u{2665} RUST"), "{text}");
+    // Eight glyphs at six columns apiece, less the gap after the last.
+    assert!(text.contains("47 of 53 columns"), "{text}");
+
+    // Upper and lower case name the same shape, because a plan is stored
+    // uppercased and has to survive the round trip.
+    let lower = art(&["I :heart: RUST", "--year", "2027", "--no-colour"]);
+    assert_eq!(stdout(&lower), text, "case should not change the drawing");
+}
+
+/// The symbol itself, and the emoji someone is far more likely to paste.
+#[test]
+fn a_pasted_symbol_draws_the_same_shape_as_its_name() {
+    let by_name = art(&[":star::heart:", "--year", "2027", "--no-colour"]);
+    let by_symbol = art(&["\u{2605}\u{2665}", "--year", "2027", "--no-colour"]);
+    let by_emoji = art(&["\u{2b50}\u{2764}\u{fe0f}", "--year", "2027", "--no-colour"]);
+
+    assert!(
+        by_name.status.success(),
+        "{}",
+        String::from_utf8_lossy(&by_name.stderr)
+    );
+    assert_eq!(stdout(&by_symbol), stdout(&by_name), "symbol vs name");
+    assert_eq!(
+        stdout(&by_emoji),
+        stdout(&by_name),
+        "a pasted emoji, variation selector and all, vs name"
+    );
+}
+
+/// Both ways of getting the grammar wrong, and what each says.
+#[test]
+fn a_misspelt_shape_says_which_shapes_there_are() {
+    let unknown = art(&[":wombat:", "--year", "2027"]);
+    assert!(
+        !unknown.status.success(),
+        "it should refuse rather than guess"
+    );
+    let error = String::from_utf8_lossy(&unknown.stderr).into_owned();
+    assert!(error.contains("wombat"), "{error}");
+    assert!(
+        error.contains(":star:") && error.contains(":heart:"),
+        "{error}"
+    );
+
+    // A colon that opens nothing. The message is about the grammar rather
+    // than about a missing glyph for ':', which would be true and useless.
+    let unclosed = art(&["12:30", "--year", "2027"]);
+    assert!(!unclosed.status.success());
+    let error = String::from_utf8_lossy(&unclosed.stderr).into_owned();
+    assert!(error.contains("unclosed"), "{error}");
+    assert!(error.contains(":name:"), "{error}");
+}
+
+/// The font view names its shapes rather than printing them. Several of these
+/// symbols are ambiguous-width, so a terminal may draw one in two columns and
+/// tear the aligned output apart — the same reason the README lists names.
+#[test]
+fn the_font_view_names_its_shapes() {
+    let out = art(&["--font", "--no-colour"]);
+    assert!(out.status.success());
+    let text = stdout(&out);
+    for named in [
+        ":star:", ":heart:", ":smile:", ":sad:", ":moon:", ":flower:",
+    ] {
+        assert!(text.contains(named), "the font view is missing {named}");
+    }
+    // The label is the name, so the raw symbol never reaches the column
+    // headings it would misalign.
+    assert!(
+        !text.contains('\u{2605}'),
+        "a bare symbol in the headings: {text}"
+    );
+}
+
+/// A shape has to survive being written to a plan and read back, which is the
+/// path every tracked year takes each morning.
+#[test]
+fn a_shape_round_trips_through_a_saved_plan() {
+    let dir = scratch("shape-plan");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_mossaic-art"))
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .expect("the art binary runs")
+    };
+
+    let saved = run(&[":heart::star:", "--year", "2027", "--save", "--no-colour"]);
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+
+    // Stored as characters, so nothing downstream has to know the grammar.
+    let plan =
+        std::fs::read_to_string(dir.join(mossaic::plan::DEFAULT_SPEC)).expect("a plan on disk");
+    assert!(
+        plan.contains('\u{2665}') && plan.contains('\u{2605}'),
+        "{plan}"
+    );
+    assert!(
+        !plan.contains(":heart:"),
+        "the name should not survive: {plan}"
+    );
+
+    // And read back by the tracker, which is the run that happens every day.
+    let tracked = run(&["--track", "--no-colour", "--today", "2027-06-01"]);
+    assert!(
+        tracked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tracked.stderr)
+    );
+    assert!(
+        stdout(&tracked).contains('\u{2665}'),
+        "{}",
+        stdout(&tracked)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The README promises a set; the font has to be that set.
+///
+/// A table of glyphs is exactly the documentation that rots — a shape gets
+/// added and the list quietly stops being true, and the list is the only place
+/// most people will look. So the list is checked rather than maintained.
+#[test]
+fn the_readme_lists_every_glyph_the_font_has() {
+    let readme = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("a README");
+    let section = readme
+        .split("## What you can draw")
+        .nth(1)
+        .expect("a section listing the font")
+        .split("\n## ")
+        .next()
+        .expect("the section ends");
+
+    for (name, _) in mossaic::art::shapes() {
+        assert!(
+            section.contains(&format!(":{name}:")),
+            "the README does not list :{name}:"
+        );
+    }
+    for character in mossaic::art::alphabet() {
+        if character.is_whitespace() || mossaic::art::shape_name(character).is_some() {
+            continue;
+        }
+        assert!(
+            section.contains(character),
+            "the README does not list {character:?}"
+        );
+    }
+
+    // And nothing it lists is missing from the font: every `:name:` in the
+    // section has to draw something.
+    for token in section.split_whitespace() {
+        let Some(name) = token
+            .trim_matches('`')
+            .strip_prefix(':')
+            .and_then(|rest| rest.strip_suffix(':'))
+        else {
+            continue;
+        };
+        assert!(
+            mossaic::art::shape(name).is_some(),
+            "the README promises :{name}:, which the font does not have"
+        );
+    }
+
+    // The table's own claim, row by row: every symbol and every emoji on a row
+    // draws the shape that row names. This is the half most likely to rot —
+    // a fold gets removed and the table still advertises the emoji.
+    let mut rows = 0;
+    for line in section.lines().filter(|line| line.starts_with('|')) {
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        let [_, symbols, names, pastes, ..] = cells.as_slice() else {
+            continue;
+        };
+        let Some(first) = names.split_whitespace().next() else {
+            continue;
+        };
+        let Some(name) = first
+            .trim_matches('`')
+            .strip_prefix(':')
+            .and_then(|rest| rest.strip_suffix(':'))
+        else {
+            continue;
+        };
+        let wanted = mossaic::art::bitmap(&format!(":{name}:")).expect("a shape");
+        rows += 1;
+
+        // The arrows share a row, so a row may name several shapes and show
+        // several symbols; each symbol is checked against its own name.
+        let named: Vec<&str> = names
+            .split_whitespace()
+            .filter_map(|token| {
+                token
+                    .trim_matches('`')
+                    .strip_prefix(':')
+                    .and_then(|rest| rest.strip_suffix(':'))
+            })
+            .collect();
+        for symbol in symbols.chars().filter(|c| !c.is_whitespace()) {
+            let drawn = mossaic::art::bitmap(&symbol.to_string())
+                .unwrap_or_else(|error| panic!("the README shows {symbol:?}: {error}"));
+            assert!(
+                named
+                    .iter()
+                    .any(|name| drawn == mossaic::art::bitmap(&format!(":{name}:")).unwrap()),
+                "the README shows {symbol:?} beside {named:?}, which it does not draw"
+            );
+        }
+
+        for pasted in pastes
+            .chars()
+            // A variation selector says how to draw the character before it,
+            // not which character it is, and the README carries whatever an
+            // emoji keyboard produced.
+            .filter(|c| {
+                !c.is_whitespace() && !c.is_ascii() && !matches!(c, '\u{fe0f}' | '\u{fe0e}')
+            })
+        {
+            let drawn = mossaic::art::bitmap(&pasted.to_string())
+                .unwrap_or_else(|error| panic!("the README offers {pasted:?}: {error}"));
+            assert_eq!(
+                drawn, wanted,
+                "the README offers {pasted:?} for :{name}:, which is not what it draws"
+            );
+        }
+    }
+    assert!(
+        rows >= 16,
+        "only {rows} rows of the shape table were checked"
+    );
+}
+
+/// A shape has to survive the last mile as well: into a commit message, and
+/// back out of git. The message is the one place the text leaves the program
+/// entirely, and a character that draws perfectly can still be mangled there.
+#[test]
+fn a_shape_reaches_the_commits_it_writes() {
+    let dir = scratch("shape-write");
+    let _ = std::fs::remove_dir_all(&dir);
+    let repo = dir.to_string_lossy().into_owned();
+
+    let out = art(&[
+        ":heart:",
+        "--year",
+        "2027",
+        "--commits",
+        "1",
+        "--repo",
+        &repo,
+        "--write",
+        "--name",
+        "Tester",
+        "--email",
+        "tester@example.invalid",
+        "--no-colour",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout(&out).contains("nothing has been pushed"),
+        "{}",
+        stdout(&out)
+    );
+
+    let log = Command::new("git")
+        .current_dir(&dir)
+        .args(["log", "--format=%s"])
+        .output()
+        .expect("git log runs");
+    let subjects = String::from_utf8_lossy(&log.stdout).into_owned();
+    assert!(!subjects.trim().is_empty(), "it wrote commits");
+    assert!(
+        subjects.contains("art: \u{2665}"),
+        "the shape did not reach the commit message: {subjects}"
+    );
+    // The name is not what is stored, so it cannot be what comes back out.
+    assert!(!subjects.contains(":heart:"), "{subjects}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The Action reads `--format json`, so a shape has to come out of it as valid
+/// JSON rather than as whatever the character did to the encoder.
+#[test]
+fn a_shape_survives_the_json_the_action_reads() {
+    let out = art(&[
+        ":heart:",
+        "--year",
+        "2027",
+        "--track",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--today",
+        "2027-06-01",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    // Parsed rather than matched, which is the only way to say "valid JSON".
+    let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    assert_eq!(parsed["text"], "\u{2665}", "{text}");
+}
+
 #[test]
 fn an_unknown_character_says_what_there_is() {
-    let out = art(&["HI+THERE", "--year", "2027"]);
+    let out = art(&["HI~THERE", "--year", "2027"]);
     assert!(!out.status.success(), "it should refuse rather than guess");
     let error = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert!(error.contains('+'), "{error}");
+    assert!(error.contains('~'), "{error}");
     assert!(error.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), "{error}");
 }
 

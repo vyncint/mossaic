@@ -9,6 +9,43 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Added
+
+- **Shapes in the font — `mossaic-art "I :heart: RUST"`.** Nineteen of them:
+  `:star:` `:heart:` `:smile:` `:sad:` `:check:` `:circle:` `:square:`
+  `:triangle:` `:diamond:` `:note:` `:sun:` `:moon:` `:bolt:` `:up:` `:down:`
+  `:left:` `:right:` `:skull:` `:flower:`, several with aliases (`:cry:` is
+  `:sad:`, `:zap:` is `:bolt:`). A shape is written between colons so it can be
+  typed on any keyboard; the symbol works where you can type one, and so does a
+  pasted emoji — ⭐ draws `:star:`, 😢 draws `:cry:`, and the variation selector
+  an emoji keyboard adds is dropped rather than refused. All three spellings
+  become the same character before anything else sees them, which is what lets
+  a shape survive being written to a plan, uppercased, and read back by
+  `--track` every morning — including into the commit message `--write` leaves
+  behind.
+- **Punctuation**: `!` `?` `,` `'` `"` `+` `=` `<` `>` `(` `)` `/` `\` `*` `_`
+  `@` `&` `#` `%`. The font is 77 glyphs where it was 39.
+- **[A list of everything the font can draw](README.md#what-you-can-draw)**, in
+  the README — and a test that checks it against the font, symbol by symbol and
+  emoji by emoji. A table of glyphs is exactly the documentation that rots, and
+  it is the only place most people will look.
+
+### Changed
+
+- **`:` is the shape delimiter and has no glyph of its own**, which is what
+  keeps the grammar to one reading. A name nobody has drawn, or a colon that
+  closes nothing, is refused with the list of shapes rather than guessed at.
+- **`mossaic-art --font` names its shapes** (`:star:`) instead of printing the
+  symbol. Several of them are ambiguous-width, so a terminal may draw one in
+  two columns and tear the aligned output apart.
+- **The README no longer prints the sextant chart inline.** It was 740
+  block-sextant characters (`U+1FB2B`, `U+1FB1B`, Unicode 13) that too few
+  systems have a font for: where one is missing the browser substitutes a font
+  of a different width and shears every row of a 176-column chart apart, which
+  is a worse advertisement for the fallback than no picture at all. The promise
+  it was making stays, with the one command that shows it in a terminal, where
+  the characters are guaranteed to work.
+
 ### Tests
 
 - **The pixel path is asserted as a picture, not as a byte count.** termlens

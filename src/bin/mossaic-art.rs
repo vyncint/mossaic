@@ -24,7 +24,10 @@ mossaic-art — write text into a GitHub contribution graph by dating commits
 usage:
   mossaic-art TEXT [options]
 
-  TEXT                what to draw, e.g. VYNCINT (A-Z, 0-9, space, - and .)
+  TEXT                what to draw, e.g. VYNCINT. Letters, digits, punctuation
+                      and shapes: `I :heart: RUST`. A shape is written between
+                      colons, or pasted as the symbol or emoji it depicts.
+                      --font lists everything
   --year YEAR         which year's calendar (default: this one)
   --commits N         commits per lit day (default 4); keep it uniform for one
                       flat shade
@@ -79,6 +82,7 @@ examples:
   mossaic-art VYNCINT --year 2027 --repo ../art --write   local commits, never pushed
   mossaic-art --backfill --repo ../art --write        commit just what the plan is short
   mossaic-art --track --today 2027-06-01              what that day will owe
+  mossaic-art \"I :heart: RUST\" --year 2027            a shape among the letters
   mossaic-art --font                                  every glyph, side by side
 
 Save the plan once and later runs need no flags at all:
@@ -947,14 +951,7 @@ fn show_font(colour: bool) {
     for chunk in characters.chunks(PER_ROW) {
         let labels: Vec<String> = chunk
             .iter()
-            .map(|character| {
-                let name = if *character == ' ' {
-                    "space".to_string()
-                } else {
-                    character.to_string()
-                };
-                format!("{name:<12}")
-            })
+            .map(|character| format!("{:<12}", art::label(*character)))
             .collect();
         println!("  {}", labels.join("").trim_end());
         for row in 0..art::GLYPH_ROWS {
@@ -1171,7 +1168,12 @@ fn parse_args() -> Option<Options> {
             other if other.starts_with('-') => {
                 fail(&format!("unknown option {other:?} — try --help"))
             }
-            other if options.text.is_empty() => options.text = other.to_string(),
+            other if options.text.is_empty() => {
+                // Expanded here rather than at every use: the plan is saved
+                // uppercased and read back by the tracker, and `:star:` has to
+                // survive both. A character does.
+                options.text = art::canonical(other).unwrap_or_else(|error| fail(&error));
+            }
             other => fail(&format!("unexpected argument {other:?}")),
         }
     }
