@@ -9,6 +9,8 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-21
+
 ### Added
 
 - **Shapes in the font — `mossaic-art "I :heart: RUST"`.** Nineteen of them:
@@ -621,7 +623,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/vyncint/mossaic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/vyncint/mossaic/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vyncint/mossaic/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vyncint/mossaic/compare/v0.2.0...v0.3.0
