@@ -9,6 +9,29 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Tests
+
+- **The pixel path is asserted as a picture, not as a byte count.** termlens
+  0.6 hands back the payloads an application transmitted and decodes them, so
+  `tests/pixels.rs` now checks what the chart actually drew: that the year is
+  pinned to the 106x7 character cells the layout reserved and placed on the
+  grid's own origin, that it goes out as *one* image however many of kitty's
+  4096-byte chunks it takes, that one moved cursor sends a single day-sized
+  image rather than a cheap-looking year, and that the chart deletes its
+  images before it exits instead of leaving them over whatever comes next.
+  None of that changes a cell on screen, which is why none of it was
+  assertable before.
+- **The year drawn is checked against the year described.** Every day's centre
+  pixel is read out of the decoded image and counted: the number drawn in
+  Primer's brightest green has to equal the number the footer calls active.
+  The two halves of the chart — the picture and the text under it — had never
+  been compared to each other, and nothing on screen can compare them.
+- **The in-process sixel decoder rounds the way a terminal does.** It
+  converted a percentage back with `p * 255 / 100`, the exact inverse of the
+  encoder's own rounding, so a systematic disagreement with real terminals
+  would have round-tripped perfectly through a test whose stated purpose was
+  to catch exactly that.
+
 ### Changed
 
 - **`Esc` no longer quits the chart.** It cancels the username prompt and

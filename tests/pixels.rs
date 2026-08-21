@@ -15,11 +15,17 @@
 //! `docs/DESIGN.md` §4 and the diffing in §5 be checked against the wire rather
 //! than against the rasteriser.
 //!
-//! What is still out of reach is what the images *look like*: termlens consumes
-//! APC and DCS strings without rendering them. The encoders are checked against
-//! the formats in `src/render_tests.rs`, and `--png` renders the same image to a
-//! file. This file checks that the right images, of about the right size, go out
-//! at the right moments.
+//! Since termlens 0.6 the payloads themselves are readable, and that moves the
+//! assertions from "an image of about the right size went out" to "*this* image
+//! went out": the cell extent it was pinned to, the character cell it was placed
+//! on, and — decoded — the pixels. Which is how a chart drawn in pixels gets to
+//! be checked against the chart described in text directly below it: the number
+//! of days drawn in Primer's brightest green is the number the footer calls
+//! active. Nothing on screen could say that, because none of it is on screen.
+//!
+//! What is still out of reach is the composite: termlens decodes an image but
+//! never draws it, so how the picture sits over the text under it is not
+//! assertable here. `--png` renders the same image to a file for that.
 //!
 //! ```sh
 //! cargo test --test pixels
@@ -27,7 +33,7 @@
 
 use std::time::Duration;
 
-use termlens::{Graphics, Key, Screen, Terminal};
+use termlens::{Graphics, GraphicsPayload, GraphicsSeen, Key, Screen, Terminal};
 
 /// A year of contribution art, every day elapsed and no network anywhere.
 const PREVIEW: [&str; 2] = ["--file", "art/vyncint-2027.json"];
@@ -36,6 +42,16 @@ const PREVIEW: [&str; 2] = ["--file", "art/vyncint-2027.json"];
 const SIZE: (u16, u16) = (176, 34);
 /// A plausible character cell. Every geometry claim scales from it.
 const CELL: (u16, u16) = (9, 19);
+/// A 53-week year, two character columns to the day.
+const GRID_CELLS: (u16, u16) = (53 * 2, 7);
+/// Screen column of the first cell: past the frame and the four-column gutter.
+const GRID_X: u16 = 1 + 4;
+
+/// GitHub's dark theme, levels 0 and 4 — the two colours a year of art with
+/// nothing behind it is made of. Read from `src/primer.rs`, which reads them
+/// from the stylesheets github.com serves.
+const CANVAS: [u8; 3] = [0x15, 0x1b, 0x23];
+const BRIGHT: [u8; 3] = [0x56, 0xd3, 0x64];
 
 /// A terminal that answers the probe the way the named terminal would.
 fn chart(
@@ -102,6 +118,48 @@ fn monday(screen: &Screen) -> u16 {
                 .starts_with("Mon")
         })
         .expect("a weekday gutter")
+}
+
+/// The payload carrying the whole year: the widest one on the wire, which is
+/// the only image 53 weeks across.
+fn year(seen: &GraphicsSeen) -> &GraphicsPayload {
+    seen.payloads()
+        .iter()
+        .max_by_key(|payload| payload.size().map_or(0, |(width, _)| width))
+        .unwrap_or_else(|| panic!("no image at all went out: {seen:?}"))
+}
+
+/// Whether a decoded pixel is `token`, allowing for a sixel's quantisation.
+///
+/// A sixel colour register is a *percentage* of 255, so most 8-bit values do
+/// not survive the round trip — `#56d364` comes back one off on two channels.
+/// That is the palette degradation `docs/DESIGN.md` describes, not a wrong
+/// colour, and one step of slack is the whole of it: two levels of the ramp
+/// are never this close.
+fn is(pixel: Option<[u8; 4]>, token: [u8; 3]) -> bool {
+    pixel.is_some_and(|pixel| {
+        pixel[3] == 0xff
+            && (0..3)
+                .all(|channel| i32::from(pixel[channel]).abs_diff(i32::from(token[channel])) <= 2)
+    })
+}
+
+/// The number of days the footer calls active, read off the screen.
+fn active_days(screen: &Screen) -> usize {
+    screen
+        .text()
+        .lines()
+        .find(|line| line.contains("active days"))
+        .and_then(|line| {
+            let digits: String = line
+                .trim_start_matches('│')
+                .trim()
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+        .unwrap_or_else(|| panic!("no active-day count in:\n{screen}"))
 }
 
 #[test]
@@ -193,6 +251,115 @@ fn the_grid_rows_belong_to_the_image_and_the_labels_stay_text() -> termlens::Res
 }
 
 #[test]
+fn the_year_is_pinned_to_the_cells_the_layout_reserved() -> termlens::Result<()> {
+    // The cell contract of docs/DESIGN.md §3, asserted as the numbers that go
+    // out rather than as the absence of text over them. A day is two columns
+    // and one row, so a 53-week year is 106x7 character cells and — at this
+    // cell size — 954x133 pixels. An image that disagrees with the layout it
+    // was drawn for slides out from under the month labels, and every cell on
+    // the screen stays exactly as it was while it does.
+    for (label, graphics) in [("kitty", Graphics::Kitty), ("sixel", Graphics::Sixel)] {
+        let mut terminal = chart(graphics, Some(CELL), SIZE, &PREVIEW)?;
+        let screen = terminal.wait_frame(loaded)?;
+        let seen = screen.graphics();
+        let year = year(&seen);
+
+        assert_eq!(
+            year.size(),
+            Some((
+                u32::from(GRID_CELLS.0) * u32::from(CELL.0),
+                u32::from(GRID_CELLS.1) * u32::from(CELL.1),
+            )),
+            "{label}: {year:?}"
+        );
+        // The top-left corner is the grid's own origin: past the frame and the
+        // weekday gutter, one row above the Monday label.
+        assert_eq!(
+            year.at(),
+            (monday(&screen) - 1, GRID_X),
+            "{label}: {year:?}"
+        );
+        // kitty is told the extent in cells, and then cannot disagree with it.
+        if graphics == Graphics::Kitty {
+            assert_eq!(year.cells(), Some(GRID_CELLS), "{label}: {year:?}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_year_is_one_image_however_many_escapes_it_takes() -> termlens::Result<()> {
+    // kitty caps a payload at 4096 bytes and continues with `m=1`, so the year
+    // goes out in two escapes. It is still one picture, and the count has to
+    // say so — "how many images did this frame send?" is the question every
+    // assertion about the diffing painter below rests on.
+    let mut terminal = chart(Graphics::Kitty, Some(CELL), SIZE, &PREVIEW)?;
+    let screen = terminal.wait_frame(loaded)?;
+    let seen = screen.graphics();
+    let year = year(&seen);
+    assert!(year.chunks() > 1, "the year needs chunking: {year:?}");
+    // The year, the legend and the ring on the opening day: three images, not
+    // three plus however many chunks the biggest one took.
+    assert_eq!(seen.kitty(), seen.payloads().len() as u32, "{seen:?}");
+    Ok(())
+}
+
+#[test]
+fn the_year_drawn_is_the_year_described() -> termlens::Result<()> {
+    // The two halves of the chart, checked against each other for the first
+    // time. The footer counts active days in text; the image draws them in
+    // Primer's brightest green. Nothing on screen can compare them, because
+    // the image is not on screen — it is an escape sequence that leaves every
+    // cell it covers exactly as it found it.
+    for (label, graphics) in [("kitty", Graphics::Kitty), ("sixel", Graphics::Sixel)] {
+        let mut terminal = chart(graphics, Some(CELL), SIZE, &PREVIEW)?;
+        let screen = terminal.wait_frame(loaded)?;
+        let seen = screen.graphics();
+        let image = year(&seen)
+            .decode()
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+
+        // Every day's centre pixel, week by week: the square is centred in its
+        // two columns, so half a cell in from the day's own corner lands
+        // inside the rounded rect rather than on its anti-aliased edge.
+        let (mut lit, mut empty, mut outside) = (0usize, 0usize, 0usize);
+        for week in 0..u32::from(GRID_CELLS.0) / 2 {
+            for weekday in 0..u32::from(GRID_CELLS.1) {
+                let pixel = image.pixel(
+                    week * 2 * u32::from(CELL.0) + u32::from(CELL.0),
+                    weekday * u32::from(CELL.1) + u32::from(CELL.1) / 2,
+                );
+                if is(pixel, BRIGHT) {
+                    lit += 1;
+                } else if is(pixel, CANVAS) {
+                    empty += 1;
+                } else {
+                    outside += 1;
+                }
+            }
+        }
+
+        assert_eq!(
+            lit,
+            active_days(&screen),
+            "{label}: the image draws {lit} bright days where the footer counts \
+             {} active:\n{screen}",
+            active_days(&screen)
+        );
+        // 2027 opens on a Friday and ends on a Friday, so the six cells before
+        // January and after December belong to no day and are drawn as nothing
+        // at all — not as an empty day, which is a colour.
+        assert_eq!(outside, 6, "{label}: {outside} cells outside the year");
+        assert_eq!(
+            lit + empty + outside,
+            usize::from(GRID_CELLS.0 / 2 * GRID_CELLS.1),
+            "{label}: every cell of the grid is accounted for"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_year_costs_what_the_design_notes_say() -> termlens::Result<()> {
     // docs/DESIGN.md §4 quotes a year as 4.9 KB over kitty (zlib'd RGBA, base64'd)
     // against 38 KB of run-length-encoded sixel. Those figures were unverifiable
@@ -276,7 +443,54 @@ fn moving_the_cursor_sends_a_cell_not_a_year() -> termlens::Result<()> {
             "{label}: one cursor move cost {cost} bytes against a {base}-byte year — \
              that is the whole grid being re-sent"
         );
+
+        // And the payload says what it is, which is stronger than saying it is
+        // small: a day, at the day's own cell. A painter that re-sent the year
+        // compressed unusually well would pass the byte test and fail this one.
+        let after = terminal.screen();
+        let seen = after.graphics();
+        let last = seen.last().expect("a payload");
+        assert_eq!(
+            last.size(),
+            Some((2 * u32::from(CELL.0), u32::from(CELL.1))),
+            "{label}: one moved cursor sent {last:?}"
+        );
+        // The cursor is on Fri Dec 24, and Friday is four rows below Monday.
+        assert_eq!(
+            last.at().0,
+            monday(&after) + 4,
+            "{label}: the ring is drawn on the day's own row: {last:?}"
+        );
+        assert_eq!(
+            (last.at().1 - GRID_X) % 2,
+            0,
+            "{label}: and on a day boundary, two columns to the day: {last:?}"
+        );
     }
+    Ok(())
+}
+
+#[test]
+fn the_chart_takes_its_images_down_before_it_leaves() -> termlens::Result<()> {
+    // kitty images outlive the program that drew them: the terminal holds them
+    // until told otherwise, so a chart that exits without deleting leaves its
+    // year floating over the next thing in the window. That teardown writes no
+    // text and changes no cell — the only evidence it happened is the delete
+    // itself, which used to be counted as one more image transmitted.
+    let mut terminal = chart(Graphics::Kitty, Some(CELL), SIZE, &PREVIEW)?;
+    let drawn = terminal.wait_frame(loaded)?.graphics();
+    assert_eq!(drawn.deletes(), 0, "nothing to take down yet: {drawn:?}");
+
+    terminal.send(Key::Char('q'))?;
+    assert!(terminal.wait_exit()?.success());
+
+    let seen = terminal.screen().graphics();
+    assert!(
+        seen.deletes() > 0,
+        "the chart left its images behind: {seen:?}"
+    );
+    // The teardown is not a picture, so it must not read as one.
+    assert_eq!(seen.kitty(), drawn.kitty(), "{seen:?}");
     Ok(())
 }
 
@@ -400,9 +614,22 @@ fn a_flood_of_motion_is_drained_not_replayed() -> termlens::Result<()> {
     let bytes = after.graphics().bytes() - base.bytes();
     assert!(
         payloads > 0 && payloads <= 12,
-        "crossing {CROSSED} cells produced {payloads} image payloads — one per \
-         event would be about {}",
-        CROSSED * 2
+        "crossing {CROSSED} cells produced {payloads} images — one per event \
+         would be {CROSSED}"
+    );
+    // Images, not escapes: each of these is one small ring well under kitty's
+    // 4096-byte chunk, so a count inflated by chunking would be invisible here
+    // and would not be in the year above.
+    assert!(
+        after
+            .graphics()
+            .payloads()
+            .iter()
+            .rev()
+            .take(payloads as usize)
+            .all(|payload| payload.chunks() == 1),
+        "a ring should not need chunking: {:?}",
+        after.graphics().payloads()
     );
     assert!(
         bytes * 4 < base.bytes(),

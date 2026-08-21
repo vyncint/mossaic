@@ -38,8 +38,9 @@ libc = "0.2"
 
 [dev-dependencies]
 # The end-to-end suite: the real binary, in a real PTY, asserted on the rendered
-# screen.
-termlens = "0.5.0"
+# screen — and, with `decode`, on the pixels of the images that went out over
+# kitty and sixel, which no rendered screen can show.
+termlens = { version = "0.6.0", features = ["decode"] }
 
 [profile.release]
 lto = true

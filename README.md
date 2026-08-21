@@ -301,7 +301,9 @@ formats* by decoding sixel back into pixels — and two out-of-process layers wh
 [termlens] spawns the real binary in a real pty. That pty can be told which
 terminal it is simulating, so the pixel path runs its own probe rather than being
 handed the answer, and `tests/pixels.rs` asserts what actually goes out on the
-wire.
+wire — down to the pixels, since termlens decodes the payloads it captures. Which
+is how the two halves of the chart get compared to each other: the number of days
+drawn in bright green has to be the number the footer calls active.
 
 [The file layout, what belongs in which test layer, and the two mistakes that
 make tests flaky are in CONTRIBUTING.md](CONTRIBUTING.md).
