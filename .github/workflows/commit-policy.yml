@@ -1,6 +1,8 @@
 # Enforces one commit policy on every commit in a PR (and on pushes to main,
 # for direct pushes while the project is solo-maintained):
 #
+#   DCO sign-off: every commit carries Signed-off-by matching its author
+#   (.github/scripts/check-dco.sh), and
 #   No AI attribution: no AI co-author trailers, "Generated with" watermarks,
 #   or bot identities (.github/scripts/check-no-ai-attribution.sh).
 #
@@ -63,6 +65,11 @@ jobs:
           fi
           echo "Checking range: $range"
           echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      - name: DCO sign-off
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: .github/scripts/check-dco.sh "$RANGE"
 
       - name: No AI attribution
         env:

@@ -4,6 +4,13 @@ Thanks for looking. Bug reports, terminal compatibility reports and PRs are all
 welcome — the compatibility ones especially, since mossaic's whole job is
 getting along with terminals none of us has.
 
+> **These four projects share one contributor pattern** — the same commit
+> rules, the same DCO, the same AI policy, the same CI and release shape:
+> [termlens](https://github.com/vyncint/termlens),
+> [mossaic](https://github.com/vyncint/mossaic),
+> [launchbound](https://github.com/vyncint/launchbound),
+> [reconverge](https://github.com/vyncint/reconverge). Learn it once.
+
 ## 1. Dev setup
 
 ```sh
@@ -94,43 +101,99 @@ for i in $(seq 20); do cargo test --release || break; done
 
 ## 4. Commit conventions
 
-Short imperative subject, body explaining *why*. Reference issues as
-`Closes #123`. Squash merges, so the PR title becomes the commit subject.
+We use [Conventional Commits](https://www.conventionalcommits.org/):
+`feat:`, `fix:`, `docs:`, `test:`, `ci:`, `chore:`, `refactor:`, `perf:` —
+scope optional (`feat(ui): …`). Subject line: imperative mood,
+≤ 72 characters.
 
-**No AI attribution.** AI assistance is welcome here — use whatever helps. AI
-*attribution* is not: no `Co-Authored-By` trailer naming an assistant, no
-"Generated with" watermark, no bot identity as author or committer. Whoever
-opens the pull request is the author of record, and the history should say so.
+## 5. Developer Certificate of Origin (DCO)
 
-This is enforced, not requested: [`commit-policy.yml`](.github/workflows/commit-policy.yml)
-runs [`check-no-ai-attribution.sh`](.github/scripts/check-no-ai-attribution.sh)
-over every commit in a pull request. If it fails, drop the trailer and
-force-push:
+Every commit must be signed off:
 
 ```sh
-git commit --amend        # the last commit
-git rebase -i main        # several, marking each `reword`
+git commit -s
+```
+
+This appends `Signed-off-by: Your Name <you@example.com>` and certifies you
+wrote the change or otherwise have the right to submit it under the project
+license — the [Developer Certificate of Origin](https://developercertificate.org),
+the same lightweight model the Linux kernel uses. The sign-off email must
+match the commit author email; CI enforces this on every commit in a PR.
+
+**There is no CLA. DCO only.** You keep your copyright.
+
+Forgot to sign off? `git commit --amend -s` for the last commit, or
+`git rebase --signoff main` for a whole branch, then force-push.
+
+One exception, and it is GitHub's rather than ours: a pull request
+**squash-merged through the web UI** has its author email rewritten by GitHub
+*after* the sign-off was written, so an exact match is impossible by
+construction. Such a commit must carry a sign-off, but is not matched against
+an author it did not choose. The commits that went into the PR were already
+checked, address and all, on the branch.
+
+## 6. AI tooling policy
+
+**AI assistance is welcome here — use whatever helps.** Every one of these
+projects was built with it. There is an [AGENTS.md](AGENTS.md) briefing coding
+agents on the layout, the commands, and the house style.
+
+**AI attribution is not welcome.** No `Co-Authored-By` trailer naming an
+assistant, model or vendor; no "Generated with …" footer; no robot emoji; no
+bot identity as author or committer. Whoever opens the pull request is the
+author of record, takes responsibility under the DCO, and the history should
+say so — a tool cannot certify the DCO, which is the whole point of it.
+
+This is enforced, not requested: `commit-policy.yml` runs
+[`check-no-ai-attribution.sh`](.github/scripts/check-no-ai-attribution.sh) and
+[`check-dco.sh`](.github/scripts/check-dco.sh) over every commit in a pull
+request. Run them yourself first — both take a range:
+
+```sh
+.github/scripts/check-dco.sh main..HEAD
+.github/scripts/check-no-ai-attribution.sh main..HEAD
+```
+
+If a check fails, rewrite the message rather than arguing with it:
+
+```sh
+git commit --amend            # the last commit
+git rebase -i main            # several, marking each `reword`
 git push --force-with-lease
 ```
 
-Agents that read repository settings are also told up front: `.claude/settings.json`
-turns co-author trailers off. That is a courtesy, not the boundary — settings
-files are advisory and CI is what actually holds.
+`.claude/settings.json` turns co-author trailers off for agents that read
+repository settings. That is a courtesy; the check in CI is the boundary.
+Contributions authored *by* an autonomous account are not accepted.
 
-## 5. Pull requests
+## 7. PR flow
 
-A pull request is the only way anything lands: `main` rejects direct pushes —
-the maintainer's too — and merges are squashes that need the `required-green`
-and `commit-policy` checks green first.
+- Branch from `main`; name branches `feat/…`, `fix/…`, `docs/…`, `ci/…`.
+- PRs are **squash-merged** — keep the PR title in Conventional Commit form,
+  since it becomes the commit subject on `main`. Branches are deleted on merge.
+- Required checks: `required-green` (fmt, clippy, tests on Ubuntu + macOS + Windows, MSRV, docs, cargo-deny, zizmor), plus `commit-policy` (DCO + attribution). All
+  must pass before merge; direct pushes to `main` are blocked by a ruleset.
+- **Every change lands with a test, and the test must be able to fail.** If
+  you add a guard, break it once and watch it go red before you commit.
+- **Say what you did not do.** A PR that lists what it left out and why is
+  worth more than one implying completeness. An honest gap is cheap; a false
+  claim is expensive.
+- **Contributing from a fork?** Two things are normal. On your first PR the
+  workflows wait for a maintainer to approve them — GitHub's standard
+  first-time-contributor safeguard, nothing you did wrong. And when
+  `commit-policy` fails on a fork PR it cannot post its explanatory comment
+  (fork PRs get a read-only token); the job log carries the full explanation,
+  including the offending commit and the command that fixes it.
+- Review: expect actionable review within a few days. Small, focused PRs get
+  reviewed faster. Update `CHANGELOG.md` under `[Unreleased]` for any
+  user-facing change.
 
-1. Open an issue first for anything larger than a fix — especially anything
-   that changes what the chart looks like.
-2. `cargo fmt --all`, `cargo clippy --all-targets --all-features -- -D warnings`
-   and `cargo test` before pushing.
-3. Update `CHANGELOG.md` under `[Unreleased]` for user-facing changes.
-4. Fill in the PR checklist.
+## 8. Release process
 
-## 6. Terminal compatibility reports
+Releases are cut by maintainers only; the checklist lives in
+[docs/RELEASING.md](docs/RELEASING.md).
+
+## 9. Terminal compatibility reports
 
 These are worth their own note, because they are the most useful thing an
 outside contributor can send. If the chart looks wrong on your terminal:
@@ -141,7 +204,7 @@ outside contributor can send. If the chart looks wrong on your terminal:
    image to a file — comparing that with your screen separates "the rasteriser
    is wrong" from "the protocol emission is wrong", which are different bugs.
 
-## 7. Adding a glyph to the font
+## 10. Adding a glyph to the font
 
 The `mossaic-art` binary draws text with a 5×5 font in `src/art.rs`. It has A–Z,
 0–9, punctuation, and a set of named shapes — everything else is a gap someone
@@ -190,7 +253,7 @@ reads as no character at all), and no two glyphs may draw the same pixels. The
 README's list of what the font can draw is checked against the font too, so a
 new glyph that is not documented fails the suite.
 
-## 8. Code style
+## 11. Code style
 
 The code is commented for the reader who wonders *why*, not *what*. Comments
 that explain a trade-off, a protocol quirk, or a decision that looks arbitrary
