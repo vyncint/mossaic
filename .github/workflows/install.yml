@@ -1,0 +1,165 @@
+# What crates.io actually serves, installed the way a user installs it.
+#
+# CI tests the working tree and `cargo publish` checks that the archive builds.
+# Neither answers the question this one asks: does `cargo install mossaic` work
+# for somebody who has only cargo? Three failures live in that gap and nowhere
+# else.
+#
+#   * A file the build needs that `exclude` kept out of the archive. The
+#     repository still compiles; the package does not, and no test here can
+#     see it because every test here has the repository.
+#   * A **fresh dependency resolution**. CI resolves against the committed
+#     lockfile — `--locked` is the whole point of it — and `cargo install`
+#     does not. A dependency's own release can therefore break the published
+#     crate days after it was published, with nothing changed here at all.
+#     That is why this runs weekly and not only at publish.
+#   * The binaries running on a machine that has never seen this repository.
+#
+# So nothing here checks the repository out. The version, the MSRV and the
+# smoke commands all come from the registry or from the installed binaries,
+# because the registry is what a user gets.
+name: install
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to verify (default: the newest published)"
+        required: false
+  schedule:
+    - cron: "41 7 * * 1" # Mondays, after the stress run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.event.release.tag_name || inputs.version || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  install:
+    name: install (${{ matrix.os }}, ${{ matrix.toolchain }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        toolchain: [stable, msrv]
+        include:
+          # Stable resolves fresh, which is what a user gets and the only way
+          # a dependency's own release can be caught breaking us.
+          - toolchain: stable
+            locked: ""
+          # The MSRV promise is made against the lockfile we shipped, so that
+          # is what it is checked against — a fresh resolution on the oldest
+          # supported compiler is a claim this project has never made.
+          - toolchain: msrv
+            locked: "--locked"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Ask the registry what was published
+        id: crate
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          WANTED: ${{ inputs.version }}
+        run: |
+          api="https://crates.io/api/v1/crates/mossaic"
+          agent="mossaic-install-check (github actions)"
+          version="${WANTED:-${TAG#v}}"
+          if [ -z "$version" ]; then
+            version=$(curl -sSf -H "User-Agent: $agent" "$api" | jq -r .crate.max_stable_version)
+          fi
+
+          # The release event fires the moment the publish job finishes, and
+          # the index can trail it by seconds. Wait rather than fail: a flaky
+          # gate teaches people to ignore it.
+          for attempt in $(seq 30); do
+            body=$(curl -sS -H "User-Agent: $agent" "$api/$version") || body=""
+            if [ "$(printf '%s' "$body" | jq -r '.version.num // empty')" = "$version" ]; then
+              break
+            fi
+            echo "waiting for $version to appear on crates.io (${attempt}/30)"
+            sleep 10
+          done
+
+          num=$(printf '%s' "$body" | jq -r '.version.num // empty')
+          if [ "$num" != "$version" ]; then
+            echo "::error::$version never appeared on crates.io"
+            exit 1
+          fi
+          if [ "$(printf '%s' "$body" | jq -r .version.yanked)" != "false" ]; then
+            echo "::error::$version is yanked"
+            exit 1
+          fi
+
+          msrv=$(printf '%s' "$body" | jq -r '.version.rust_version // empty')
+          if [ -z "$msrv" ]; then
+            echo "::error::$version declares no rust-version, so its MSRV cannot be checked"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
+          echo "verifying mossaic $version, which declares Rust $msrv"
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: ${{ matrix.toolchain == 'msrv' && steps.crate.outputs.msrv || 'stable' }}
+      - name: cargo install, from an empty directory
+        env:
+          VERSION: ${{ steps.crate.outputs.version }}
+          LOCKED: ${{ matrix.locked }}
+        run: |
+          # An empty directory on purpose: `cargo install` from inside a
+          # checkout is a different code path from the one a user takes.
+          mkdir -p "$RUNNER_TEMP/clean-room"
+          cd "$RUNNER_TEMP/clean-room"
+          # shellcheck disable=SC2086 # LOCKED is a flag or nothing
+          cargo install mossaic --version "$VERSION" $LOCKED --root "$RUNNER_TEMP/installed"
+          echo "$RUNNER_TEMP/installed/bin" >> "$GITHUB_PATH"
+      - name: Run what it installed
+        env:
+          VERSION: ${{ steps.crate.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP/clean-room"
+
+          # The version a binary reports is the one thing that proves the
+          # archive under test is the archive that was published.
+          for binary in mossaic mossaic-art mossaic-glyphs; do
+            got=$("$binary" --version)
+            echo "$binary: $got"
+            case "$got" in
+              "$binary $VERSION") ;;
+              *) echo "::error::$binary reports '$got', expected '$binary $VERSION'"; exit 1 ;;
+            esac
+          done
+
+          # Offline by construction: a saved year, a font, and a demo.
+          mossaic-art VYNCINT --year 2027 --no-colour | tee art.txt
+          grep -q "41 of 53 columns" art.txt
+
+          mossaic-art "I :heart: RUST" --year 2027 --no-colour | tee shape.txt
+          grep -q "I ♥ RUST" shape.txt
+
+          mossaic-art --font --no-colour | tee font.txt
+          grep -q "glyphs, 5x5 each" font.txt
+          grep -q ":star:" font.txt
+
+          # Capability probing has to survive having no terminal at all: this
+          # is a pipe, and the honest answer is that nothing answered.
+          mossaic --capabilities < /dev/null | tee caps.txt
+          grep -q "cells      text" caps.txt
+
+          # And the renderers, which are where an excluded file would show:
+          # both write real PNGs.
+          mossaic --demo --png demo.png < /dev/null
+          mossaic-art --font --png font.png
+          for png in demo.png font.png; do
+            magic=$(head -c 8 "$png" | od -An -tx1 | tr -d ' \n')
+            if [ "$magic" != "89504e470d0a1a0a" ]; then
+              echo "::error::$png is not a PNG (magic $magic)"
+              exit 1
+            fi
+            echo "$png: $(wc -c < "$png") bytes, PNG"
+          done
