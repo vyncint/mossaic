@@ -27,7 +27,7 @@ column between them, placed on rows Mon–Fri so Sunday and Saturday stay clear.
 `mossaic-art --font` prints the whole set and the
 [README lists it](../README.md#what-you-can-draw); adding to it is one table
 entry in `src/art.rs`, with the shape rules checked when the crate compiles —
-see [CONTRIBUTING.md §7](../CONTRIBUTING.md#7-adding-a-glyph-to-the-font).
+see [CONTRIBUTING.md §10](../CONTRIBUTING.md#10-adding-a-glyph-to-the-font).
 `VYNCINT` is 41 of the year's 53 columns and is centred by default;
 `--start-week` and `--top` move it, `--commits` sets how many commits each lit
 day gets.

@@ -252,7 +252,7 @@ closes nothing, is refused with the list above rather than guessed at.
 
 Adding a glyph is one table entry in `src/art.rs` — the shape rules are checked
 when the crate compiles. See
-[CONTRIBUTING.md](CONTRIBUTING.md#7-adding-a-glyph-to-the-font).
+[CONTRIBUTING.md](CONTRIBUTING.md#10-adding-a-glyph-to-the-font).
 
 ## Keys
 
