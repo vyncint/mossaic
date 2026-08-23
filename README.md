@@ -37,6 +37,7 @@ labels around them stay text.
 [The GitHub Action](action/README.md)
 
 **Reference** · [Usage](#usage) · [What you can draw](#what-you-can-draw) ·
+[Pixel art across the year](#pixel-art-across-the-year) ·
 [Keys](#keys) · [Mouse](#mouse) ·
 [How it works](#how-it-works) · [Known limits](#known-limits) ·
 [Design notes](docs/DESIGN.md) · [Contributing](CONTRIBUTING.md) ·
@@ -253,6 +254,77 @@ closes nothing, is refused with the list above rather than guessed at.
 Adding a glyph is one table entry in `src/art.rs` — the shape rules are checked
 when the crate compiles. See
 [CONTRIBUTING.md](CONTRIBUTING.md#10-adding-a-glyph-to-the-font).
+
+## Pixel art across the year
+
+The font draws five rows of two shades on Mon–Fri. A **canvas** is the general
+case: seven rows, up to 53 columns, any of GitHub's five shades on any day —
+the weekend included, and the whole year at once.
+
+```sh
+mossaic-art --list-templates                    # what there is, with thumbnails
+mossaic-art --template dragon --year 2027       # draw one, and see what it costs
+mossaic-art --draw                              # draw your own, by hand
+mossaic-art --matrix mine.art --year 2027       # draw a file you made
+mossaic-art --image logo.png --year 2027        # turn a picture into a year
+```
+
+Everything a text plan does, a picture does: `--track` reports how far along it
+is, `--save` remembers it, `--backfill` catches up, `--write` makes the commits,
+and the GitHub Action reads the same JSON.
+
+### The `.art` format
+
+Seven rows of shades, and a header that introduces the picture:
+
+```
+# name: Dragon
+# author: @vyncint
+# description: A serpentine dragon coiling across the whole year
+
+0000000000000000000003333333333333300000330000000000
+...
+```
+
+Shades are `0`–`4`, or the blocks ` ░▒▓█` if you would rather read the file as
+a picture. A short row is padded with dark days, so an editor that strips
+trailing whitespace cannot corrupt one. Dropping a file into `art/templates/`
+is all it takes to add a template — `build.rs` finds it, and there is no list
+to edit. See [CONTRIBUTING §11](CONTRIBUTING.md#11-adding-a-pixel-art-template).
+
+### Drawing by hand
+
+`--draw` opens an editor on the year itself:
+
+| key | |
+|---|---|
+| arrows, or `h` `j` `k` `l` | move |
+| `0` `1` `2` `3` `4` | paint that shade, and take it as the brush |
+| space, enter | cycle this cell 0 → 4 → 0 |
+| click, drag | paint; right-click clears; moving the pointer just reads |
+| `c` / `i` | clear / invert |
+| `u`, `ctrl-z` | undo |
+| `s` | save to the `--output` file |
+| `?` / `q` | help / leave |
+
+It shows the date under the cursor, how many days sit at each shade, **what the
+picture would cost in commits** — the same arithmetic `--write` uses, not an
+estimate of it — and how well the shades will separate for a reader on any
+palette GitHub ships. Days in the partial weeks at either end of the year are
+drawn as `·` and cost nothing, because they are not days the year has.
+
+### From an image
+
+`--image` reads a PNG, shrinks it to the calendar keeping its aspect ratio, and
+quantises it to five shades. A **dark pixel becomes a busy day**, the way ink
+reads on paper; `--invert` turns that over, and `--dither` spreads the rounding
+error into neighbouring days so a gradient reads as one rather than as four
+bands. Every source pixel that lands in a cell is averaged into it, because the
+shrink is enormous and sampling one pixel in twenty throws the picture away.
+
+PNG only, and it says so: a JPEG is named as a JPEG with the one command that
+converts it. Decoding it costs no dependency — zlib is already here for the
+kitty protocol.
 
 ## Keys
 

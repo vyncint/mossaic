@@ -9,6 +9,62 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Added
+
+Pixel art across the whole year. The font draws five rows of two shades on
+Mon–Fri; a **canvas** is the general case — seven rows, up to 53 columns, any
+of GitHub's five shades on any day, the weekend included.
+
+- **`--template NAME` and `--list-templates`.** A catalogue of whole-year
+  pictures, shipped with the crate. `--list-templates` prints each one with a
+  thumbnail, because a name and a sentence are not a picture and the point of
+  choosing one is what it looks like. Contributing a template is dropping a
+  `.art` file into `art/templates/` — `build.rs` embeds every file it finds, so
+  there is no list to remember to edit. Local templates in `./templates/` and
+  `~/.config/mossaic/templates/` shadow the built-in ones, so a template can be
+  tested under the name it will eventually ship with.
+- **`--matrix FILE`.** Draw a `.art` file: seven rows of `0`–`4`, or of the
+  blocks ` ░▒▓█`, with `#` comments and a `# name:` / `# author:` /
+  `# description:` header. A short row is padded with dark days, so an editor
+  that strips trailing whitespace cannot corrupt a picture whose last column is
+  dark.
+- **`--draw`, an editor for the year itself.** Arrows or `hjkl` to move, `0`–`4`
+  to paint, space to cycle a cell, the mouse to paint directly, `c` clear, `i`
+  invert, `u` or `ctrl-z` undo, `s` save. The HUD shows the date under the
+  cursor, the days at each shade, how well those shades will separate for a
+  reader on any palette GitHub ships, and **what the picture would cost in
+  commits** — the same arithmetic `--write` uses rather than an approximation
+  of it. Days in the partial weeks at either end of the year are drawn as `·`
+  and cost nothing, because they are not days the year has.
+- **`--image FILE`, with `--invert` and `--dither`.** A PNG becomes a year:
+  shrunk to the calendar keeping its aspect ratio, and quantised to five
+  shades. A dark pixel becomes a busy day, the way ink reads on paper. Every
+  source pixel that lands in a cell is averaged into it — the shrink is
+  enormous, and sampling one pixel in twenty throws the picture away.
+  `--dither` is Floyd–Steinberg, so a gradient reads as one rather than as four
+  bands. The decoder is written here rather than pulled in: zlib is already
+  present for the kitty protocol, so this costs no new dependency. PNG only,
+  and it says so — a JPEG is named as a JPEG, with the one command that
+  converts it.
+- **`art::Canvas`**, `art::band`, and **`plan::Plan::from_levels`** — the
+  library half. A canvas tracks, saves, backfills and writes exactly as text
+  does, and the GitHub Action reads the same JSON, because `Day` was already a
+  *band* rather than a target and a level-2 day is that band with different
+  numbers.
+
+### Changed
+
+- **`plan::Plan::holes` counts any day past its ceiling**, not only the ones
+  inside the text's own block. A canvas has middle shades, and a level-2 day
+  that has crept to level 4 is damage nothing takes back. This cannot change
+  what a text plan reports: text gives a letter day no ceiling — brighter than
+  brightest is still brightest — so there is nothing for one to pass.
+- **`plan::Spec` carries an optional `art` field**, the picture stored inline.
+  A name would be a pointer to something that can change underneath a plan, and
+  every other field here is resolved for exactly that reason. Plans written
+  before this load unchanged.
+
+
 ## [0.5.0] - 2026-08-21
 
 ### Added
