@@ -182,6 +182,7 @@ pub mod graphics;
 pub mod plan;
 pub mod png;
 pub mod primer;
+pub mod templates;
 pub mod term;
 pub mod ui;
 

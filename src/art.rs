@@ -581,6 +581,384 @@ pub fn shape_name(character: char) -> Option<&'static str> {
         .map(|(name, _)| *name)
 }
 
+// ============================================================ the pixel canvas
+
+/// Rows in a full-year canvas: every weekday, Sunday through Saturday.
+///
+/// A glyph is five tall so that letters sit on Mon–Fri and the weekend stays
+/// clear. A canvas has no such courtesy — it is the whole graph, so it is the
+/// whole week.
+pub const CANVAS_ROWS: usize = WEEKDAYS;
+
+/// The widest a canvas can be. A Sunday-aligned year spans 53 columns at most,
+/// which happens when January 1st is a Saturday, or a Friday in a leap year.
+pub const CANVAS_COLS: usize = 53;
+
+/// The characters a canvas file may use for each shade, darkest first.
+///
+/// Two alphabets for the same five levels: digits, which are unambiguous in any
+/// editor and any font, and the block glyphs, which let a file be read as a
+/// picture rather than as a table of numbers. A file may mix them, because the
+/// two say the same thing and refusing a mixture would be pedantry.
+pub const SHADE_CHARS: [(char, char); 5] =
+    [('0', ' '), ('1', '░'), ('2', '▒'), ('3', '▓'), ('4', '█')];
+
+/// The level a canvas character stands for, or `None` if it is not one.
+#[must_use]
+pub fn shade_of(character: char) -> Option<u8> {
+    SHADE_CHARS
+        .iter()
+        .position(|(digit, block)| *digit == character || *block == character)
+        // A position in a five-element table is a level by construction.
+        .map(|level| level as u8)
+}
+
+/// What a `.art` file says about itself, from its `# key: value` header.
+///
+/// Every field is optional. A file with no header at all is still a valid
+/// canvas — the header is how a template introduces itself in a listing, not a
+/// precondition for drawing it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Meta {
+    /// A display name, from `# name:`.
+    pub name: Option<String>,
+    /// Who made it, from `# author:`.
+    pub author: Option<String>,
+    /// One line about it, from `# description:`.
+    pub description: Option<String>,
+}
+
+/// Pixel art across the whole calendar: one shade per day, seven rows tall.
+///
+/// This is the general form of what [`bitmap`] produces for text. A glyph
+/// column is five booleans — lit or not — because a letter is one shade
+/// against another. A canvas column is seven levels, because a picture is
+/// however many shades GitHub gives you, and it uses the weekend.
+///
+/// Stored column-major, like [`bitmap`]'s output, because that is the axis
+/// placement walks: a canvas is laid onto the year by choosing which calendar
+/// column its first column lands on.
+///
+/// ```
+/// # use mossaic::art::Canvas;
+/// let canvas = Canvas::parse("0123\n4321\n0000\n1111\n2222\n3333\n4444\n").unwrap();
+/// assert_eq!(canvas.width(), 4);
+/// assert_eq!(canvas.at(0, 0), 0); // week 0, Sunday
+/// assert_eq!(canvas.at(0, 1), 4); // week 0, Monday
+/// assert_eq!(canvas.at(3, 0), 3); // week 3, Sunday
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Canvas {
+    /// One entry per calendar column, each seven levels deep, row 0 = Sunday.
+    columns: Vec<[u8; CANVAS_ROWS]>,
+    /// What the file said about itself.
+    meta: Meta,
+}
+
+impl Canvas {
+    /// An all-dark canvas `width` columns across.
+    ///
+    /// Returns `None` for a width no calendar column can hold, rather than
+    /// clamping: a width comes from a flag or a file, and silently drawing on a
+    /// different canvas than the one asked for is worse than refusing.
+    #[must_use]
+    pub fn blank(width: usize) -> Option<Self> {
+        (1..=CANVAS_COLS).contains(&width).then(|| Self {
+            columns: vec![[0; CANVAS_ROWS]; width],
+            meta: Meta::default(),
+        })
+    }
+
+    /// Read a canvas from the `.art` format, or say why it could not be read.
+    ///
+    /// The format is seven rows of shade characters, optionally preceded by
+    /// `# key: value` header lines. Three rules about what a line is, and they
+    /// exist because the alternative is a file that parses into a picture
+    /// nobody drew:
+    ///
+    /// 1. a line starting with `#` is a comment, and `# name:`, `# author:`
+    ///    and `# description:` are read into [`Meta`];
+    /// 2. a line of length zero is skipped, so a file may breathe between its
+    ///    header and its rows;
+    /// 3. anything else is a shade row, and every character in it must be one
+    ///    [`SHADE_CHARS`] knows.
+    ///
+    /// Rule 2 is deliberately about *length zero* rather than about
+    /// whitespace. A row of spaces is a row of level-0 days, which is a
+    /// perfectly ordinary thing for a picture to contain — trimming it away
+    /// would silently turn a seven-row file into a six-row one, and the error
+    /// would name the wrong problem.
+    ///
+    /// A short row is padded with level 0 on the right, because an editor that
+    /// strips trailing whitespace will do exactly that to a picture whose last
+    /// column is dark, and a format that cannot survive being saved is not a
+    /// format contributors can use.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut meta = Meta::default();
+        let mut rows: Vec<Vec<u8>> = Vec::new();
+
+        for (number, line) in text.lines().enumerate() {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            if let Some(comment) = line.strip_prefix('#') {
+                read_meta(comment, &mut meta);
+                continue;
+            }
+            if line.is_empty() {
+                continue;
+            }
+            if rows.len() == CANVAS_ROWS {
+                return Err(format!(
+                    "line {}: {} rows already, and a canvas is exactly {}",
+                    number + 1,
+                    CANVAS_ROWS,
+                    CANVAS_ROWS
+                ));
+            }
+            let mut row = Vec::with_capacity(line.chars().count());
+            for (column, character) in line.chars().enumerate() {
+                let Some(level) = shade_of(character) else {
+                    return Err(format!(
+                        "line {}, column {}: {character:?} is not a shade — use {}",
+                        number + 1,
+                        column + 1,
+                        describe_shades()
+                    ));
+                };
+                row.push(level);
+            }
+            rows.push(row);
+        }
+
+        if rows.len() != CANVAS_ROWS {
+            return Err(format!(
+                "a canvas is exactly {CANVAS_ROWS} rows, one per weekday; this has {}",
+                rows.len()
+            ));
+        }
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        if !(1..=CANVAS_COLS).contains(&width) {
+            return Err(format!(
+                "a canvas is 1 to {CANVAS_COLS} columns wide; this is {width}"
+            ));
+        }
+
+        let mut columns = vec![[0u8; CANVAS_ROWS]; width];
+        for (row, levels) in rows.iter().enumerate() {
+            for (column, level) in levels.iter().enumerate() {
+                columns[column][row] = *level;
+            }
+        }
+        Ok(Self { columns, meta })
+    }
+
+    /// Columns across.
+    #[must_use]
+    pub fn width(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// What the file said about itself.
+    #[must_use]
+    pub fn meta(&self) -> &Meta {
+        &self.meta
+    }
+
+    /// Replace what the file says about itself.
+    pub fn set_meta(&mut self, meta: Meta) {
+        self.meta = meta;
+    }
+
+    /// The level at a position, or 0 for one off the canvas.
+    ///
+    /// Answering rather than panicking because a cursor walks this: an editor
+    /// asking about the cell past the edge wants "nothing there", not a crash.
+    #[must_use]
+    pub fn at(&self, week: usize, row: usize) -> u8 {
+        self.columns
+            .get(week)
+            .and_then(|column| column.get(row).copied())
+            .unwrap_or(0)
+    }
+
+    /// Set the level at a position. Off-canvas positions and levels above 4 are
+    /// ignored, for the same reason [`Canvas::at`] answers rather than panics.
+    pub fn set(&mut self, week: usize, row: usize, level: u8) {
+        if level > 4 {
+            return;
+        }
+        if let Some(cell) = self
+            .columns
+            .get_mut(week)
+            .and_then(|column| column.get_mut(row))
+        {
+            *cell = level;
+        }
+    }
+
+    /// Every level in the canvas, in column order.
+    pub fn levels(&self) -> impl Iterator<Item = u8> + '_ {
+        self.columns
+            .iter()
+            .flat_map(|column| column.iter().copied())
+    }
+
+    /// How many days sit at each level, indexed by level.
+    #[must_use]
+    pub fn histogram(&self) -> [usize; 5] {
+        let mut counts = [0usize; 5];
+        for level in self.levels() {
+            counts[usize::from(level).min(4)] += 1;
+        }
+        counts
+    }
+
+    /// The darkest and brightest levels the picture actually uses.
+    ///
+    /// `None` for a canvas that is entirely one shade, which has no contrast to
+    /// describe and nothing to check.
+    #[must_use]
+    pub fn range(&self) -> Option<(u8, u8)> {
+        let low = self.levels().min()?;
+        let high = self.levels().max()?;
+        (low != high).then_some((low, high))
+    }
+
+    /// The busiest day this canvas needs the year to have before its shades can
+    /// be told apart.
+    ///
+    /// GitHub's scale has four steps, so a year whose busiest day is 1 holds
+    /// exactly two shades: empty and full. A picture using any level between
+    /// needs a peak of at least 4, where the counts 1, 2, 3, 4 land on levels
+    /// 1, 2, 3, 4 exactly. The same rule [`Shades::min_peak`] applies to two
+    /// shades, stated for however many a picture uses.
+    #[must_use]
+    pub fn min_peak(&self) -> u32 {
+        if self.levels().any(|level| (1..4).contains(&level)) {
+            4
+        } else {
+            1
+        }
+    }
+
+    /// Turn the canvas back into the `.art` format, header included.
+    ///
+    /// Digits rather than blocks, and every row padded to the full width: this
+    /// is what an editor writes, and a file that round-trips through
+    /// [`Canvas::parse`] unchanged is one a contributor can diff.
+    #[must_use]
+    pub fn to_art(&self) -> String {
+        let mut out = String::new();
+        for (key, value) in [
+            ("name", self.meta.name.as_deref()),
+            ("author", self.meta.author.as_deref()),
+            ("description", self.meta.description.as_deref()),
+        ] {
+            if let Some(value) = value {
+                out.push_str(&format!("# {key}: {value}\n"));
+            }
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        for row in 0..CANVAS_ROWS {
+            for week in 0..self.width() {
+                out.push(SHADE_CHARS[usize::from(self.at(week, row)).min(4)].0);
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Lay the canvas on a year and report the shade each day should end at.
+    ///
+    /// `start` is the calendar column the canvas's first column lands on.
+    /// Columns that fall outside the year are counted in the returned total
+    /// rather than silently dropped — the first and last calendar columns are
+    /// partial weeks, so a full-width picture always loses a few days at the
+    /// ends and the caller should be able to say so.
+    ///
+    /// Returns the level for **every** day it covers, including the level-0
+    /// ones. That is the difference between a canvas and text: a dark day
+    /// inside a picture is part of the picture, and the plan has to know it
+    /// must stay dark.
+    #[must_use]
+    pub fn place(&self, grid: &Grid, start: usize) -> (BTreeMap<NaiveDate, u8>, usize) {
+        let mut levels = BTreeMap::new();
+        let mut skipped = 0;
+        for (offset, column) in self.columns.iter().enumerate() {
+            let Some(week) = start.checked_add(offset) else {
+                skipped += CANVAS_ROWS;
+                continue;
+            };
+            if week >= grid.weeks {
+                skipped += CANVAS_ROWS;
+                continue;
+            }
+            for (row, level) in column.iter().enumerate() {
+                let date = grid.date_at(week, row);
+                if grid.holds(date) {
+                    levels.insert(date, *level);
+                } else {
+                    skipped += 1;
+                }
+            }
+        }
+        (levels, skipped)
+    }
+
+    /// Where the canvas sits when nobody says: centred on the year.
+    #[must_use]
+    pub fn centred(&self, grid: &Grid) -> usize {
+        grid.weeks.saturating_sub(self.width()) / 2
+    }
+}
+
+/// Read one `# key: value` header line into `meta`.
+///
+/// Unknown keys are ignored rather than refused. A `.art` file is a document as
+/// well as data — a contributor may want a `# note:` line — and a format that
+/// rejects a comment it does not recognise is one that breaks when it grows.
+fn read_meta(comment: &str, meta: &mut Meta) {
+    let Some((key, value)) = comment.split_once(':') else {
+        return;
+    };
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return;
+    }
+    match key.trim().to_ascii_lowercase().as_str() {
+        "name" => meta.name = Some(value),
+        "author" => meta.author = Some(value),
+        "description" => meta.description = Some(value),
+        _ => {}
+    }
+}
+
+/// The shade alphabet, for a parse error that has to teach the format.
+fn describe_shades() -> String {
+    let digits: String = SHADE_CHARS.iter().map(|(digit, _)| *digit).collect();
+    let blocks: String = SHADE_CHARS.iter().map(|(_, block)| *block).collect();
+    format!("{digits} or {blocks:?} (space is level 0)")
+}
+
+/// What a day at `level` must reach, and the most it may hold before it becomes
+/// the next shade up.
+///
+/// The general form of the band [`Shades`] describes for two shades. Level 0
+/// must stay dark, so its ceiling is zero; level 4 has no ceiling, because
+/// brighter than brightest is still brightest.
+#[must_use]
+pub fn band(level: u8, peak: u32) -> (u32, Option<u32>) {
+    match level.min(4) {
+        0 => (0, Some(0)),
+        4 => (commits_to_reach(4, peak), None),
+        level => (
+            commits_to_reach(level, peak),
+            commits_to_reach(level + 1, peak).checked_sub(1),
+        ),
+    }
+}
+
 /// The two shades contribution art is drawn in.
 ///
 /// The classic look is `ink: 4, field: 0` — letters against an empty graph. It

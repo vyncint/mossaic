@@ -3247,8 +3247,30 @@ fn a_plan_file_is_input_and_is_bounded_like_one() {
         commits: 4,
         background: 0,
         user: None,
+        art: None,
     };
     assert!(sound.validate().is_ok());
+
+    // A stored picture is input too, and reaches the drawing code by the same
+    // route. Parsed and bounded here rather than trusted and drawn later.
+    let mut drawn = sound.clone();
+    drawn.art = Some(
+        crate::templates::find("dragon")
+            .expect("dragon")
+            .canvas
+            .to_art(),
+    );
+    assert!(drawn.validate().is_ok(), "a real canvas passes");
+    assert!(drawn.canvas().expect("parses").is_some());
+
+    let mut bent = sound.clone();
+    bent.art = Some("not a canvas".to_string());
+    let why = bent.validate().expect_err("a picture that is not one");
+    assert!(
+        why.contains("not a canvas"),
+        "names the picture as the problem: {why}"
+    );
+    assert!(sound.canvas().expect("no picture").is_none());
 
     // `usize::MAX + GLYPH_ROWS` wraps to 4, which passes a `> WEEKDAYS` check
     // comfortably, and the rows were then drawn wherever the wrapping landed.
@@ -3758,4 +3780,158 @@ fn the_measured_shade_floors_are_the_ones_the_docs_quote() {
     );
     // Which is the whole reason the rule is "leave two levels".
     assert!(apart > adjacent * 3.0);
+}
+
+// ======================================================== the template catalogue
+
+/// Every `.art` file in `art/templates/` is a valid canvas, checked from the
+/// files on disk rather than from the embedded copies.
+///
+/// Reading the directory rather than [`crate::templates::builtin_sources`] is
+/// deliberate: `build.rs` is the thing under test as much as the files are. A
+/// template that never got embedded — a stem the generator rejected, a file
+/// added while the build cache was warm — is invisible to a test that only
+/// looks at what was embedded, and invisible is exactly the failure the
+/// auto-discovery exists to prevent.
+#[test]
+fn every_template_file_is_a_valid_canvas() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("art")
+        .join("templates");
+    let entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("{} is not readable: {error}", dir.display()))
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("art"))
+        .collect();
+
+    assert!(
+        !entries.is_empty(),
+        "{} holds no .art files — the format needs at least one worked example",
+        dir.display()
+    );
+
+    let mut titles: Vec<String> = Vec::new();
+    for path in &entries {
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        assert!(
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "{}: the stem is what you type after --template, so it must be \
+             lowercase letters, digits and dashes",
+            path.display()
+        );
+
+        let body = std::fs::read_to_string(path).expect("a readable template");
+        let canvas = crate::art::Canvas::parse(&body)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+
+        // Rule 1: exactly seven rows. `parse` enforces it, so this asserts the
+        // parser's promise rather than re-deriving it.
+        let cells = canvas.histogram().iter().sum::<usize>();
+        assert_eq!(
+            cells,
+            canvas.width() * crate::art::CANVAS_ROWS,
+            "{}: {} cells across {} columns is not {} rows",
+            path.display(),
+            cells,
+            canvas.width(),
+            crate::art::CANVAS_ROWS
+        );
+
+        // Rule 2: a width a calendar column can hold.
+        assert!(
+            (1..=crate::art::CANVAS_COLS).contains(&canvas.width()),
+            "{}: {} columns is outside 1..={}",
+            path.display(),
+            canvas.width(),
+            crate::art::CANVAS_COLS
+        );
+
+        // Rule 3: only shades. Checked on the file's own bytes, because `parse`
+        // would have refused anything else and this is the claim being made.
+        for (number, line) in body.lines().enumerate() {
+            if line.starts_with('#') || line.is_empty() {
+                continue;
+            }
+            for character in line.chars() {
+                assert!(
+                    crate::art::shade_of(character).is_some(),
+                    "{}: line {} holds {character:?}, which is not a shade",
+                    path.display(),
+                    number + 1
+                );
+            }
+        }
+
+        // Rule 4: a header that introduces it, and a title nobody else has.
+        // A template with no name is one nobody can tell apart in a listing.
+        let meta = canvas.meta();
+        let title = meta
+            .name
+            .clone()
+            .unwrap_or_else(|| panic!("{}: needs a `# name:` header", path.display()));
+        assert!(
+            meta.description.is_some(),
+            "{}: needs a `# description:` header — it is what --list-templates prints",
+            path.display()
+        );
+        assert!(
+            !titles.contains(&title),
+            "{}: two templates are both called {title:?}",
+            path.display()
+        );
+        titles.push(title);
+
+        // A template that is one flat shade is a blank graph with extra steps.
+        assert!(
+            canvas.range().is_some(),
+            "{}: every cell is the same shade, so there is nothing to draw",
+            path.display()
+        );
+    }
+
+    // And the generator found all of them. This is the assertion that fails
+    // when a file is added and `build.rs` did not re-run.
+    let embedded = crate::templates::builtin_sources().len();
+    assert_eq!(
+        embedded,
+        entries.len(),
+        "{} .art files on disk but {embedded} embedded — build.rs did not see them all",
+        entries.len()
+    );
+}
+
+/// The reference template exercises the whole format, because it is what a
+/// contributor copies. One that used two shades would teach two shades.
+#[test]
+fn the_reference_template_uses_every_shade() {
+    let dragon = crate::templates::find("dragon").expect("the reference template");
+    let histogram = dragon.canvas.histogram();
+    for (level, count) in histogram.iter().enumerate() {
+        assert!(
+            *count > 0,
+            "dragon uses no level-{level} days; the reference template should \
+             show all five: {histogram:?}"
+        );
+    }
+    assert_eq!(dragon.canvas.width(), crate::art::CANVAS_COLS);
+    assert_eq!(dragon.author(), Some("@vyncint"));
+}
+
+/// A canvas survives being written and read again, which is what makes a saved
+/// drawing reviewable as a diff.
+#[test]
+fn a_canvas_round_trips_through_the_art_format() {
+    for template in crate::templates::catalogue() {
+        let again = crate::art::Canvas::parse(&template.canvas.to_art())
+            .unwrap_or_else(|error| panic!("{}: {error}", template.name));
+        assert_eq!(
+            again, template.canvas,
+            "{} changed when written and read back",
+            template.name
+        );
+    }
 }
