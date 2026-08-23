@@ -300,6 +300,11 @@ trailing whitespace cannot corrupt one. Dropping a file into `art/templates/`
 is all it takes to add a template — `build.rs` finds it, and there is no list
 to edit. See [CONTRIBUTING §11](CONTRIBUTING.md#11-adding-a-pixel-art-template).
 
+> **Draw one?** [#57](https://github.com/vyncint/mossaic/issues/57) is an open
+> invitation with the whole thing written out — the editor's keys, the format,
+> what gets merged, and a list of ideas to claim. **No Rust needed:** a
+> template is a text file, and there is no list to add it to.
+
 **Use three shades, and use `0`, `2` and `4`.** GitHub's five greens are not
 evenly spaced: every *adjacent* pair is 9–20 ΔE apart in the worst palette it
 ships, which is close enough to read as one colour. `{0, 2, 4}` is the only
