@@ -44,6 +44,13 @@ usage:
                       `# author:` and `# description:` are read as the
                       picture's own. With --commits N a level-4 day costs N
                       and every darker level is priced against it
+  --image FILE        turn a PNG into a picture: shrunk to fit the calendar,
+                      keeping its aspect ratio, and quantised to five shades.
+                      A dark pixel is a busy day, the way ink reads on paper
+  --invert            with --image, map bright pixels to busy days instead
+  --dither            with --image, spread the rounding error into
+                      neighbouring days (Floyd-Steinberg), so a gradient
+                      reads as one rather than as four bands
   --output FILE       (-o) where a drawing is written
   --year YEAR         which year's calendar (default: this one)
   --commits N         commits per lit day (default 4); keep it uniform for one
@@ -1600,6 +1607,8 @@ fn parse_args() -> Option<Options> {
 
     let mut template: Option<String> = None;
     let mut matrix: Option<PathBuf> = None;
+    let mut picture: Option<PathBuf> = None;
+    let mut image_options = mossaic::image::Options::default();
     let mut list_templates = false;
     let mut font = false;
     let mut png_path: Option<PathBuf> = None;
@@ -1687,6 +1696,9 @@ fn parse_args() -> Option<Options> {
             "--plan" => options.plan_path = args.value("--plan").into(),
             "--save" => options.save = true,
             "--template" => template = Some(args.value("--template")),
+            "--image" => picture = Some(args.value("--image").into()),
+            "--invert" => image_options.invert = true,
+            "--dither" => image_options.dither = true,
             "--matrix" | "--file" => matrix = Some(args.value("--matrix").into()),
             "--list-templates" => list_templates = true,
             "--output" | "-o" => options.output = Some(args.value("--output").into()),
@@ -1722,6 +1734,7 @@ fn parse_args() -> Option<Options> {
     let sources = [
         ("--template", template.is_some()),
         ("--matrix", matrix.is_some()),
+        ("--image", picture.is_some()),
         ("a TEXT argument", !options.text.is_empty()),
     ];
     let given: Vec<&str> = sources
@@ -1739,6 +1752,29 @@ fn parse_args() -> Option<Options> {
     if let Some(name) = &template {
         let found = templates::find(name).unwrap_or_else(|error| fail(&error));
         options.canvas = Some((found.title().to_string(), found.canvas));
+    }
+    // Said plainly rather than ignored: both change what a picture looks like,
+    // so a run where they do nothing is a run that drew something other than
+    // what was asked for.
+    for (flag, given) in [
+        ("--invert", image_options.invert),
+        ("--dither", image_options.dither),
+    ] {
+        if given && picture.is_none() {
+            fail(&format!(
+                "{flag} describes how to read an image — it needs --image"
+            ));
+        }
+    }
+
+    if let Some(path) = &picture {
+        let canvas = mossaic::image::load(path, image_options).unwrap_or_else(|error| fail(&error));
+        let name = canvas
+            .meta()
+            .name
+            .clone()
+            .unwrap_or_else(|| "picture".to_string());
+        options.canvas = Some((name, canvas));
     }
     if let Some(path) = &matrix {
         let body = std::fs::read_to_string(path)

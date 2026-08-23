@@ -179,6 +179,7 @@ pub mod calendar;
 pub mod cli;
 pub mod github;
 pub mod graphics;
+pub mod image;
 pub mod plan;
 pub mod png;
 pub mod primer;
