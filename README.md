@@ -47,31 +47,21 @@ labels around them stay text.
 ## Quickstart
 
 **No Rust needed.** Every release ships static binaries for Linux, macOS and
-Windows — [all four ways to install](#install) are below.
+Windows. One command, no toolchain:
 
 ```sh
-brew install vyncint/tap/mossaic          # macOS and Linux
+target=x86_64-unknown-linux-musl     # or aarch64-unknown-linux-musl,
+                                     # aarch64-apple-darwin, x86_64-apple-darwin
+curl -fsSL "https://github.com/vyncint/mossaic/releases/latest/download/mossaic-${target}.tar.gz" \
+  | tar xz --strip-components=1 --wildcards '*/mossaic*'
 ```
 
-<details>
-<summary>Without Homebrew — one command, no toolchain</summary>
+Windows: take the `.zip` from the
+[latest release](https://github.com/vyncint/mossaic/releases/latest).
+Already have Rust? `cargo install mossaic --locked`.
 
-```sh
-# Linux x86_64. Swap the target for aarch64-unknown-linux-musl,
-# x86_64-apple-darwin or aarch64-apple-darwin as needed.
-curl -fsSL https://github.com/vyncint/mossaic/releases/latest/download/mossaic-x86_64-unknown-linux-musl.tar.gz \
-  | tar xz --strip-components=1 -C ~/.local/bin --wildcards '*/mossaic*'
-```
-
-The Linux builds are statically linked, so they run on any distribution
-whatever its glibc. Windows users take the `.zip` from the
-[releases page](https://github.com/vyncint/mossaic/releases/latest).
-
-</details>
-
-```sh
-cargo install mossaic      # if you have Rust 1.88+ already
-```
+[All the ways to install](#install), including checksum verification, are
+below.
 
 **Plan the art.** No account, no network — this is arithmetic:
 
@@ -471,15 +461,9 @@ palette is degraded on purpose, and what the capability probe actually sends.
 
 ## Install
 
-Four ways, and only the last needs a Rust toolchain.
+Three ways, and only the last needs a Rust toolchain.
 
-### Homebrew — macOS and Linux
-
-```sh
-brew install vyncint/tap/mossaic
-```
-
-### A downloaded binary — anything else
+### A downloaded binary
 
 Every release attaches a static build for each platform, with a `.sha256`
 beside it. Nothing to compile and nothing to keep up to date but the file

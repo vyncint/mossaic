@@ -11,6 +11,12 @@ listed under a **Changed** or **Removed** heading.
 
 ### Fixed
 
+- **The README no longer promises Homebrew.** The line went in ahead of the
+  tap existing, on the assumption that the tap would follow within the hour.
+  It has not yet, and an install command that does not work is worse than one
+  that is not offered. The three routes documented are the three that are
+  verified against the real release.
+
 - **The Windows binary is built.** The 0.6.2 release shipped Linux and macOS
   archives and no `.zip`: the build step had no `shell: bash`, and Windows
   runners default to PowerShell, where `"$TARGET"` expands to the empty string
