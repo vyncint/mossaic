@@ -116,6 +116,116 @@ jobs:
             --notes-file "$RUNNER_TEMP/notes.md" \
             --verify-tag
 
+  # Prebuilt binaries, so that using mossaic does not require a Rust toolchain.
+  #
+  # The reason is not convenience. The whole pitch for contributing a template
+  # is that it needs no Rust -- a template is a text file -- and that pitch is
+  # false if the only way to *see* what you drew is `cargo install`. Somebody
+  # who does not write Rust should not have to install a compiler to draw a
+  # picture.
+  #
+  # Linux targets are **musl**, so the binary is statically linked and runs on
+  # any distribution regardless of its glibc. Building against the runner's
+  # glibc would produce something that refuses to start on anything older than
+  # the runner, which for a download people keep for a year is the wrong
+  # trade.
+  #
+  # Every target builds on its own architecture rather than cross-compiling:
+  # GitHub gives public repositories arm64 runners, and a native build is one
+  # fewer thing that can be subtly wrong.
+  binaries:
+    name: ${{ matrix.target }}
+    needs: github-release
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload release assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # --locked, because the point of a published binary is that it is the
+      # one the lockfile describes and the tests ran against.
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stage="mossaic-${version}-${TARGET}"
+          mkdir "$stage"
+          suffix=""
+          case "$TARGET" in *windows*) suffix=".exe" ;; esac
+          for binary in mossaic mossaic-art mossaic-glyphs; do
+            cp "target/${TARGET}/release/${binary}${suffix}" "$stage/"
+          done
+          cp README.md LICENSE-MIT LICENSE-APACHE CHANGELOG.md "$stage/"
+          # The templates ship inside the binary, but a copy beside it is what
+          # someone starts from when drawing their own.
+          cp -r art/templates "$stage/templates"
+
+          case "$TARGET" in
+            *windows*)
+              7z a "${stage}.zip" "$stage" > /dev/null
+              archive="${stage}.zip"
+              ;;
+            *)
+              tar czf "${stage}.tar.gz" "$stage"
+              archive="${stage}.tar.gz"
+              ;;
+          esac
+
+          # Checksums beside the archive: a download nobody can verify is a
+          # download nobody should run.
+          sums() {
+            if command -v sha256sum > /dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi
+          }
+          sums "$archive" > "${archive}.sha256"
+
+          # A second copy without the version in the name, because
+          # `releases/latest/download/<asset>` resolves by *exact* file name --
+          # so a URL that is stable across releases cannot contain the version.
+          # The versioned name is what cargo-binstall and the Homebrew formula
+          # look for; the unversioned one is what a person copies out of the
+          # README and keeps working next release.
+          alias="${archive/-${version}-/-}"
+          cp "$archive" "$alias"
+          sums "$alias" > "${alias}.sha256"
+
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "ALIAS=$alias" >> "$GITHUB_ENV"
+
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "$ARCHIVE" "${ARCHIVE}.sha256" \
+            "$ALIAS" "${ALIAS}.sha256" --clobber
+
   # Tell the repository that tests this tool against a real subject that a
   # new version exists, so the deep run happens now rather than at its next
   # scheduled tick.

@@ -11,6 +11,28 @@ listed under a **Changed** or **Removed** heading.
 
 ## [0.6.2] - 2026-08-23
 
+### Added
+
+- **Prebuilt binaries on every release**, for Linux, macOS and Windows on both
+  x86-64 and arm64 — so using mossaic no longer needs a Rust toolchain.
+
+  The reason is not convenience. The pitch for contributing a template is that
+  it needs no Rust, because a template is a text file — and that pitch is false
+  if the only way to *see* what you drew is `cargo install`. Somebody who does
+  not write Rust should not have to install a compiler to draw a picture.
+
+  Linux builds are **musl**, so they are statically linked and run on any
+  distribution whatever its glibc: a binary downloaded today still starts next
+  year. Every target builds on its own architecture rather than
+  cross-compiling.
+
+  Each archive carries the three binaries, both licences, the changelog, and a
+  `templates/` directory to start from, with a `.sha256` beside it. Assets are
+  uploaded under two names: the versioned one, which `cargo binstall` and the
+  Homebrew formula look for, and an unversioned alias, because
+  `releases/latest/download/<asset>` resolves by exact file name and a URL that
+  is stable across releases therefore cannot contain the version.
+
 ### Changed
 
 - **Refreshed the lockfile.** `cc` 1.4.3 → 1.4.4, `darling` 0.24.0 → 0.24.1
