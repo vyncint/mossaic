@@ -48,7 +48,11 @@ fn ready(screen: &Screen) -> bool {
 #[test]
 fn list_templates_shows_a_picture_and_not_just_a_name() -> termlens::Result<()> {
     let mut terminal = spawn(&["--list-templates"])?;
-    terminal.wait_until(|screen| screen.contains("draw one:"))?;
+    // Waiting for the *process* rather than for a line: this command prints
+    // and exits, so a predicate matching part way down its output can be
+    // satisfied by a screen the rest of it has not reached yet. Every
+    // assertion below is then a race, and it loses on a loaded runner.
+    terminal.wait_exit()?;
     let screen = terminal.screen();
 
     assert!(screen.contains("dragon"), "the name:\n{screen}");
@@ -85,7 +89,11 @@ fn a_template_draws_the_year_and_prices_every_level() -> termlens::Result<()> {
         "--plan",
         "/dev/null",
     ])?;
-    terminal.wait_until(|screen| screen.contains("commits each"))?;
+    // Not `wait_until("commits each")`: that line is the price table's header
+    // and the contrast figure is printed after it, so the screen could be read
+    // between the two. It flaked on macOS at four threads, which is exactly
+    // what the stress workflow is for.
+    terminal.wait_exit()?;
     let screen = terminal.screen();
 
     assert!(screen.contains("Dragon"), "{screen}");
@@ -139,8 +147,7 @@ fn an_unknown_template_lists_what_there_was() -> termlens::Result<()> {
 #[test]
 fn the_editor_opens_on_the_year_and_says_which_keys_do_what() -> termlens::Result<()> {
     let mut terminal = spawn(&["--draw", "--year", "2027", "--plan", "/dev/null"])?;
-    terminal.wait_until(ready)?;
-    let screen = terminal.screen();
+    let screen = terminal.wait_frame(ready)?;
 
     assert!(screen.contains("untitled"), "{screen}");
     assert!(screen.contains("2027"), "{screen}");
@@ -236,8 +243,7 @@ fn a_template_can_be_opened_edited_and_saved() -> termlens::Result<()> {
         "-o",
         output.to_str().expect("a UTF-8 path"),
     ])?;
-    terminal.wait_until(ready)?;
-    let screen = terminal.screen();
+    let screen = terminal.wait_frame(ready)?;
     assert!(screen.contains("Dragon"), "opened the template:\n{screen}");
     assert!(screen.contains("53x7"), "{screen}");
 
