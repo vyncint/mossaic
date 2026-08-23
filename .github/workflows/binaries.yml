@@ -66,8 +66,18 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
+          # Cross-compiled from Apple silicon rather than built on macos-13.
+          # Xcode's toolchain and SDK are universal, so an arm64 Mac produces
+          # an x86-64 binary with nothing but `rustup target add` — there is
+          # no sysroot to fetch and no linker to configure.
+          #
+          # The Intel runners are being wound down and it shows: on the v0.6.2
+          # release this leg sat queued for forty-five minutes while every
+          # other target finished inside ninety seconds. A target nobody can
+          # schedule is a target that silently stops shipping, which is worse
+          # than one that is cross-built.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-pc-windows-msvc
@@ -151,6 +161,22 @@ jobs:
           alias="${archive/-${version}-/-}"
           cp "$archive" "$alias"
           sums "$alias" > "${alias}.sha256"
+
+          # A cross-built binary that is quietly the host's architecture would
+          # pass every other check here and fail on the first machine that
+          # downloaded it. Ask the file what it is.
+          case "$TARGET" in
+            x86_64-apple-darwin)  want="x86_64" ;;
+            aarch64-apple-darwin) want="arm64" ;;
+            *) want="" ;;
+          esac
+          if [ -n "$want" ]; then
+            got=$(file -b "target/${TARGET}/release/mossaic-art")
+            case "$got" in
+              *"$want"*) echo "architecture check: $want — $got" ;;
+              *) echo "::error::built for $TARGET but the binary is: $got"; exit 1 ;;
+            esac
+          fi
 
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
           echo "ALIAS=$alias" >> "$GITHUB_ENV"
