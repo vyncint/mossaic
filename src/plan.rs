@@ -223,6 +223,112 @@ impl Plan {
         }
     }
 
+    /// Compare a placed **canvas** against a year's real contributions.
+    ///
+    /// The general form of [`Plan::build`]. Text gives every day one of two
+    /// shades — a letter day or the background — so it can be described by a
+    /// [`Shades`](art::Shades) pair and two prices. A canvas gives every day
+    /// its own level, so the price is per day and the pair is only a summary of
+    /// the range the picture spans.
+    ///
+    /// Everything downstream is unchanged, because [`Day`] was already a band
+    /// rather than a target: a level-2 day is simply a band with both ends,
+    /// exactly as a background day always was.
+    ///
+    /// `levels` covers **every** day the picture claims, including the dark
+    /// ones. That is what makes a canvas different from text: a dark day inside
+    /// a picture is part of the picture, and contributing on it is damage.
+    pub fn from_levels(
+        name: &str,
+        grid: &Grid,
+        levels: &BTreeMap<NaiveDate, u8>,
+        start_week: usize,
+        columns: usize,
+        actual: &BTreeMap<NaiveDate, u32>,
+    ) -> Self {
+        let peak = actual.values().copied().max().unwrap_or(0);
+        let peak_day = actual
+            .iter()
+            .filter(|(_, count)| **count == peak && peak > 0)
+            .map(|(date, _)| *date)
+            .next();
+
+        // The same rule [`art::Shades::min_peak`] applies to two shades, for
+        // however many the picture uses: a year whose busiest day is 1 holds
+        // only empty and full, so a picture with a level in between needs a
+        // peak of at least 4 before its shades are distinguishable at all.
+        let intermediate = levels.values().any(|level| (1..4).contains(level));
+        let measured = peak.max(if intermediate { 4 } else { 1 });
+
+        // The summary pair: the range the picture spans. `worst()` on it is
+        // then an honest answer to "will a reader tell this apart" — the
+        // darkest and brightest shades in the drawing are the two furthest
+        // apart, so if *they* are faint, everything is.
+        let used_low = levels.values().copied().min().unwrap_or(0);
+        let used_high = levels.values().copied().max().unwrap_or(0);
+        let shades = art::Shades {
+            ink: used_high,
+            field: used_low,
+        };
+
+        let mut days = Vec::new();
+        let mut date = grid.first;
+        loop {
+            let have = actual.get(&date).copied().unwrap_or(0);
+            let (want, day_need, ceiling) = match levels.get(&date) {
+                // Part of the picture, and meant to be seen.
+                Some(level) if *level > 0 => {
+                    let (need, ceiling) = art::band(*level, measured);
+                    (Want::Lit, need, ceiling)
+                }
+                // Part of the picture, and meant to stay dark. A contribution
+                // here is a hole, exactly as one inside a letter is.
+                Some(_) => (Want::Hole, 0, Some(0)),
+                // Not covered: the picture has no opinion. Only ever the days
+                // in the partial weeks at the ends of the year, for a canvas
+                // narrower than the calendar.
+                None => (Want::Around, 0, None),
+            };
+            if want != Want::Around || have > 0 {
+                days.push(Day {
+                    date,
+                    want,
+                    have,
+                    need: day_need,
+                    ceiling,
+                });
+            }
+            let Some(next) = date.succ_opt() else { break };
+            if next > grid.last {
+                break;
+            }
+            date = next;
+        }
+
+        Self {
+            // Not uppercased: this is a template or a file name, not text being
+            // drawn, and `DRAGON` is not what anyone called it.
+            text: name.to_string(),
+            year: grid.year,
+            peak,
+            peak_day,
+            // The most expensive day in the picture, which is what "a letter
+            // day costs" means when the days cost different amounts.
+            need: art::band(used_high, measured).0,
+            shades,
+            // A canvas has no separate background: a dark day is dark, and a
+            // shaded one is part of the drawing with a price of its own. Saying
+            // the darkest day must stay at zero is the honest summary, and it
+            // is what `hideable` needs to be for the tracker to call a
+            // contribution on a dark day damage.
+            field_need: 0,
+            field_ceiling: Some(0),
+            days,
+            start_week,
+            columns,
+        }
+    }
+
     /// Days that are part of a letter.
     pub fn letters(&self) -> impl Iterator<Item = &Day> {
         self.days.iter().filter(|day| day.want == Want::Lit)
@@ -266,10 +372,14 @@ impl Plan {
     /// With no background that means any contribution at all. With one it means
     /// a day that has crept past the background's shade and up towards the
     /// letters' own — the same damage, arrived at differently.
+    /// A day drawn at a *middle* shade counts too, and only a canvas has
+    /// those. Text gives a letter day no ceiling — brighter than brightest is
+    /// still brightest — so [`Day::over`] is always zero for one and this
+    /// reads exactly as it did when it only looked at holes.
     pub fn holes(&self) -> Vec<&Day> {
         self.days
             .iter()
-            .filter(|day| day.want == Want::Hole && day.over() > 0)
+            .filter(|day| day.want != Want::Around && day.over() > 0)
             .collect()
     }
 
@@ -461,6 +571,19 @@ pub struct Spec {
     pub background: u8,
     /// Whose contributions to track. `None` asks gh who you are.
     pub user: Option<String>,
+    /// The picture, in the `.art` format, for a plan drawn from a canvas
+    /// rather than from text.
+    ///
+    /// Stored **inline** rather than as a template name or a path, for the
+    /// reason everything else here is resolved: a plan is a record of what was
+    /// decided, and a name is a pointer to something that can change
+    /// underneath it. A template edited next month must not silently
+    /// re-target a plan you have been drawing since January.
+    ///
+    /// `None` for a text plan, and defaulted rather than required so every
+    /// plan written before canvases existed still loads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
 }
 
 /// Where a plan lives when nobody says otherwise.
@@ -508,7 +631,28 @@ impl Spec {
         // The tight bound needs the year and the text; `place` applies it.
         bounded("start_week", self.start_week as i128, 0, 60)?;
         bounded("background", i128::from(self.background), 0, 4)?;
+        // A canvas is input like everything else here: the file may have come
+        // from somewhere other than your own `--save`, so it is parsed and
+        // bounded now rather than trusted and drawn later.
+        if let Some(art) = &self.art {
+            let canvas = crate::art::Canvas::parse(art)
+                .map_err(|why| format!("the stored picture is not a canvas: {why}"))?;
+            bounded(
+                "the stored picture's width",
+                canvas.width() as i128,
+                1,
+                crate::art::CANVAS_COLS as i128,
+            )?;
+        }
         Ok(())
+    }
+
+    /// The picture this plan draws, if it draws one.
+    pub fn canvas(&self) -> Result<Option<crate::art::Canvas>, String> {
+        self.art
+            .as_deref()
+            .map(crate::art::Canvas::parse)
+            .transpose()
     }
 
     /// Read a plan, or say why it could not be read.

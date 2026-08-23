@@ -16,18 +16,48 @@ use chrono::{Datelike, Local, NaiveDate};
 use mossaic::art::{self, Grid};
 use mossaic::cli::{Args, YEARS};
 use mossaic::primer::{Appearance, Palette, Season};
-use mossaic::{github, graphics, plan, png, primer, thousands, Colour};
+use mossaic::{github, graphics, plan, png, primer, templates, thousands, Colour};
 
 const HELP: &str = "\
 mossaic-art — write text into a GitHub contribution graph by dating commits
 
 usage:
   mossaic-art TEXT [options]
+  mossaic-art --template NAME [options]
+  mossaic-art --matrix FILE [options]
 
   TEXT                what to draw, e.g. VYNCINT. Letters, digits, punctuation
                       and shapes: `I :heart: RUST`. A shape is written between
                       colons, or pasted as the symbol or emoji it depicts.
                       --font lists everything
+
+  Text is drawn through a 5x5 font on Mon-Fri. The three flags below draw a
+  *picture* instead: seven rows by up to 53 columns, any of GitHub's five
+  shades per day, using the whole week and the whole year.
+
+  --template NAME     draw a template from the catalogue. --list-templates
+                      shows what there is
+  --list-templates    list the templates, with a thumbnail of each, and exit
+  --matrix FILE       (--file) draw a .art file: 7 rows of the shades 0-4, or
+                      of the blocks ░ ▒ ▓ █ with a space for 0.
+                      Lines starting with # are comments, and `# name:`,
+                      `# author:` and `# description:` are read as the
+                      picture's own. With --commits N a level-4 day costs N
+                      and every darker level is priced against it
+  --image FILE        turn a PNG into a picture: shrunk to fit the calendar,
+                      keeping its aspect ratio, and quantised to five shades.
+                      A dark pixel is a busy day, the way ink reads on paper
+  --invert            with --image, map bright pixels to busy days instead
+  --dither            with --image, spread the rounding error into
+                      neighbouring days (Floyd-Steinberg), so a gradient
+                      reads as one rather than as four bands
+  --draw              open the editor and draw on the year by hand: arrows or
+                      hjkl to move, 0-4 to paint a shade, space to cycle one,
+                      the mouse to paint directly, u to undo and s to save.
+                      With --template or --matrix it opens that picture; on
+                      its own it starts a blank year
+  --output FILE       (-o) where --draw saves, as a .art file
+                      (default: the picture's name, or drawing.art)
   --year YEAR         which year's calendar (default: this one)
   --commits N         commits per lit day (default 4); keep it uniform for one
                       flat shade
@@ -77,6 +107,11 @@ usage:
   -h, --help          show this help
 
 examples:
+  mossaic-art --draw                                  draw a year by hand
+  mossaic-art --template dragon --draw -o mine.art    start from one, save as mine
+  mossaic-art --list-templates                        see the pictures on offer
+  mossaic-art --template dragon --year 2027           draw one across the year
+  mossaic-art --matrix mine.art --year 2027 --save    draw your own, and keep it
   mossaic-art VYNCINT --year 2027                     what it would look like, and cost
   mossaic-art VYNCINT --year 2027 --background 1      letters on a field, not on nothing
   mossaic-art VYNCINT --year 2027 --track             am I getting there, and what today owes
@@ -110,6 +145,21 @@ fn main() {
             options.year
         ))
     });
+    // A picture takes a path of its own, before a single line of the text
+    // machinery runs. That is what makes "no regressions for text" a property
+    // of the control flow rather than a claim about the diff.
+    if let Some((name, canvas)) = options.canvas.clone() {
+        if options.draw {
+            run_editor(&options, &grid, &name, canvas);
+        } else {
+            run_canvas(&options, &grid, &name, &canvas);
+        }
+        return;
+    }
+    if options.draw {
+        fail("--draw draws a picture; it has nothing to do with TEXT");
+    }
+
     let columns = art::bitmap(&options.text).unwrap_or_else(|error| fail(&error));
 
     // The letters are always the brightest shade; --background picks what they
@@ -194,6 +244,7 @@ fn main() {
             commits: options.commits,
             background: options.background,
             user: options.tracking.clone(),
+            art: None,
         };
         spec.save(&options.plan_path)
             .unwrap_or_else(|error| fail(&error));
@@ -348,6 +399,542 @@ fn main() {
         (Some(_), false) => println!("\n(add --write to create the commits; this was a dry run)"),
         (None, true) => fail("--write needs --repo DIR"),
         (None, false) => {}
+    }
+}
+
+/// `--draw`: the editor, from opening the terminal to putting it back.
+///
+/// The loop is deliberately thin. Everything that decides anything lives in
+/// [`mossaic::draw::Editor`], which holds no terminal — so the interesting
+/// claims about this feature are checked by unit tests rather than by reading
+/// a screen through a pseudo-terminal and hoping.
+fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
+    use ratatui::crossterm::event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, KeyModifiers,
+    };
+    use ratatui::crossterm::execute;
+    use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+
+    let output = options.output.clone().unwrap_or_else(|| {
+        // The picture's own name, lowercased and dashed, so a template opened
+        // and saved lands somewhere predictable rather than on top of itself.
+        let stem: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        PathBuf::from(format!("{}.art", stem.trim_matches('-')))
+    });
+
+    let start = options
+        .start_week
+        .unwrap_or_else(|| canvas.centred(grid).min(grid.weeks.saturating_sub(1)));
+    let mut editor = mossaic::draw::Editor::new(canvas, *grid, start, output, options.commits);
+    if editor.canvas.meta().name.is_none() {
+        let mut meta = editor.canvas.meta().clone();
+        meta.name = Some(name.to_string());
+        editor.canvas.set_meta(meta);
+    }
+
+    let mut terminal = ratatui::try_init()
+        .unwrap_or_else(|error| fail(&format!("--draw needs an interactive terminal ({error})")));
+    let mut out = std::io::stdout();
+    let _ = execute!(out, EnableMouseCapture);
+    let palette = mossaic::draw::palette();
+
+    let outcome = (|| -> std::io::Result<()> {
+        loop {
+            let mut body = ratatui::layout::Rect::default();
+            // Bracketed, like the chart's own loop: a terminal that understands
+            // DEC 2026 then shows a whole frame rather than one caught halfway
+            // through being painted. It is also what lets a test wait for a
+            // *complete* frame instead of reading a torn one.
+            execute!(out, BeginSynchronizedUpdate)?;
+            terminal.draw(|frame| {
+                mossaic::draw::render(frame, &editor, &palette);
+                // The same rectangle the grid was drawn in, so a click lands on
+                // the cell it was aimed at.
+                let area = frame.area();
+                body = ratatui::layout::Rect {
+                    x: area.x,
+                    y: area.y + 1,
+                    width: area.width,
+                    height: (mossaic::art::CANVAS_ROWS as u16) + 2,
+                };
+            })?;
+            execute!(out, EndSynchronizedUpdate)?;
+            let origin = mossaic::draw::grid_origin(body);
+
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                    match editor.on_key(key.code, ctrl) {
+                        mossaic::draw::Outcome::Quit => break,
+                        mossaic::draw::Outcome::Save => {
+                            if let Err(error) = editor.save() {
+                                editor.status = error;
+                            }
+                        }
+                        mossaic::draw::Outcome::Idle => {}
+                    }
+                }
+                Event::Mouse(mouse) => editor.on_mouse(mouse, origin),
+                _ => {}
+            }
+        }
+        Ok(())
+    })();
+
+    let _ = execute!(out, DisableMouseCapture);
+    let restored = ratatui::try_restore();
+    if let Some(error) = [outcome.err(), restored.err()].into_iter().flatten().next() {
+        fail(&format!("{error}"));
+    }
+
+    // Said after the terminal is back, so it is readable rather than painted
+    // over by the alternate screen going away.
+    if editor.dirty {
+        eprintln!(
+            "not saved — press s in the editor, or run it again and save to {}",
+            editor.output.display()
+        );
+    } else if editor.output.exists() {
+        println!("{}", editor.output.display());
+        println!(
+            "\ndraw it on a year:\n  mossaic-art --matrix {} --year {}",
+            editor.output.display(),
+            grid.year
+        );
+    }
+}
+
+/// `--list-templates`: the catalogue, with where each one came from.
+fn show_templates(colour: bool) {
+    let catalogue = templates::catalogue();
+    if catalogue.is_empty() {
+        println!("no templates installed");
+        return;
+    }
+    let palette = colour.then(|| Palette::new(Appearance::Dark, Season::Default, true));
+    let width = catalogue
+        .iter()
+        .map(|template| template.name.len())
+        .max()
+        .unwrap_or(0);
+
+    println!("{} template(s):\n", catalogue.len());
+    for template in &catalogue {
+        let author = template
+            .author()
+            .map(|who| format!("  by {who}"))
+            .unwrap_or_default();
+        println!(
+            "  {:<width$}  {}{author}",
+            template.name,
+            template.title(),
+            width = width
+        );
+        if let Some(description) = template.description() {
+            println!("  {:<width$}  {description}", "", width = width);
+        }
+        println!(
+            "  {:<width$}  {} columns, {}\n",
+            "",
+            template.canvas.width(),
+            template.origin,
+            width = width
+        );
+        // A thumbnail, because a name and a sentence are not a picture and the
+        // whole point of choosing one is what it looks like.
+        for row in 0..art::CANVAS_ROWS {
+            let mut line = String::from("    ");
+            for week in 0..template.canvas.width() {
+                let level = template.canvas.at(week, row);
+                let block = art::SHADE_CHARS[usize::from(level).min(4)].1;
+                match (&palette, level) {
+                    (Some(palette), level) if level > 0 => {
+                        let rgb = palette.levels[usize::from(level).min(4)];
+                        line.push_str(&format!(
+                            "\x1b[38;2;{};{};{}m{block}\x1b[0m",
+                            rgb.0, rgb.1, rgb.2
+                        ));
+                    }
+                    _ => line.push(block),
+                }
+            }
+            println!("{line}");
+        }
+        println!();
+    }
+    println!("draw one:  mossaic-art --template {}", catalogue[0].name);
+}
+
+/// Everything a run that draws a **picture** does, from preview to commits.
+///
+/// Deliberately a path of its own rather than a widening of the text one. The
+/// two share the plan, the pricing and every report format that a machine
+/// reads; what they do not share is language. A canvas has no letters and no
+/// background, so a report that says "letters at level 4, background at level
+/// 1" would be describing something that is not there.
+fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) {
+    let start = options.start_week.unwrap_or_else(|| canvas.centred(grid));
+    if start >= grid.weeks {
+        fail(&format!(
+            "--start-week {start} is past the {} columns {} has",
+            grid.weeks, grid.year
+        ));
+    }
+    let (levels, skipped) = canvas.place(grid, start);
+    if levels.is_empty() {
+        fail(&format!(
+            "nothing of the picture lands inside {} from week {start}",
+            grid.year
+        ));
+    }
+    if skipped > 0 {
+        eprintln!(
+            "note: {skipped} cell(s) fell outside {} and were dropped — the first \
+             and last calendar columns are partial weeks",
+            grid.year
+        );
+    }
+
+    // Resolved, exactly as a text plan is: the picture is stored inline, so a
+    // template edited next month cannot re-target a plan drawn from it today.
+    if options.save {
+        let spec = plan::Spec {
+            text: name.to_string(),
+            year: options.year,
+            start_week: start,
+            top: 0,
+            commits: options.commits,
+            background: 0,
+            user: options.tracking.clone(),
+            art: Some(canvas.to_art()),
+        };
+        spec.save(&options.plan_path)
+            .unwrap_or_else(|error| fail(&error));
+        println!(
+            "saved {} — from now on:\n  mossaic-art --track\n",
+            options.plan_path.display()
+        );
+    }
+
+    if options.track {
+        track_canvas(options, grid, name, canvas, &levels, start);
+        return;
+    }
+
+    let existing = match &options.merge {
+        Some(path) => load(path, grid),
+        None => BTreeMap::new(),
+    };
+    // `--commits` prices the *brightest* day, and every darker level is priced
+    // against it by the same formula GitHub shades with. At the default of 4
+    // that is 1, 2, 3, 4 commits for levels 1 to 4 — the smallest year in which
+    // all five shades are distinct.
+    let peak = existing
+        .values()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .max(options.commits)
+        .max(canvas.min_peak());
+    let commits: BTreeMap<NaiveDate, u32> = levels
+        .iter()
+        .filter(|(_, level)| **level > 0)
+        .map(|(date, level)| (*date, art::commits_to_reach(*level, peak)))
+        .collect();
+    let total = commits
+        .values()
+        .fold(0u32, |sum, count| sum.saturating_add(*count));
+
+    if options.backfill {
+        backfill_canvas(options, grid, &levels);
+        return;
+    }
+
+    let histogram = canvas.histogram();
+    println!(
+        "{name}  ·  {}  ·  {} of {} columns  ·  {} days  ·  {} commits\n",
+        grid.year,
+        canvas.width(),
+        grid.weeks,
+        commits.len(),
+        thousands(total),
+    );
+
+    let palette = options
+        .colour
+        .enabled()
+        .then(|| Palette::new(Appearance::Dark, Season::Default, true));
+    println!("{}\n", art::preview(&levels, grid, palette.as_ref()));
+
+    println!("  level  days   commits each");
+    for level in (1..=4u8).rev() {
+        if histogram[usize::from(level)] == 0 {
+            continue;
+        }
+        println!(
+            "  {level:>5}  {:>4}   {}",
+            histogram[usize::from(level)],
+            thousands(art::commits_to_reach(level, peak)),
+        );
+    }
+    println!("  {:>5}  {:>4}   must stay dark", 0, histogram[0]);
+
+    // Whether a reader will see a picture or a smudge. The pair measured is the
+    // darkest and brightest the drawing actually uses: if those two are faint,
+    // everything between them is worse.
+    if let Some((low, high)) = canvas.range() {
+        let shades = art::Shades {
+            ink: high,
+            field: low,
+        };
+        let (legibility, delta) = shades.worst();
+        println!("\n  shades {low} to {high}  ·  ΔE {delta:.0} at worst, {legibility}",);
+        if legibility != primer::Legibility::Clear {
+            println!(
+                "  -> neighbouring shades are all but the same colour on some themes. \
+                 A picture\n     drawn in levels {low} and {high} will read as one shade for \
+                 some of its audience."
+            );
+        }
+    }
+    println!();
+
+    if let Some(path) = &options.snapshot {
+        let mut combined = existing.clone();
+        for (day, count) in &commits {
+            let total = combined.entry(*day).or_insert(0);
+            *total = total.saturating_add(*count);
+        }
+        let body = art::snapshot(&combined, grid, &options.login);
+        std::fs::write(path, body)
+            .unwrap_or_else(|error| fail(&format!("could not write {path:?}: {error}")));
+        println!(
+            "wrote {} — see it in the real renderer with:",
+            path.display()
+        );
+        println!("  mossaic --file {}\n", path.display());
+    }
+
+    match (&options.repo, options.write) {
+        (Some(repo), true) => {
+            let (default_name, default_email) = art::identity();
+            let who = options.name.clone().unwrap_or(default_name);
+            let email = options.email.clone().unwrap_or(default_email);
+            println!(
+                "committing {} commits into {} as {who} <{email}>",
+                thousands(total),
+                repo.display()
+            );
+            let label = format!("art: {name}");
+            let made = art::write_commits(&commits, repo, &label, &who, &email)
+                .unwrap_or_else(|error| fail(&error));
+            println!(
+                "made {} commits — nothing has been pushed.\n\n\
+                 To publish, create an empty repo on GitHub and:\n\n  \
+                 cd {}\n  git remote add origin git@github.com:<you>/<repo>.git\n  \
+                 git push -u origin main",
+                thousands(made as u32),
+                repo.display()
+            );
+        }
+        (Some(_), false) => println!("(add --write to create the commits; this was a dry run)"),
+        (None, true) => fail("--write needs --repo DIR"),
+        (None, false) => {}
+    }
+}
+
+/// `--track` for a picture: how far along it is, and what today owes.
+fn track_canvas(
+    options: &Options,
+    grid: &Grid,
+    name: &str,
+    canvas: &art::Canvas,
+    levels: &BTreeMap<NaiveDate, u8>,
+    start: usize,
+) {
+    let colour = options.colour.enabled();
+    let palette = colour.then(|| Palette::new(Appearance::Dark, Season::Default, true));
+    let (who, actual) = observed(options, grid);
+    let plan = plan::Plan::from_levels(name, grid, levels, start, canvas.width(), &actual);
+    let today = options.now();
+
+    // Every machine-read format is generic over the plan already, so a picture
+    // reports through exactly the same code a text plan does. Only the human
+    // one below needed writing, because only it uses words like "letters".
+    if options.format != Format::Text {
+        let year_total = actual
+            .values()
+            .fold(0u32, |sum, count| sum.saturating_add(*count));
+        // No suggestion: a picture is usually the full width of the year, so
+        // there is no column to move it to, and offering one that does not fit
+        // is worse than offering none.
+        let report = plan::Report::of(&plan, &who, year_total, today, None);
+        match options.format {
+            Format::Json => println!(
+                "{}",
+                serde_json::to_string_pretty(&report)
+                    .unwrap_or_else(|error| fail(&format!("could not encode the report: {error}")))
+            ),
+            Format::Markdown => println!("{}", report.markdown()),
+            Format::Text => unreachable!("handled above"),
+        }
+        return;
+    }
+
+    println!("{name} · {} — tracking {who}\n", grid.year);
+    println!("{}\n", art::preview(levels, grid, palette.as_ref()));
+
+    let (owing_days, owing_commits) = plan.owing();
+    let drawn = plan.bright();
+    let wanted = plan.letters().count();
+    match plan.verdict() {
+        plan::Verdict::Done => println!("  Drawn. Every day is the shade the picture asks for."),
+        plan::Verdict::Reachable => println!(
+            "  On track — {drawn} of {wanted} shaded day(s) are right, \
+             {owing_days} to go."
+        ),
+        plan::Verdict::Holed { holes } => println!(
+            "  Cannot be drawn cleanly — {holes} day(s) are brighter than the \
+             picture wants,\n  and nothing takes a contribution away."
+        ),
+    }
+
+    println!("\n  level  days   done   owing   each");
+    let histogram = canvas.histogram();
+    for level in (1..=4u8).rev() {
+        if histogram[usize::from(level)] == 0 {
+            continue;
+        }
+        let at_level: Vec<&plan::Day> = plan
+            .days
+            .iter()
+            .filter(|day| levels.get(&day.date).copied() == Some(level))
+            .collect();
+        let done = at_level.iter().filter(|day| day.done()).count();
+        let short: u32 = at_level
+            .iter()
+            .fold(0u32, |sum, day| sum.saturating_add(day.short()));
+        let each = at_level.first().map(|day| day.need).unwrap_or(0);
+        println!(
+            "  {level:>5}  {:>4}   {done:>4}   {:>5}   {}",
+            at_level.len(),
+            thousands(short),
+            thousands(each),
+        );
+    }
+    let dark: Vec<&plan::Day> = plan
+        .days
+        .iter()
+        .filter(|day| day.want == plan::Want::Hole)
+        .collect();
+    println!(
+        "  {:>5}  {:>4}   {:>4}   {:>5}   must stay dark",
+        0,
+        dark.len(),
+        dark.iter().filter(|day| day.done()).count(),
+        "-",
+    );
+
+    println!(
+        "\n  still owing  {} day(s) · {} contributions",
+        thousands(owing_days as u32),
+        thousands(owing_commits)
+    );
+
+    if plan.holds(today) {
+        match plan.on(today) {
+            Some(day) if day.short() > 0 => println!(
+                "  today        {} of {} there, {} to go",
+                thousands(day.have),
+                thousands(day.need),
+                thousands(day.short())
+            ),
+            Some(day) if day.need == 0 => println!("  today        must stay dark"),
+            Some(_) => println!("  today        already the right shade"),
+            None => println!("  today        the picture does not reach"),
+        }
+        if let Some(tomorrow) = today.succ_opt().and_then(|next| plan.on(next)) {
+            println!(
+                "  tomorrow     {}",
+                if tomorrow.need == 0 {
+                    "must stay dark".to_string()
+                } else {
+                    format!(
+                        "{} of {} there",
+                        thousands(tomorrow.have),
+                        thousands(tomorrow.need)
+                    )
+                }
+            );
+        }
+    }
+
+    let holes = plan.holes();
+    if !holes.is_empty() {
+        println!("\n  {} day(s) already too bright:", holes.len());
+        for day in holes.iter().take(8) {
+            println!(
+                "    {}  has {}, wants at most {}",
+                day.date,
+                thousands(day.have),
+                thousands(day.ceiling.unwrap_or(0))
+            );
+        }
+        if holes.len() > 8 {
+            println!("    ... and {} more", holes.len() - 8);
+        }
+    }
+    println!();
+}
+
+/// `--backfill` for a picture: commit what each day already past still owes.
+fn backfill_canvas(options: &Options, grid: &Grid, levels: &BTreeMap<NaiveDate, u8>) {
+    let (_, actual) = observed(options, grid);
+    let plan = plan::Plan::from_levels("picture", grid, levels, 0, 0, &actual);
+    let today = options.now();
+    let owed: BTreeMap<NaiveDate, u32> = plan
+        .days
+        .iter()
+        .filter(|day| day.date <= today && day.short() > 0)
+        .map(|day| (day.date, day.short()))
+        .collect();
+    let total = owed
+        .values()
+        .fold(0u32, |sum, count| sum.saturating_add(*count));
+
+    if owed.is_empty() {
+        println!("nothing to catch up on — every day up to {today} is already right.");
+        return;
+    }
+    println!(
+        "{} day(s) up to {today} are short, {} contributions in total",
+        owed.len(),
+        thousands(total)
+    );
+    match (&options.repo, options.write) {
+        (Some(repo), true) => {
+            let (default_name, default_email) = art::identity();
+            let who = options.name.clone().unwrap_or(default_name);
+            let email = options.email.clone().unwrap_or(default_email);
+            let made = art::write_commits(&owed, repo, "art: catch up", &who, &email)
+                .unwrap_or_else(|error| fail(&error));
+            println!(
+                "made {} commits — nothing has been pushed.",
+                thousands(made as u32)
+            );
+        }
+        (Some(_), false) => println!("(add --write to create them; this was a dry run)"),
+        (None, true) => fail("--write needs --repo DIR"),
+        (None, false) => println!("(--repo DIR --write would create them)"),
     }
 }
 
@@ -1105,6 +1692,17 @@ struct Options {
     name: Option<String>,
     email: Option<String>,
     colour: Colour,
+    /// The picture being drawn, and what to call it, for a run that draws a
+    /// canvas rather than text.
+    ///
+    /// Beside `text` rather than replacing it, so that every path that reads
+    /// `text` is exactly the code it was: a canvas run branches away at the
+    /// top of `main` and never reaches them.
+    canvas: Option<(String, art::Canvas)>,
+    /// Where `--draw` writes the picture it made.
+    output: Option<PathBuf>,
+    /// Open the editor instead of drawing straight to the terminal.
+    draw: bool,
 }
 
 fn parse_args() -> Option<Options> {
@@ -1131,8 +1729,16 @@ fn parse_args() -> Option<Options> {
         name: None,
         email: None,
         colour: Colour::default(),
+        canvas: None,
+        output: None,
+        draw: false,
     };
 
+    let mut template: Option<String> = None;
+    let mut matrix: Option<PathBuf> = None;
+    let mut picture: Option<PathBuf> = None;
+    let mut image_options = mossaic::image::Options::default();
+    let mut list_templates = false;
     let mut font = false;
     let mut png_path: Option<PathBuf> = None;
     let mut track = false;
@@ -1218,6 +1824,14 @@ fn parse_args() -> Option<Options> {
             }
             "--plan" => options.plan_path = args.value("--plan").into(),
             "--save" => options.save = true,
+            "--template" => template = Some(args.value("--template")),
+            "--image" => picture = Some(args.value("--image").into()),
+            "--invert" => image_options.invert = true,
+            "--dither" => image_options.dither = true,
+            "--matrix" | "--file" => matrix = Some(args.value("--matrix").into()),
+            "--list-templates" => list_templates = true,
+            "--output" | "-o" => options.output = Some(args.value("--output").into()),
+            "--draw" => options.draw = true,
             "--font" => font = true,
             "--png" => png_path = Some(PathBuf::from(args.value("--png"))),
             "--track" => {
@@ -1240,6 +1854,72 @@ fn parse_args() -> Option<Options> {
         }
     }
 
+    if list_templates {
+        show_templates(options.colour.enabled());
+        return None;
+    }
+
+    // One picture, from one place. Two sources on one command line would mean
+    // guessing which was meant, and the guess would be silent.
+    let sources = [
+        ("--template", template.is_some()),
+        ("--matrix", matrix.is_some()),
+        ("--image", picture.is_some()),
+        ("a TEXT argument", !options.text.is_empty()),
+    ];
+    let given: Vec<&str> = sources
+        .iter()
+        .filter(|(_, present)| *present)
+        .map(|(name, _)| *name)
+        .collect();
+    if given.len() > 1 {
+        fail(&format!(
+            "{} both draw the picture — pick one",
+            given.join(" and ")
+        ));
+    }
+
+    if let Some(name) = &template {
+        let found = templates::find(name).unwrap_or_else(|error| fail(&error));
+        options.canvas = Some((found.title().to_string(), found.canvas));
+    }
+    // Said plainly rather than ignored: both change what a picture looks like,
+    // so a run where they do nothing is a run that drew something other than
+    // what was asked for.
+    for (flag, given) in [
+        ("--invert", image_options.invert),
+        ("--dither", image_options.dither),
+    ] {
+        if given && picture.is_none() {
+            fail(&format!(
+                "{flag} describes how to read an image — it needs --image"
+            ));
+        }
+    }
+
+    if let Some(path) = &picture {
+        let canvas = mossaic::image::load(path, image_options).unwrap_or_else(|error| fail(&error));
+        let name = canvas
+            .meta()
+            .name
+            .clone()
+            .unwrap_or_else(|| "picture".to_string());
+        options.canvas = Some((name, canvas));
+    }
+    if let Some(path) = &matrix {
+        let body = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| fail(&format!("could not read {}: {error}", path.display())));
+        let canvas = art::Canvas::parse(&body)
+            .unwrap_or_else(|error| fail(&format!("{}: {error}", path.display())));
+        let name = canvas.meta().name.clone().unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("picture")
+                .to_string()
+        });
+        options.canvas = Some((name, canvas));
+    }
+
     // After the loop, so that flags on either side of it are all in hand.
     if font {
         match &png_path {
@@ -1256,7 +1936,17 @@ fn parse_args() -> Option<Options> {
     // that named a user was loaded and then overwritten with nothing.
     options.track = track;
     options.tracking = tracking;
-    match (options.text.is_empty(), options.plan_path.exists()) {
+    // The editor is a source of its own: `--draw` with nothing else starts on a
+    // blank year rather than complaining there is nothing to draw.
+    if options.draw && options.canvas.is_none() && options.text.is_empty() {
+        let blank = art::Canvas::blank(art::CANVAS_COLS).expect("53 is a canvas width");
+        options.canvas = Some(("untitled".to_string(), blank));
+    }
+
+    match (
+        options.text.is_empty() && options.canvas.is_none(),
+        options.plan_path.exists(),
+    ) {
         (true, true) => {
             let spec = plan::Spec::load(&options.plan_path).unwrap_or_else(|error| fail(&error));
             options.plan_loaded = true;
@@ -1279,10 +1969,21 @@ fn parse_args() -> Option<Options> {
             if options.tracking.is_none() {
                 options.tracking = spec.user;
             }
+            // A saved picture is the picture. `text` is then its name rather
+            // than something to run through the font, so the two are swapped
+            // over here and the text path is never entered.
+            if let Some(canvas) = spec.art.as_deref() {
+                let canvas = art::Canvas::parse(canvas).unwrap_or_else(|error| {
+                    fail(&format!("{}: {error}", options.plan_path.display()))
+                });
+                options.canvas = Some((options.text.clone(), canvas));
+                options.text = String::new();
+            }
         }
         (true, false) => fail(&format!(
             "nothing to draw.\n\n  \
              mossaic-art VYNCINT --year 2027        draw something\n  \
+             mossaic-art --template dragon          draw a picture instead\n  \
              mossaic-art VYNCINT --year 2027 --save remember it, then just \
              `mossaic-art --track`\n\n\
              (no plan at {})",

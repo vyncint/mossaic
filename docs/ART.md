@@ -200,6 +200,114 @@ there is exactly what the field wants — so a year that could not be drawn
 cleanly at all often can be, once the background gives those days somewhere to
 belong.
 
+## Pictures, not just text
+
+Everything above draws *letters*: a 5×5 font, two shades, Mon–Fri, weekends
+left clear. A **canvas** is the same machinery with the restrictions taken off
+— seven rows, up to 53 columns, and any of GitHub's five shades on any day.
+
+```sh
+mossaic-art --list-templates                # what there is, with thumbnails
+mossaic-art --template dragon --year 2027   # draw one
+```
+
+```
+Dragon  ·  2027  ·  53 of 53 columns  ·  146 days  ·  503 commits
+
+  level  days   commits each
+      4    75   4
+      3    65   3
+      2     2   2
+      1     4   1
+      0   225   must stay dark
+
+  shades 0 to 4  ·  ΔE 70 at worst, clear
+```
+
+`--commits N` prices the **brightest** day, and every darker shade is priced
+against it by the same formula GitHub shades with. At the default of 4 that is
+1, 2, 3, 4 commits for levels 1 to 4 — the smallest year in which all five
+shades are distinct.
+
+The last line is the one worth reading twice. GitHub's five greens are not
+evenly spaced: neighbouring shades come as close as ΔE 9.1, while any two
+levels apart never fall below ΔE 35.4. A picture drawn in levels 2 and 3 will
+read as one shade for some of its audience, on a palette you cannot see. The
+figure quoted is the worst across all nine palettes GitHub ships.
+
+### Drawing one
+
+`--draw` opens an editor on the year:
+
+```sh
+mossaic-art --draw --year 2027 -o mine.art
+mossaic-art --template dragon --draw -o mine.art   # start from an existing one
+```
+
+Arrows or `hjkl` move, `0`–`4` paint, space cycles a cell, the mouse paints
+directly, `u` undoes, `s` saves. The panel underneath keeps a running count of
+the days at each shade and **what the picture would cost** — the same
+arithmetic `--write` uses, so the figure is what you would be asked to make
+rather than an approximation of it.
+
+Days in the partial weeks at either end of the year are drawn as `·`. They can
+be painted and they cost nothing, because they are not days the year has: a
+Sunday in the first calendar column of 2027 belongs to 2026.
+
+### From a file, or from an image
+
+```sh
+mossaic-art --matrix mine.art --year 2027
+mossaic-art --image logo.png --year 2027 --dither
+```
+
+A `.art` file is seven rows of `0`–`4`, or of the blocks ` ░▒▓█`, with `#`
+comments. `--image` reads a PNG, fits it to the calendar keeping its aspect
+ratio, and quantises it: a **dark pixel becomes a busy day**, the way ink reads
+on paper. `--invert` turns that over, and `--dither` spreads the rounding error
+into neighbouring days so a gradient reads as one rather than as four bands.
+
+### Tracking a picture
+
+The same as tracking text, because underneath it is the same plan:
+
+```sh
+mossaic-art --template dragon --year 2027 --save
+mossaic-art --track
+```
+
+```
+# with --merge art/vyncint-2027.json --today 2027-08-19, to reproduce this exactly
+
+  level  days   done   owing   each
+      4    75     28     188   4
+      3    65      0     156   3
+      2     2      0       2   2
+      1     4      0       4   1
+      0   219    186       -   must stay dark
+
+  still owing  104 day(s) · 350 contributions
+  today        must stay dark
+  tomorrow     must stay dark
+```
+
+The prices are 4, 3, 2, 1 because that year's busiest day is quiet. Track the
+same picture against a year whose peak is 110 and a level-4 day costs 110, a
+level-3 day 74 — the shade is a *fraction of the busiest day*, so the cost of
+art is set by how active the year already is. That is the whole subject of
+[How GitHub shades a day](#how-github-shades-a-day-and-why-it-decides-the-cost)
+below, and it applies to a picture exactly as it does to text.
+
+`--save` stores the picture **inline** in the plan file rather than storing the
+template's name. A name is a pointer to something that can change underneath
+you, and a plan is a record of what was decided — the same reason the start
+column is saved resolved rather than as "centre it".
+
+A level-0 day inside a picture is not a day the plan ignores. It is a day the
+plan wants dark, and contributing on it punches a hole in the drawing exactly
+as contributing inside a letter does. That is why the table above reports 219
+of them: they are part of the picture.
+
 ## Tracking it, day by day
 
 Drawing the art is one command. Getting there while also living a normal year is

@@ -253,7 +253,76 @@ reads as no character at all), and no two glyphs may draw the same pixels. The
 README's list of what the font can draw is checked against the font too, so a
 new glyph that is not documented fails the suite.
 
-## 11. Code style
+## 11. Adding a pixel-art template
+
+A **template** is a whole-year picture: seven rows by up to 53 columns, in any
+of GitHub's five shades. Contributing one is dropping a file into
+`art/templates/` — there is no list to edit, because `build.rs` finds every
+`.art` file in that directory and embeds it when the crate compiles. If your
+file is there and the tests pass, `--template <stem>` works.
+
+The file is a header and seven rows:
+
+```
+# name: Dragon
+# author: @vyncint
+# description: A serpentine dragon coiling across the whole year, in all five shades
+
+00000000000000000000033333333333333000003300000000000
+00000000000000000333344444444444444333344400000000000
+...
+```
+
+- **Seven rows**, one per weekday, Sunday first. Not five: a template uses the
+  weekend, which is the whole difference between a picture and text.
+- **Up to 53 columns.** A row shorter than the widest is padded with level 0 on
+  the right, so an editor that strips trailing whitespace cannot corrupt a
+  picture whose last column is dark.
+- **Shades are `0` to `4`**, or the blocks ` ░▒▓█` if you would rather read the
+  file as a picture. The two may be mixed; they mean the same thing.
+- **Lines starting with `#` are comments.** `name`, `author` and `description`
+  are read; anything else is ignored, so a `# note:` line is fine.
+- **A line of length zero is skipped**, so the header can breathe. A row of
+  *spaces* is not empty — it is seven dark days, and it is kept.
+
+The file name is what people type after `--template`, so it must be lowercase
+letters, digits and dashes.
+
+Draw it by hand rather than by counting characters:
+
+```sh
+cargo run --bin mossaic-art -- --draw -o art/templates/mine.art
+cargo run --bin mossaic-art -- --template mine --year 2027   # in a year, priced
+cargo run --bin mossaic-art -- --list-templates              # as others will see it
+```
+
+`--draw` is the editor: arrows or `hjkl` to move, `0`–`4` to paint, space to
+cycle a cell, the mouse to paint directly, `u` to undo, `s` to save. It shows
+what the picture would cost in commits as you draw it, and how well its
+shades will separate for a reader on any palette GitHub ships.
+
+Five rules are checked by the test suite, so a mistake is a failing test with
+the reason rather than a broken `--template` for whoever tries it first:
+
+1. exactly seven rows, and a width between 1 and 53,
+2. only shade characters,
+3. a `# name:` and a `# description:` — a template with neither is one nobody
+   can tell apart in a listing,
+4. no two templates with the same title,
+5. more than one shade, since a picture drawn in one is a blank graph.
+
+The suite reads the directory rather than the embedded copies, deliberately:
+`build.rs` is as much under test as the files are, and a template that never
+got embedded is invisible to a test that only looks at what was embedded.
+
+**On what makes a good one.** Seven by fifty-three is a very wide, very short
+canvas — about 7.5:1 — so shapes that stretch along it read far better than
+ones that want to be square. Leave two levels between shades you need a reader
+to tell apart: GitHub's five greens are not evenly spaced, and neighbouring
+ones are all but identical on some themes. `--list-templates` and the editor
+both report the contrast, measured across every palette GitHub ships.
+
+## 12. Code style
 
 The code is commented for the reader who wonders *why*, not *what*. Comments
 that explain a trade-off, a protocol quirk, or a decision that looks arbitrary

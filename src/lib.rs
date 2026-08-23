@@ -177,11 +177,14 @@ pub mod app;
 pub mod art;
 pub mod calendar;
 pub mod cli;
+pub mod draw;
 pub mod github;
 pub mod graphics;
+pub mod image;
 pub mod plan;
 pub mod png;
 pub mod primer;
+pub mod templates;
 pub mod term;
 pub mod ui;
 
