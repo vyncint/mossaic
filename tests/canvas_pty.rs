@@ -292,3 +292,98 @@ fn an_unsaved_drawing_is_not_lost_quietly() -> termlens::Result<()> {
     );
     Ok(())
 }
+
+/// A day the picture does not cover is **free**, and the report has to say so.
+///
+/// Both a day the picture wants dark and a day outside it have a `need` of
+/// zero, and the advice for them is opposite: one must be left alone or the
+/// drawing is damaged, the other is nobody's business. Reading the number
+/// rather than the intent told people to stay dark on every day after the
+/// picture ends.
+#[test]
+fn a_day_outside_the_picture_is_free_not_dark() -> termlens::Result<()> {
+    let art = scratch("outside.art");
+    // Three lit columns, placed early, so a day late in the year is plainly
+    // outside them.
+    std::fs::write(
+        &art,
+        "# name: Bar\n# description: three columns\n\n444\n444\n444\n444\n444\n444\n444\n",
+    )
+    .expect("write");
+
+    let calendar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("art/vyncint-2027.json");
+    let mut terminal = spawn(&[
+        "--matrix",
+        art.to_str().expect("a UTF-8 path"),
+        "--year",
+        "2027",
+        "--start-week",
+        "2",
+        "--track",
+        "--merge",
+        calendar.to_str().expect("a UTF-8 path"),
+        // Deep in the year and nowhere near columns 2 to 4 — **and a day that
+        // already has contributions**. That second half is the whole test: a
+        // day outside the picture with nothing on it is not recorded at all,
+        // so it takes the "no entry" path and never reaches the branch this
+        // is about. The first version of this test used a quiet day and
+        // passed against the bug it was written for.
+        "--today",
+        "2027-06-15",
+        "--plan",
+        "/dev/null",
+        "--no-color",
+    ])?;
+    terminal.wait_exit()?;
+    let screen = terminal.screen();
+
+    assert!(
+        screen.contains("outside the picture"),
+        "a day the picture does not reach is free:\n{screen}"
+    );
+    assert!(
+        !screen.contains("today        must stay dark"),
+        "and must not be told to stay dark:\n{screen}"
+    );
+    let _ = std::fs::remove_file(&art);
+    Ok(())
+}
+
+/// The other half: a day the picture *does* want dark still says so.
+#[test]
+fn a_dark_day_inside_the_picture_still_says_stay_dark() -> termlens::Result<()> {
+    let art = scratch("inside.art");
+    // A hole in the middle of a block: row 3, column 1 is dark.
+    std::fs::write(
+        &art,
+        "# name: Ring\n# description: a hole in the middle\n\n444\n444\n444\n404\n444\n444\n444\n",
+    )
+    .expect("write");
+
+    let calendar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("art/vyncint-2027.json");
+    // 2027-01-13 is the Wednesday of calendar column 2, which is the dark cell.
+    let mut terminal = spawn(&[
+        "--matrix",
+        art.to_str().expect("a UTF-8 path"),
+        "--year",
+        "2027",
+        "--start-week",
+        "1",
+        "--track",
+        "--merge",
+        calendar.to_str().expect("a UTF-8 path"),
+        "--today",
+        "2027-01-13",
+        "--plan",
+        "/dev/null",
+        "--no-color",
+    ])?;
+    terminal.wait_exit()?;
+    let screen = terminal.screen();
+    assert!(
+        screen.contains("must stay dark"),
+        "the hole in the ring is still a day to leave alone:\n{screen}"
+    );
+    let _ = std::fs::remove_file(&art);
+    Ok(())
+}

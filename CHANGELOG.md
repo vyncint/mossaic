@@ -9,6 +9,26 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-23
+
+### Fixed
+
+- **A day the picture does not cover is reported as free, not as one that must
+  stay dark.** Both a day the picture wants dark and a day outside it have a
+  `need` of zero, and the tracker read the number rather than the intent — so
+  every day after a picture ends was told to stay dark, when it is nobody's
+  business. The advice for the two is opposite: one must be left alone or the
+  drawing is damaged, the other is free.
+
+  Only the human `--track` report was affected. The JSON and Markdown formats
+  carry `today.kind`, which named the two apart correctly all along.
+
+  The test written for this passed against the bug first time round: a day
+  outside the picture with *no* contributions is not recorded at all, so it
+  takes a different path and never reaches the branch. It needs a day that is
+  both outside the picture and already contributed to, which is exactly the
+  case that produced the report.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added
@@ -715,7 +735,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/vyncint/mossaic/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/vyncint/mossaic/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/vyncint/mossaic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/vyncint/mossaic/compare/v0.3.1...v0.4.0
