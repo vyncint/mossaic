@@ -212,28 +212,54 @@ mossaic-art --template dragon --year 2027   # draw one
 ```
 
 ```
-Dragon  ·  2027  ·  53 of 53 columns  ·  146 days  ·  503 commits
+Dragon  ·  2027  ·  53 of 53 columns  ·  146 days  ·  442 commits
 
   level  days   commits each
       4    75   4
-      3    65   3
-      2     2   2
-      1     4   1
+      2    71   2
       0   225   must stay dark
 
-  shades 0 to 4  ·  ΔE 70 at worst, clear
+  shades 0 2 4  ·  closest pair 2 and 4  ·  ΔE 35, clear
 ```
 
-`--commits N` prices the **brightest** day, and every darker shade is priced
-against it by the same formula GitHub shades with. At the default of 4 that is
-1, 2, 3, 4 commits for levels 1 to 4 — the smallest year in which all five
-shades are distinct.
+That is what it looks like on the graph itself:
 
-The last line is the one worth reading twice. GitHub's five greens are not
-evenly spaced: neighbouring shades come as close as ΔE 9.1, while any two
-levels apart never fall below ΔE 35.4. A picture drawn in levels 2 and 3 will
-read as one shade for some of its audience, on a palette you cannot see. The
-figure quoted is the worst across all nine palettes GitHub ships.
+![The dragon template rendered as a GitHub contribution chart for 2027: a
+serpentine body sweeping up from the lower left to a head at the right, drawn
+in two greens on an empty field](../art/dragon.png)
+
+`--commits N` prices the **brightest** day, and every darker shade is priced
+against it by the same formula GitHub shades with.
+
+### Three shades, and which three
+
+The last line of that report is the one worth reading twice, and it is the
+whole craft of this medium.
+
+GitHub's five greens are **not evenly spaced**. Measured across all nine
+palettes it ships — three appearances times three seasons — the worst case for
+each pair is:
+
+| | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| **0** | 20 · faint | 50 · clear | 62 · clear | 70 · clear |
+| **1** | | 9 · faint | 36 · clear | 35 · clear |
+| **2** | | | 11 · faint | 35 · clear |
+| **3** | | | | 17 · faint |
+
+Every **adjacent** pair is faint. So a picture that uses all five shades
+cannot avoid putting two nearly-identical greens beside each other, however
+carefully it is drawn — it will look thorough in the terminal and read as a
+smudge on the graph.
+
+**`{0, 2, 4}` is the only set of three with no faint pair in it**, and there is
+no clear set of four. That is not a style preference, it is arithmetic, and the
+test suite proves it by enumeration rather than asserting it here. It is why
+the dragon is drawn in three shades and not five.
+
+mossaic reports the **closest** pair the picture uses rather than the widest,
+because the widest always flatters: a drawing spanning 0 to 4 reads as ΔE 70
+and can still hold two shades nobody can separate.
 
 ### Drawing one
 
@@ -281,12 +307,10 @@ mossaic-art --track
 
   level  days   done   owing   each
       4    75     28     188   4
-      3    65      0     156   3
-      2     2      0       2   2
-      1     4      0       4   1
+      2    71      0     114   2
       0   219    186       -   must stay dark
 
-  still owing  104 day(s) · 350 contributions
+  still owing  104 day(s) · 302 contributions
   today        must stay dark
   tomorrow     must stay dark
 ```
@@ -470,7 +494,7 @@ arrive rather than be asked for:
 
 ```yaml
 - id: art
-  uses: vyncint/mossaic/action@v0.5.0
+  uses: vyncint/mossaic/action@v0.6.0
   with:
     text: VYNCINT
     year: "2027"

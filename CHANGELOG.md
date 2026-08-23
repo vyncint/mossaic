@@ -9,6 +9,8 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-23
+
 ### Added
 
 Pixel art across the whole year. The font draws five rows of two shades on
@@ -52,8 +54,34 @@ of GitHub's five shades on any day, the weekend included.
   *band* rather than a target and a level-2 day is that band with different
   numbers.
 
+- **`art::Canvas::closest_pair`**, and the palette rule it exists to enforce.
+  GitHub's five greens are not evenly spaced: every *adjacent* pair is 9–20 ΔE
+  apart in the worst palette it ships. `{0, 2, 4}` is the only three-shade set
+  with no faint pair in it, and there is no clear set of four — proved by
+  enumeration in the suite rather than asserted in prose.
+- **The GitHub Action takes `template`, `matrix`, `image`, `invert` and
+  `dither`.** Exactly one of `text`, `template`, `matrix` or `image` says what
+  is being drawn, and giving two is refused rather than guessed at. Every
+  existing input and all twenty outputs are unchanged and work for a picture:
+  a picture is the same plan underneath. `matrix` and `image` are paths in your
+  repository, so a workflow without `actions/checkout` is told that rather than
+  told the file is missing.
+
 ### Changed
 
+- **Contrast is reported for the shades that look most alike**, not the
+  darkest and brightest. The widest pair always flatters: a picture spanning
+  levels 0 to 4 reads as ΔE 70 and can still hold two greens nobody can
+  separate, because the ones sitting next to each other are 9 apart. This
+  changes what `--template`, `--matrix`, `--image` and `--draw` print; a text
+  plan is unaffected, since two shades have only one pair.
+- **The reference template is drawn in three shades, not five.** `dragon.art`
+  used all five to demonstrate the format, which demonstrated the wrong thing:
+  the rendered chart is what showed it up. It reads clearly now.
+- **`--top` and `--background` are refused with a picture** rather than
+  silently ignored. They place letters on rows and shade the field behind
+  them; a picture uses the whole week and names its own shade for every day.
+  Only when typed, so the defaults nobody chose still work.
 - **`plan::Plan::holes` counts any day past its ceiling**, not only the ones
   inside the text's own block. A canvas has middle shades, and a level-2 day
   that has crept to level 4 is damage nothing takes back. This cannot change
@@ -687,7 +715,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/vyncint/mossaic/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/vyncint/mossaic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/vyncint/mossaic/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vyncint/mossaic/compare/v0.3.0...v0.3.1

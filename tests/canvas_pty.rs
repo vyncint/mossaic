@@ -97,7 +97,17 @@ fn a_template_draws_the_year_and_prices_every_level() -> termlens::Result<()> {
     // Every level the dragon uses is priced, and level 0 is named as the one
     // that costs nothing and must stay that way.
     assert!(screen.contains("must stay dark"), "{screen}");
-    for level in 1..=4 {
+    // Derived from the template rather than hardcoded: which shades it draws
+    // in is a design decision that has already changed once, and a test that
+    // pins the decision rather than the property fails on the next redraw for
+    // no reason at all.
+    let dragon = mossaic::templates::find("dragon").expect("dragon");
+    for level in dragon
+        .canvas
+        .palette()
+        .into_iter()
+        .filter(|level| *level > 0)
+    {
         assert!(
             (0..screen.rows()).any(|row| screen
                 .row_text(row)
@@ -106,6 +116,8 @@ fn a_template_draws_the_year_and_prices_every_level() -> termlens::Result<()> {
             "level {level} is missing from the price table:\n{screen}"
         );
     }
+    // And the honest contrast figure: the closest pair, not the widest.
+    assert!(screen.contains("closest pair"), "{screen}");
     Ok(())
 }
 
@@ -171,7 +183,7 @@ fn painting_shows_up_on_screen_and_in_the_numbers() -> termlens::Result<()> {
     );
     // And with two shades on the canvas there is a contrast to report.
     assert!(
-        screen.contains("shades read as"),
+        screen.contains("closest shades"),
         "the legibility line appears once there are two shades:\n{screen}"
     );
     assert!(!screen.contains("one shade only"), "{screen}");

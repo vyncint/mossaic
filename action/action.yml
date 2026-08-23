@@ -20,8 +20,43 @@ branding:
 
 inputs:
   text:
-    description: The text being drawn, e.g. VYNCINT (A-Z, 0-9, space, - and .).
-    required: true
+    description: >-
+      The text being drawn, e.g. VYNCINT (A-Z, 0-9, space, - and .). One of
+      `text`, `template`, `matrix` or `image` says what is being drawn; give
+      exactly one.
+    required: false
+    default: ""
+  template:
+    description: >-
+      A pixel-art template to draw instead of text — a whole-year picture,
+      seven rows by up to 53 columns, in any of GitHub's five shades. Run
+      `mossaic-art --list-templates` to see what there is.
+    required: false
+    default: ""
+  matrix:
+    description: >-
+      A `.art` file in this repository to draw: seven rows of the shades 0-4.
+      Checked out with your code, so a picture can live beside the workflow
+      that tracks it.
+    required: false
+    default: ""
+  image:
+    description: >-
+      A PNG in this repository to draw. Fitted to the calendar keeping its
+      aspect ratio and quantised to five shades; a dark pixel becomes a busy
+      day.
+    required: false
+    default: ""
+  invert:
+    description: With `image`, map bright pixels to busy days instead of dark ones.
+    required: false
+    default: "false"
+  dither:
+    description: >-
+      With `image`, spread the rounding error into neighbouring days
+      (Floyd-Steinberg), so a gradient reads as one rather than as four bands.
+    required: false
+    default: "false"
   user:
     description: >-
       Whose contributions to compare against. Defaults to the repository owner.
@@ -39,7 +74,9 @@ inputs:
     required: false
     default: ""
   top:
-    description: First calendar row used, 0 = Sunday. Default 1, so Mon-Fri.
+    description: >-
+      First calendar row used, 0 = Sunday. Default 1, so Mon-Fri. Text only —
+      a picture uses the whole week.
     required: false
     default: "1"
   background:
@@ -81,7 +118,7 @@ inputs:
     default: "true"
   version:
     description: >-
-      Which mossaic release runs the tracking, e.g. "0.5.0". The default,
+      Which mossaic release runs the tracking, e.g. "0.6.0". The default,
       `latest`, installs the newest release on crates.io each run — fine for
       tracking, since the report format is versioned with the crate. Pin a
       number if you want the tracker to change only when you say so.
@@ -199,6 +236,11 @@ runs:
         # into the script: a text of `"; rm -rf /` is a text, not a command.
         GH_TOKEN: ${{ inputs.token }}
         INPUT_TEXT: ${{ inputs.text }}
+        INPUT_TEMPLATE: ${{ inputs.template }}
+        INPUT_MATRIX: ${{ inputs.matrix }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_INVERT: ${{ inputs.invert }}
+        INPUT_DITHER: ${{ inputs.dither }}
         INPUT_USER: ${{ inputs.user }}
         INPUT_YEAR: ${{ inputs.year }}
         INPUT_START_WEEK: ${{ inputs.start-week }}
@@ -214,14 +256,61 @@ runs:
         report_dir="${RUNNER_TEMP}/mossaic"
         mkdir -p "${report_dir}"
 
+        # Exactly one thing is being drawn. Counted rather than assumed: two
+        # sources on one workflow would mean guessing which was meant, and the
+        # guess would be silent for as long as the schedule runs.
+        given=()
+        if [ -n "${INPUT_TEXT}" ]; then given+=("text"); fi
+        if [ -n "${INPUT_TEMPLATE}" ]; then given+=("template"); fi
+        if [ -n "${INPUT_MATRIX}" ]; then given+=("matrix"); fi
+        if [ -n "${INPUT_IMAGE}" ]; then given+=("image"); fi
+        if [ "${#given[@]}" -eq 0 ]; then
+          echo "::error::nothing to draw — give one of text, template, matrix or image"
+          exit 1
+        fi
+        if [ "${#given[@]}" -gt 1 ]; then
+          echo "::error::these all say what to draw: ${given[*]} — give exactly one"
+          exit 1
+        fi
+
         # `[ -n "$x" ] && args+=(…)` would exit the script under `set -e` on the
         # very common case of the input being empty. Plain ifs instead.
-        args=("${INPUT_TEXT}" --track "${INPUT_USER:-$OWNER}" --top "${INPUT_TOP}")
+        if [ -n "${INPUT_TEMPLATE}" ]; then
+          args=(--template "${INPUT_TEMPLATE}")
+        elif [ -n "${INPUT_MATRIX}" ]; then
+          if [ ! -f "${INPUT_MATRIX}" ]; then
+            echo "::error::no such file: ${INPUT_MATRIX} — matrix is a path in this repository, so the workflow needs an actions/checkout step before this one"
+            exit 1
+          fi
+          args=(--matrix "${INPUT_MATRIX}")
+        elif [ -n "${INPUT_IMAGE}" ]; then
+          if [ ! -f "${INPUT_IMAGE}" ]; then
+            echo "::error::no such file: ${INPUT_IMAGE} — image is a path in this repository, so the workflow needs an actions/checkout step before this one"
+            exit 1
+          fi
+          args=(--image "${INPUT_IMAGE}")
+          if [ "${INPUT_INVERT}" = "true" ]; then args+=(--invert); fi
+          if [ "${INPUT_DITHER}" = "true" ]; then args+=(--dither); fi
+        else
+          args=("${INPUT_TEXT}")
+        fi
+        args+=(--track "${INPUT_USER:-$OWNER}")
+
+        # Placement and shading belong to text: a picture uses the whole week
+        # and names its own shade for every day, and mossaic-art refuses both
+        # rather than ignoring them.
+        if [ -n "${INPUT_TEXT}" ]; then
+          args+=(--top "${INPUT_TOP}")
+          if [ -n "${INPUT_BACKGROUND}" ] && [ "${INPUT_BACKGROUND}" != "0" ]; then
+            args+=(--background "${INPUT_BACKGROUND}")
+          fi
+        elif [ -n "${INPUT_BACKGROUND}" ] && [ "${INPUT_BACKGROUND}" != "0" ]; then
+          echo "::error::background shades the field behind letters; a picture names its own shade for every day"
+          exit 1
+        fi
+
         if [ -n "${INPUT_YEAR}" ]; then args+=(--year "${INPUT_YEAR}"); fi
         if [ -n "${INPUT_START_WEEK}" ]; then args+=(--start-week "${INPUT_START_WEEK}"); fi
-        if [ -n "${INPUT_BACKGROUND}" ] && [ "${INPUT_BACKGROUND}" != "0" ]; then
-          args+=(--background "${INPUT_BACKGROUND}")
-        fi
 
         "${ART}" "${args[@]}" --format json > "${report_dir}/report.json"
         "${ART}" "${args[@]}" --format markdown > "${report_dir}/report.md"
