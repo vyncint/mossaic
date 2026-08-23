@@ -36,7 +36,8 @@ labels around them stay text.
 [Writing text into the graph](docs/ART.md) ·
 [The GitHub Action](action/README.md)
 
-**Reference** · [Usage](#usage) · [What you can draw](#what-you-can-draw) ·
+**Reference** · [Install](#install) · [Usage](#usage) ·
+[What you can draw](#what-you-can-draw) ·
 [Pixel art across the year](#pixel-art-across-the-year) ·
 [Keys](#keys) · [Mouse](#mouse) ·
 [How it works](#how-it-works) · [Known limits](#known-limits) ·
@@ -45,8 +46,31 @@ labels around them stay text.
 
 ## Quickstart
 
+**No Rust needed.** Every release ships static binaries for Linux, macOS and
+Windows — [all four ways to install](#install) are below.
+
 ```sh
-cargo install mossaic      # needs Rust 1.88+
+brew install vyncint/tap/mossaic          # macOS and Linux
+```
+
+<details>
+<summary>Without Homebrew — one command, no toolchain</summary>
+
+```sh
+# Linux x86_64. Swap the target for aarch64-unknown-linux-musl,
+# x86_64-apple-darwin or aarch64-apple-darwin as needed.
+curl -fsSL https://github.com/vyncint/mossaic/releases/latest/download/mossaic-x86_64-unknown-linux-musl.tar.gz \
+  | tar xz --strip-components=1 -C ~/.local/bin --wildcards '*/mossaic*'
+```
+
+The Linux builds are statically linked, so they run on any distribution
+whatever its glibc. Windows users take the `.zip` from the
+[releases page](https://github.com/vyncint/mossaic/releases/latest).
+
+</details>
+
+```sh
+cargo install mossaic      # if you have Rust 1.88+ already
 ```
 
 **Plan the art.** No account, no network — this is arithmetic:
@@ -444,6 +468,64 @@ palette is degraded on purpose, and what the capability probe actually sends.
   borderless style, where a future day and a day off the end of the year both look
   blank; `d` still forces the others if you would rather they clipped.
 - Private contributions appear only if the authenticated user can see them.
+
+## Install
+
+Four ways, and only the last needs a Rust toolchain.
+
+### Homebrew — macOS and Linux
+
+```sh
+brew install vyncint/tap/mossaic
+```
+
+### A downloaded binary — anything else
+
+Every release attaches a static build for each platform, with a `.sha256`
+beside it. Nothing to compile and nothing to keep up to date but the file
+itself.
+
+| platform | archive |
+| --- | --- |
+| Linux, x86-64 | `mossaic-<version>-x86_64-unknown-linux-musl.tar.gz` |
+| Linux, arm64 | `mossaic-<version>-aarch64-unknown-linux-musl.tar.gz` |
+| macOS, Apple silicon | `mossaic-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `mossaic-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows, x86-64 | `mossaic-<version>-x86_64-pc-windows-msvc.zip` |
+
+The Linux builds are **musl**, so they are statically linked and run on any
+distribution regardless of its glibc — a binary you download today still
+starts next year.
+
+```sh
+# Pick your target, then:
+target=x86_64-unknown-linux-musl
+curl -fsSLO "https://github.com/vyncint/mossaic/releases/latest/download/mossaic-${target}.tar.gz"
+curl -fsSLO "https://github.com/vyncint/mossaic/releases/latest/download/mossaic-${target}.tar.gz.sha256"
+sha256sum -c "mossaic-${target}.tar.gz.sha256"     # verify before you run it
+tar xzf "mossaic-${target}.tar.gz"
+```
+
+Each archive holds the three binaries, both licences, the changelog, and a
+`templates/` directory to start your own art from.
+
+### cargo-binstall
+
+If you have it, it finds those same archives without building anything:
+
+```sh
+cargo binstall mossaic
+```
+
+### cargo install
+
+The source route, and the one that needs Rust 1.88 or newer:
+
+```sh
+cargo install mossaic --locked
+```
+
+`--locked` builds the dependency versions the release was tested against.
 
 ## Development
 
