@@ -177,6 +177,7 @@ pub mod app;
 pub mod art;
 pub mod calendar;
 pub mod cli;
+pub mod draw;
 pub mod github;
 pub mod graphics;
 pub mod image;

@@ -51,7 +51,13 @@ usage:
   --dither            with --image, spread the rounding error into
                       neighbouring days (Floyd-Steinberg), so a gradient
                       reads as one rather than as four bands
-  --output FILE       (-o) where a drawing is written
+  --draw              open the editor and draw on the year by hand: arrows or
+                      hjkl to move, 0-4 to paint a shade, space to cycle one,
+                      the mouse to paint directly, u to undo and s to save.
+                      With --template or --matrix it opens that picture; on
+                      its own it starts a blank year
+  --output FILE       (-o) where --draw saves, as a .art file
+                      (default: the picture's name, or drawing.art)
   --year YEAR         which year's calendar (default: this one)
   --commits N         commits per lit day (default 4); keep it uniform for one
                       flat shade
@@ -101,6 +107,8 @@ usage:
   -h, --help          show this help
 
 examples:
+  mossaic-art --draw                                  draw a year by hand
+  mossaic-art --template dragon --draw -o mine.art    start from one, save as mine
   mossaic-art --list-templates                        see the pictures on offer
   mossaic-art --template dragon --year 2027           draw one across the year
   mossaic-art --matrix mine.art --year 2027 --save    draw your own, and keep it
@@ -141,8 +149,15 @@ fn main() {
     // machinery runs. That is what makes "no regressions for text" a property
     // of the control flow rather than a claim about the diff.
     if let Some((name, canvas)) = options.canvas.clone() {
-        run_canvas(&options, &grid, &name, &canvas);
+        if options.draw {
+            run_editor(&options, &grid, &name, canvas);
+        } else {
+            run_canvas(&options, &grid, &name, &canvas);
+        }
         return;
+    }
+    if options.draw {
+        fail("--draw draws a picture; it has nothing to do with TEXT");
     }
 
     let columns = art::bitmap(&options.text).unwrap_or_else(|error| fail(&error));
@@ -384,6 +399,117 @@ fn main() {
         (Some(_), false) => println!("\n(add --write to create the commits; this was a dry run)"),
         (None, true) => fail("--write needs --repo DIR"),
         (None, false) => {}
+    }
+}
+
+/// `--draw`: the editor, from opening the terminal to putting it back.
+///
+/// The loop is deliberately thin. Everything that decides anything lives in
+/// [`mossaic::draw::Editor`], which holds no terminal — so the interesting
+/// claims about this feature are checked by unit tests rather than by reading
+/// a screen through a pseudo-terminal and hoping.
+fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
+    use ratatui::crossterm::event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, KeyModifiers,
+    };
+    use ratatui::crossterm::execute;
+    use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+
+    let output = options.output.clone().unwrap_or_else(|| {
+        // The picture's own name, lowercased and dashed, so a template opened
+        // and saved lands somewhere predictable rather than on top of itself.
+        let stem: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        PathBuf::from(format!("{}.art", stem.trim_matches('-')))
+    });
+
+    let start = options
+        .start_week
+        .unwrap_or_else(|| canvas.centred(grid).min(grid.weeks.saturating_sub(1)));
+    let mut editor = mossaic::draw::Editor::new(canvas, *grid, start, output, options.commits);
+    if editor.canvas.meta().name.is_none() {
+        let mut meta = editor.canvas.meta().clone();
+        meta.name = Some(name.to_string());
+        editor.canvas.set_meta(meta);
+    }
+
+    let mut terminal = ratatui::try_init()
+        .unwrap_or_else(|error| fail(&format!("--draw needs an interactive terminal ({error})")));
+    let mut out = std::io::stdout();
+    let _ = execute!(out, EnableMouseCapture);
+    let palette = mossaic::draw::palette();
+
+    let outcome = (|| -> std::io::Result<()> {
+        loop {
+            let mut body = ratatui::layout::Rect::default();
+            // Bracketed, like the chart's own loop: a terminal that understands
+            // DEC 2026 then shows a whole frame rather than one caught halfway
+            // through being painted. It is also what lets a test wait for a
+            // *complete* frame instead of reading a torn one.
+            execute!(out, BeginSynchronizedUpdate)?;
+            terminal.draw(|frame| {
+                mossaic::draw::render(frame, &editor, &palette);
+                // The same rectangle the grid was drawn in, so a click lands on
+                // the cell it was aimed at.
+                let area = frame.area();
+                body = ratatui::layout::Rect {
+                    x: area.x,
+                    y: area.y + 1,
+                    width: area.width,
+                    height: (mossaic::art::CANVAS_ROWS as u16) + 2,
+                };
+            })?;
+            execute!(out, EndSynchronizedUpdate)?;
+            let origin = mossaic::draw::grid_origin(body);
+
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                    match editor.on_key(key.code, ctrl) {
+                        mossaic::draw::Outcome::Quit => break,
+                        mossaic::draw::Outcome::Save => {
+                            if let Err(error) = editor.save() {
+                                editor.status = error;
+                            }
+                        }
+                        mossaic::draw::Outcome::Idle => {}
+                    }
+                }
+                Event::Mouse(mouse) => editor.on_mouse(mouse, origin),
+                _ => {}
+            }
+        }
+        Ok(())
+    })();
+
+    let _ = execute!(out, DisableMouseCapture);
+    let restored = ratatui::try_restore();
+    if let Some(error) = [outcome.err(), restored.err()].into_iter().flatten().next() {
+        fail(&format!("{error}"));
+    }
+
+    // Said after the terminal is back, so it is readable rather than painted
+    // over by the alternate screen going away.
+    if editor.dirty {
+        eprintln!(
+            "not saved — press s in the editor, or run it again and save to {}",
+            editor.output.display()
+        );
+    } else if editor.output.exists() {
+        println!("{}", editor.output.display());
+        println!(
+            "\ndraw it on a year:\n  mossaic-art --matrix {} --year {}",
+            editor.output.display(),
+            grid.year
+        );
     }
 }
 
@@ -1575,6 +1701,8 @@ struct Options {
     canvas: Option<(String, art::Canvas)>,
     /// Where `--draw` writes the picture it made.
     output: Option<PathBuf>,
+    /// Open the editor instead of drawing straight to the terminal.
+    draw: bool,
 }
 
 fn parse_args() -> Option<Options> {
@@ -1603,6 +1731,7 @@ fn parse_args() -> Option<Options> {
         colour: Colour::default(),
         canvas: None,
         output: None,
+        draw: false,
     };
 
     let mut template: Option<String> = None;
@@ -1702,6 +1831,7 @@ fn parse_args() -> Option<Options> {
             "--matrix" | "--file" => matrix = Some(args.value("--matrix").into()),
             "--list-templates" => list_templates = true,
             "--output" | "-o" => options.output = Some(args.value("--output").into()),
+            "--draw" => options.draw = true,
             "--font" => font = true,
             "--png" => png_path = Some(PathBuf::from(args.value("--png"))),
             "--track" => {
@@ -1806,6 +1936,13 @@ fn parse_args() -> Option<Options> {
     // that named a user was loaded and then overwritten with nothing.
     options.track = track;
     options.tracking = tracking;
+    // The editor is a source of its own: `--draw` with nothing else starts on a
+    // blank year rather than complaining there is nothing to draw.
+    if options.draw && options.canvas.is_none() && options.text.is_empty() {
+        let blank = art::Canvas::blank(art::CANVAS_COLS).expect("53 is a canvas width");
+        options.canvas = Some(("untitled".to_string(), blank));
+    }
+
     match (
         options.text.is_empty() && options.canvas.is_none(),
         options.plan_path.exists(),

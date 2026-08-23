@@ -3935,3 +3935,291 @@ fn a_canvas_round_trips_through_the_art_format() {
         );
     }
 }
+
+// ============================================================== the editor
+
+mod editor {
+    use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    use crate::art::{Canvas, Grid, CANVAS_COLS, CANVAS_ROWS};
+    use crate::draw::{grid_origin, Editor, Outcome};
+
+    fn editor() -> Editor {
+        let canvas = Canvas::blank(CANVAS_COLS).expect("a canvas");
+        let grid = Grid::new(2027).expect("a year");
+        Editor::new(canvas, grid, 0, super::scratch("draw"), 4)
+    }
+
+    fn press(editor: &mut Editor, key: char) -> Outcome {
+        editor.on_key(KeyCode::Char(key), false)
+    }
+
+    #[test]
+    fn painting_changes_the_cell_and_nothing_else() {
+        let mut editor = editor();
+        assert!(!editor.dirty);
+        press(&mut editor, '3');
+        assert_eq!(editor.canvas.at(0, 0), 3);
+        assert_eq!(editor.brush, 3, "the digit is also the brush");
+        assert!(editor.dirty);
+        // Every other cell is untouched.
+        assert_eq!(editor.canvas.histogram()[3], 1);
+    }
+
+    /// The rule that keeps a stuck key from eating the history: painting a cell
+    /// the colour it already is changes nothing, so it must cost nothing.
+    #[test]
+    fn repainting_the_same_level_does_not_consume_an_undo_step() {
+        let mut editor = editor();
+        press(&mut editor, '2');
+        assert_eq!(editor.undo_depth(), 1);
+        for _ in 0..20 {
+            press(&mut editor, '2');
+        }
+        assert_eq!(editor.undo_depth(), 1, "twenty no-ops, one step");
+    }
+
+    #[test]
+    fn undo_restores_exactly_what_was_there() {
+        let mut editor = editor();
+        press(&mut editor, '4');
+        editor.move_by(1, 0);
+        press(&mut editor, '2');
+        editor.move_by(0, 1);
+        press(&mut editor, '1');
+        let before = editor.canvas.clone();
+
+        press(&mut editor, '3');
+        assert_ne!(editor.canvas, before);
+        assert!(editor.undo());
+        assert_eq!(editor.canvas, before, "byte for byte, not approximately");
+
+        // And all the way back to the start.
+        while editor.undo() {}
+        assert_eq!(editor.canvas.histogram()[0], CANVAS_COLS * CANVAS_ROWS);
+        assert!(!editor.undo(), "and then it says so rather than panicking");
+    }
+
+    #[test]
+    fn the_cursor_stops_at_the_edges() {
+        let mut editor = editor();
+        for _ in 0..200 {
+            editor.move_by(-1, -1);
+        }
+        assert_eq!(editor.cursor, (0, 0));
+        for _ in 0..200 {
+            editor.move_by(1, 1);
+        }
+        assert_eq!(
+            editor.cursor,
+            (CANVAS_COLS - 1, CANVAS_ROWS - 1),
+            "clamped, never wrapped — a picture has edges"
+        );
+    }
+
+    #[test]
+    fn space_cycles_the_cell_and_comes_back_round() {
+        let mut editor = editor();
+        for expected in [1, 2, 3, 4, 0, 1] {
+            editor.on_key(KeyCode::Char(' '), false);
+            assert_eq!(editor.canvas.at(0, 0), expected);
+        }
+    }
+
+    #[test]
+    fn invert_is_its_own_opposite() {
+        let mut editor = editor();
+        press(&mut editor, '1');
+        editor.move_by(3, 2);
+        press(&mut editor, '4');
+        let before = editor.canvas.clone();
+        editor.invert();
+        assert_ne!(editor.canvas, before);
+        editor.invert();
+        assert_eq!(editor.canvas, before);
+    }
+
+    #[test]
+    fn clearing_leaves_one_undo_step_between_you_and_the_drawing() {
+        let mut editor = editor();
+        press(&mut editor, '4');
+        editor.fill(0);
+        assert_eq!(editor.canvas.histogram()[0], CANVAS_COLS * CANVAS_ROWS);
+        assert!(editor.undo());
+        assert_eq!(editor.canvas.at(0, 0), 4, "the drawing comes back");
+    }
+
+    /// The number on the HUD is the number `--write` would make, not an
+    /// approximation of it — so it is derived the same way.
+    #[test]
+    fn the_estimate_is_what_write_would_actually_commit() {
+        let mut editor = editor();
+        // Mid-year, so every one of the four is a day 2027 actually has. Week 0
+        // is a partial week and its Sunday is in 2026 — which the test below
+        // is about, and which would quietly halve this one's total.
+        for (level, week) in [(4u8, 20usize), (3, 21), (2, 22), (1, 23)] {
+            editor.cursor = (week, 0);
+            editor.paint(level);
+            assert!(
+                editor.cursor_date().is_some(),
+                "week {week} row 0 should be inside 2027"
+            );
+        }
+        let peak = editor.peak();
+        let expected: u32 = [4u8, 3, 2, 1]
+            .iter()
+            .map(|level| crate::art::commits_to_reach(*level, peak))
+            .sum();
+        assert_eq!(editor.estimate(), expected);
+        // At the default of four, the five shades cost 1, 2, 3, 4.
+        assert_eq!(expected, 1 + 2 + 3 + 4);
+    }
+
+    /// Days the year does not have are not billed for. The first calendar
+    /// column of most years is a partial week.
+    #[test]
+    fn cells_outside_the_year_cost_nothing() {
+        let mut editor = editor();
+        let outside: Vec<(usize, usize)> = (0..CANVAS_ROWS)
+            .map(|row| (0, row))
+            .filter(|(week, row)| editor.date_at(*week, *row).is_none())
+            .collect();
+        assert!(
+            !outside.is_empty(),
+            "2027 starts mid-week, so its first column is partial"
+        );
+        for cell in &outside {
+            editor.cursor = *cell;
+            editor.paint(4);
+        }
+        assert_eq!(
+            editor.estimate(),
+            0,
+            "painted, and still free — those days are not in the year"
+        );
+    }
+
+    #[test]
+    fn a_click_paints_the_cell_it_was_aimed_at() {
+        let mut editor = editor();
+        editor.brush = 2;
+        // The rectangle the grid is drawn in, exactly as the run loop computes it.
+        let body = Rect {
+            x: 0,
+            y: 1,
+            width: 80,
+            height: CANVAS_ROWS as u16 + 2,
+        };
+        let origin = grid_origin(body);
+
+        let click = |kind, column, row| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        };
+        editor.on_mouse(
+            click(
+                MouseEventKind::Down(MouseButton::Left),
+                origin.x + 7,
+                origin.y + 3,
+            ),
+            origin,
+        );
+        assert_eq!(editor.cursor, (7, 3));
+        assert_eq!(editor.canvas.at(7, 3), 2);
+
+        // A drag paints every cell it crosses, which is the whole point of one.
+        for step in 8..12 {
+            editor.on_mouse(
+                click(
+                    MouseEventKind::Drag(MouseButton::Left),
+                    origin.x + step,
+                    origin.y + 3,
+                ),
+                origin,
+            );
+        }
+        for week in 7..12 {
+            assert_eq!(editor.canvas.at(week, 3), 2, "cell {week} of the stroke");
+        }
+
+        // Released, so moving the pointer reads without painting.
+        editor.on_mouse(click(MouseEventKind::Up(MouseButton::Left), 0, 0), origin);
+        editor.on_mouse(
+            click(MouseEventKind::Moved, origin.x + 20, origin.y + 5),
+            origin,
+        );
+        assert_eq!(editor.cursor, (20, 5), "the pointer moved the cursor");
+        assert_eq!(editor.canvas.at(20, 5), 0, "and painted nothing");
+    }
+
+    #[test]
+    fn a_click_outside_the_grid_is_ignored() {
+        let mut editor = editor();
+        let origin = grid_origin(Rect {
+            x: 0,
+            y: 1,
+            width: 80,
+            height: 9,
+        });
+        let event = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        };
+        editor.on_mouse(event, origin);
+        assert_eq!(editor.cursor, (0, 0));
+        assert!(!editor.dirty, "a click in the gutter draws nothing");
+    }
+
+    #[test]
+    fn saving_writes_a_file_that_reads_back_as_the_same_picture() {
+        let mut editor = editor();
+        press(&mut editor, '4');
+        editor.move_by(5, 2);
+        press(&mut editor, '2');
+        assert!(editor.dirty);
+
+        assert_eq!(editor.on_key(KeyCode::Char('s'), false), Outcome::Save);
+        editor.save().expect("writes");
+        assert!(!editor.dirty, "saved is not dirty");
+
+        let body = std::fs::read_to_string(&editor.output).expect("the file");
+        let again = Canvas::parse(&body).expect("parses");
+        assert_eq!(again, editor.canvas);
+        let _ = std::fs::remove_file(&editor.output);
+    }
+
+    #[test]
+    fn quitting_and_help_are_the_keys_the_footer_promises() {
+        let mut editor = editor();
+        assert_eq!(editor.on_key(KeyCode::Char('q'), false), Outcome::Quit);
+        assert_eq!(editor.on_key(KeyCode::Esc, false), Outcome::Quit);
+        assert_eq!(editor.on_key(KeyCode::Char('c'), true), Outcome::Quit);
+
+        assert!(!editor.help);
+        press(&mut editor, '?');
+        assert!(editor.help);
+        press(&mut editor, '?');
+        assert!(!editor.help, "and closes again");
+
+        // ctrl-z is undo, not quit.
+        press(&mut editor, '4');
+        assert_eq!(editor.on_key(KeyCode::Char('z'), true), Outcome::Idle);
+        assert_eq!(editor.canvas.at(0, 0), 0);
+    }
+
+    /// The overlay must not swallow the keystroke that dismissed it.
+    #[test]
+    fn a_key_pressed_over_the_help_closes_it_and_then_acts() {
+        let mut editor = editor();
+        press(&mut editor, '?');
+        assert!(editor.help);
+        press(&mut editor, '3');
+        assert!(!editor.help, "closed");
+        assert_eq!(editor.canvas.at(0, 0), 3, "and the paint landed");
+    }
+}
