@@ -164,8 +164,14 @@ jobs:
 
       # --locked, because the point of a published binary is that it is the
       # one the lockfile describes and the tests ran against.
+      #
+      # The target reaches the shell as an environment variable rather than
+      # interpolated into the script, which is how every other `run:` in this
+      # repository takes an input.
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
 
       - name: Package
         shell: bash
