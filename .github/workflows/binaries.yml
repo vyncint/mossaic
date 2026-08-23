@@ -224,13 +224,37 @@ jobs:
             echo "usable=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "token length: ${#TOKEN}"
+          # Classify it without printing any of it. A GitHub token's prefix is
+          # a published constant rather than entropy, so naming which kind it
+          # is gives nothing away and answers the only question that matters
+          # when one does not work: is this the right sort of thing at all.
           case "$TOKEN" in
+            github_pat_*) kind="fine-grained PAT" ;;
+            ghp_*)        kind="classic PAT" ;;
+            gho_*|ghu_*|ghs_*|ghr_*) kind="a GitHub token, but not a PAT" ;;
+            *)            kind="UNRECOGNISED - no GitHub token prefix" ;;
+          esac
+          trimmed="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
+          echo "looks like: $kind"
+          echo "length: ${#TOKEN} (${#trimmed} once whitespace is removed)"
+
+          # Surrounding whitespace is the common accident and costs nothing to
+          # absorb - but say so, because a secret that needs repairing on every
+          # use should be repaired at the source.
+          if [ "${#trimmed}" -ne "${#TOKEN}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN carries whitespace. Using the trimmed value; worth setting it again cleanly."
+          fi
+          case "$trimmed" in
             *[!A-Za-z0-9_]*)
-              echo "::error::HOMEBREW_TAP_TOKEN holds characters outside [A-Za-z0-9_] —           almost always a newline or space picked up when it was pasted. Set it again           with: gh secret set HOMEBREW_TAP_TOKEN --repo vyncint/mossaic"
+              echo "::error::HOMEBREW_TAP_TOKEN does not look like a GitHub token: $kind, ${#trimmed} characters, holding characters a token cannot. A fine-grained PAT is ~93 characters and starts github_pat_; a classic one is 40 and starts ghp_. Re-set it with: gh secret set HOMEBREW_TAP_TOKEN --repo vyncint/mossaic"
               exit 1
               ;;
           esac
+
+          # Registered as a secret before it is handed on, so the trimmed value
+          # is masked in the log exactly as the original is.
+          echo "::add-mask::$trimmed"
+          echo "token=$trimmed" >> "$GITHUB_OUTPUT"
           echo "usable=true" >> "$GITHUB_OUTPUT"
 
       # Checkout does the authentication, rather than the token being spliced
@@ -241,7 +265,7 @@ jobs:
         if: steps.token.outputs.usable == 'true'
         with:
           repository: vyncint/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.token.outputs.token }}
           path: tap
           # Kept on purpose: this job's whole business is pushing back, and
           # the credential is scoped to one repository.
