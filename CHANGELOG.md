@@ -11,6 +11,21 @@ listed under a **Changed** or **Removed** heading.
 
 ### Fixed
 
+- **The Intel-Mac binary is cross-compiled from Apple silicon** rather than
+  built on a `macos-13` runner. Xcode's toolchain and SDK are universal, so an
+  arm64 Mac produces an x86-64 binary with nothing but `rustup target add` —
+  no sysroot, no linker configuration.
+
+  The Intel runners are being wound down and it shows: on the v0.6.2 release
+  this leg sat queued for forty-five minutes while every other target finished
+  inside ninety seconds. A target nobody can schedule is a target that
+  silently stops shipping.
+
+  The job now asks `file` what it actually built, and fails if the answer is
+  not the architecture the target names — a cross-build that quietly produced
+  the host's architecture would pass every other check here and fail on the
+  first machine that downloaded it.
+
 - **The README no longer promises Homebrew.** The line went in ahead of the
   tap existing, on the assumption that the tap would follow within the hour.
   It has not yet, and an install command that does not work is worse than one
