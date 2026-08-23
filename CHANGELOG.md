@@ -35,6 +35,13 @@ listed under a **Changed** or **Removed** heading.
 
 ### Changed
 
+- **The `termlens` dev-dependency moves to 0.6.1**, which carries an
+  `openpty` retry that had been written, merged and left unreleased. Without
+  it this suite fails on macOS at sixteen threads with `Device not
+  configured` — a PTY device the kernel has not finished recycling — at
+  roughly one shard in ten. It is a test-harness fix and touches nothing that
+  ships.
+
 - **Refreshed the lockfile.** `cc` 1.4.3 → 1.4.4, `darling` 0.24.0 → 0.24.1
   (with `_core` and `_macro`), `either` 1.17.0 → 1.18.0, `log` 0.4.33 → 0.4.34,
   `uuid` 1.24.1 → 1.25.0. Four of those — `cc`, `darling`, `either`, `log` —
