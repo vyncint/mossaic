@@ -24,6 +24,14 @@ on:
 permissions:
   contents: read
 
+# Keyed on the tag, so two dispatches for the same release cannot race each
+# other uploading the same asset names. Never cancelled in flight: a run
+# interrupted between building and uploading leaves the release short an
+# archive, which is the failure this workflow exists to make recoverable.
+concurrency:
+  group: binaries-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
 env:
   TAG: ${{ inputs.tag || github.event.release.tag_name }}
 
