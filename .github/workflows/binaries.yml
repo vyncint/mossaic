@@ -181,14 +181,32 @@ jobs:
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
           echo "ALIAS=$alias" >> "$GITHUB_ENV"
 
+      # Uploaded only if absent, never clobbered. A published archive is
+      # immutable: Rust builds are not bit-for-bit reproducible, so rebuilding
+      # a tag produces a *different* archive with a different checksum, and
+      # replacing it would invalidate every checksum anyone had recorded --
+      # including the one in the Homebrew formula, and including one somebody
+      # wrote down to verify a download with.
+      #
+      # This workflow exists to be re-run, so that had to be settled: a re-run
+      # now fills in what is missing and leaves what is there alone, which is
+      # exactly the case it was built for. Replacing a genuinely corrupt asset
+      # means deleting it first, and that friction is the point.
       - name: Attach to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$TAG" \
-            "$ARCHIVE" "${ARCHIVE}.sha256" \
-            "$ALIAS" "${ALIAS}.sha256" --clobber
+          set -euo pipefail
+          published="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for file in "$ARCHIVE" "${ARCHIVE}.sha256" "$ALIAS" "${ALIAS}.sha256"; do
+            if printf '%s\n' "$published" | grep -qxF "$file"; then
+              echo "already published, left alone: $file"
+            else
+              gh release upload "$TAG" "$file"
+              echo "uploaded: $file"
+            fi
+          done
 
   # Regenerate the Homebrew formula from the archives just uploaded.
   #

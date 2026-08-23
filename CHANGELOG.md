@@ -22,6 +22,20 @@ listed under a **Changed** or **Removed** heading.
 
 ### Fixed
 
+- **A release's archives are never replaced once published.** The upload
+  clobbered, so re-running the artifact build for an existing tag rebuilt and
+  overwrote them — and Rust builds are not bit-for-bit reproducible, so the
+  replacements had different checksums. Every checksum anyone had recorded
+  became wrong, including the Homebrew formula's and including one somebody
+  had written down to verify a download with.
+
+  Found by re-running the workflow: the formula job reported "tap updated"
+  where nothing should have changed, and the diff was four checksums.
+
+  A re-run now fills in what is missing and leaves what is there alone, which
+  is the case the workflow was built for. Replacing a genuinely corrupt asset
+  means deleting it first, and that friction is deliberate.
+
 - **The Intel-Mac binary is cross-compiled from Apple silicon** rather than
   built on a `macos-13` runner. Xcode's toolchain and SDK are universal, so an
   arm64 Mac produces an x86-64 binary with nothing but `rustup target add` —
