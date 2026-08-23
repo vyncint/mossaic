@@ -62,7 +62,15 @@ of GitHub's five shades on any day, the weekend included.
 - **`plan::Spec` carries an optional `art` field**, the picture stored inline.
   A name would be a pointer to something that can change underneath a plan, and
   every other field here is resolved for exactly that reason. Plans written
-  before this load unchanged.
+  before this load unchanged, and a text plan is written byte-for-byte as it
+  was — the field is skipped when absent.
+
+  **One direction does not work, and cannot be made to.** A plan saved from a
+  *picture* and then read by 0.5.0 or earlier draws the picture's **name** as
+  text, because that version has no idea the `art` field exists and serde
+  ignores what it does not know. Nothing added here can change what an already
+  released binary does with a file. If you keep a canvas plan, keep a mossaic
+  that understands it.
 
 
 ## [0.5.0] - 2026-08-21
