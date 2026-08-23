@@ -9,6 +9,19 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Windows binary is built.** The 0.6.2 release shipped Linux and macOS
+  archives and no `.zip`: the build step had no `shell: bash`, and Windows
+  runners default to PowerShell, where `"$TARGET"` expands to the empty string
+  and `cargo build --target` is handed nothing. Every step is `bash` now.
+- **Building the artifacts is re-runnable**, in `binaries.yml` rather than
+  inside `release.yml`. Publishing to crates.io happens once and cannot be
+  repeated; building an archive can fail for reasons that have nothing to do
+  with the release, and when it does the fix must not be "cut another
+  version". It fires on a published release, and by hand for any tag whose
+  artifacts need rebuilding.
+
 ## [0.6.2] - 2026-08-23
 
 ### Added

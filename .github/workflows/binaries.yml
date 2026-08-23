@@ -1,0 +1,165 @@
+name: binaries
+
+# Static, prebuilt binaries for every release, so that *using* mossaic does not
+# require a Rust toolchain.
+#
+# Separate from release.yml on purpose. Publishing to crates.io happens once
+# and cannot be repeated; building an artifact can fail for reasons that have
+# nothing to do with the release -- a runner image change, a transient network
+# -- and when it does the fix must not be "cut another version". This workflow
+# is re-runnable against any existing tag.
+#
+# It fires when a release is published, and by hand for a tag whose artifacts
+# need rebuilding.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the release tag to build binaries for, e.g. v0.6.2
+        required: true
+
+permissions:
+  contents: read
+
+# Keyed on the tag, so two dispatches for the same release cannot race each
+# other uploading the same asset names. Never cancelled in flight: a run
+# interrupted between building and uploading leaves the release short an
+# archive, which is the failure this workflow exists to make recoverable.
+concurrency:
+  group: binaries-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.event.release.tag_name }}
+
+jobs:
+  # Prebuilt binaries, so that using mossaic does not require a Rust toolchain.
+  #
+  # The reason is not convenience. The whole pitch for contributing a template
+  # is that it needs no Rust -- a template is a text file -- and that pitch is
+  # false if the only way to *see* what you drew is `cargo install`. Somebody
+  # who does not write Rust should not have to install a compiler to draw a
+  # picture.
+  #
+  # Linux targets are **musl**, so the binary is statically linked and runs on
+  # any distribution regardless of its glibc. Building against the runner's
+  # glibc would produce something that refuses to start on anything older than
+  # the runner, which for a download people keep for a year is the wrong
+  # trade.
+  #
+  # Every target builds on its own architecture rather than cross-compiling:
+  # GitHub gives public repositories arm64 runners, and a native build is one
+  # fewer thing that can be subtly wrong.
+  binaries:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload release assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          # The tag, not the branch: an artifact must be built from the commit
+          # the release names, whatever main has moved on to since.
+          ref: ${{ env.TAG }}
+      # `rustup target add` rather than a toolchain action: the runners already
+      # ship stable Rust, so the only thing actually needed here is the
+      # cross-target std -- and one fewer third-party action in a job that
+      # produces downloadable binaries is worth having on its own.
+      - name: Add the target's standard library
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
+
+      # --locked, because the point of a published binary is that it is the
+      # one the lockfile describes and the tests ran against.
+      #
+      # The target reaches the shell as an environment variable rather than
+      # interpolated into the script, which is how every other `run:` in this
+      # repository takes an input.
+      # `shell: bash` on every step, Build included. Windows runners default
+      # to PowerShell, where `"$TARGET"` expands to the empty string and
+      # `cargo build --target` is handed nothing -- which is how the first
+      # attempt at this failed.
+      - name: Build
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          stage="mossaic-${version}-${TARGET}"
+          mkdir "$stage"
+          suffix=""
+          case "$TARGET" in *windows*) suffix=".exe" ;; esac
+          for binary in mossaic mossaic-art mossaic-glyphs; do
+            cp "target/${TARGET}/release/${binary}${suffix}" "$stage/"
+          done
+          cp README.md LICENSE-MIT LICENSE-APACHE CHANGELOG.md "$stage/"
+          # The templates ship inside the binary, but a copy beside it is what
+          # someone starts from when drawing their own.
+          cp -r art/templates "$stage/templates"
+
+          case "$TARGET" in
+            *windows*)
+              7z a "${stage}.zip" "$stage" > /dev/null
+              archive="${stage}.zip"
+              ;;
+            *)
+              tar czf "${stage}.tar.gz" "$stage"
+              archive="${stage}.tar.gz"
+              ;;
+          esac
+
+          # Checksums beside the archive: a download nobody can verify is a
+          # download nobody should run.
+          sums() {
+            if command -v sha256sum > /dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi
+          }
+          sums "$archive" > "${archive}.sha256"
+
+          # A second copy without the version in the name, because
+          # `releases/latest/download/<asset>` resolves by *exact* file name --
+          # so a URL that is stable across releases cannot contain the version.
+          # The versioned name is what cargo-binstall and the Homebrew formula
+          # look for; the unversioned one is what a person copies out of the
+          # README and keeps working next release.
+          alias="${archive/-${version}-/-}"
+          cp "$archive" "$alias"
+          sums "$alias" > "${alias}.sha256"
+
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "ALIAS=$alias" >> "$GITHUB_ENV"
+
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" \
+            "$ARCHIVE" "${ARCHIVE}.sha256" \
+            "$ALIAS" "${ALIAS}.sha256" --clobber
