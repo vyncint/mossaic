@@ -79,10 +79,15 @@ jobs:
           # The tag, not the branch: an artifact must be built from the commit
           # the release names, whatever main has moved on to since.
           ref: ${{ env.TAG }}
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
+      # `rustup target add` rather than a toolchain action: the runners already
+      # ship stable Rust, so the only thing actually needed here is the
+      # cross-target std -- and one fewer third-party action in a job that
+      # produces downloadable binaries is worth having on its own.
+      - name: Add the target's standard library
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
 
       # --locked, because the point of a published binary is that it is the
       # one the lockfile describes and the tests ran against.
