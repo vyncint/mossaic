@@ -108,10 +108,11 @@ pub fn decode_png(bytes: &[u8]) -> Result<Bitmap, String> {
                 seen_header = true;
             }
             b"PLTE" => {
-                palette = body
-                    .chunks_exact(3)
-                    .map(|rgb| [rgb[0], rgb[1], rgb[2]])
-                    .collect();
+                // `as_chunks` rather than `chunks_exact`: the entries are
+                // fixed-size by definition, and saying so gives arrays back
+                // instead of slices that have to be re-indexed.
+                let (entries, _partial) = body.as_chunks::<3>();
+                palette = entries.to_vec();
             }
             b"tRNS" => alphas = body.to_vec(),
             b"IDAT" => idat.extend_from_slice(body),
