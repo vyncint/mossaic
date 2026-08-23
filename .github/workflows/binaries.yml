@@ -208,16 +208,52 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Generate and push
+      # The token is checked before anything uses it, and reported on without
+      # being revealed: a length and a yes/no about its character set. A value
+      # pasted with a trailing newline looks completely normal in the secrets
+      # UI and fails at the first use with a message about URLs, which is not
+      # where anyone looks for it.
+      - name: Check the token is usable
+        id: token
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; the tap keeps its current formula"
+            echo "usable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "token length: ${#TOKEN}"
+          case "$TOKEN" in
+            *[!A-Za-z0-9_]*)
+              echo "::error::HOMEBREW_TAP_TOKEN holds characters outside [A-Za-z0-9_] —           almost always a newline or space picked up when it was pasted. Set it again           with: gh secret set HOMEBREW_TAP_TOKEN --repo vyncint/mossaic"
+              exit 1
+              ;;
+          esac
+          echo "usable=true" >> "$GITHUB_OUTPUT"
+
+      # Checkout does the authentication, rather than the token being spliced
+      # into a remote URL by hand. That is what broke the first attempt: git
+      # refused the URL outright, and the error named the URL rather than the
+      # credential in it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.token.outputs.usable == 'true'
+        with:
+          repository: vyncint/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+          # Kept on purpose: this job's whole business is pushing back, and
+          # the credential is scoped to one repository.
+          persist-credentials: true # zizmor: ignore[artipacked]
+
+      - name: Generate and push
+        if: steps.token.outputs.usable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::notice::HOMEBREW_TAP_TOKEN is not set; the tap keeps its current formula"
-            exit 0
-          fi
           version="${TAG#v}"
           base="https://github.com/vyncint/mossaic/releases/download/${TAG}"
 
@@ -283,12 +319,8 @@ jobs:
           } > tap/Formula/mossaic.rb
 
           cd tap
-          git init -q
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/vyncint/homebrew-tap.git"
-          git fetch -q origin main
-          git reset -q --soft FETCH_HEAD
           git add Formula/mossaic.rb
           if git diff --cached --quiet; then
             echo "the formula already describes ${TAG}"
