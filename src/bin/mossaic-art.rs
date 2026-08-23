@@ -850,29 +850,44 @@ fn track_canvas(
         thousands(owing_commits)
     );
 
+    // What a day is owed turns on `want`, not on whether `need` is zero. Both
+    // a day the picture wants dark and a day the picture does not cover have a
+    // need of zero, and the advice for them is opposite: one must be left
+    // alone or the drawing is damaged, the other is free. Reading the number
+    // instead of the intent told people to stay dark on days that were none of
+    // the plan's business — every day after the picture ends, for one.
+    let describe = |day: &plan::Day| match day.want {
+        plan::Want::Around => "outside the picture — nothing owed".to_string(),
+        plan::Want::Hole => "must stay dark".to_string(),
+        plan::Want::Lit if day.short() > 0 => format!(
+            "{} of {} there, {} to go",
+            thousands(day.have),
+            thousands(day.need),
+            thousands(day.short())
+        ),
+        plan::Want::Lit if day.over() > 0 => format!(
+            "{} is past {}, which is a hole",
+            thousands(day.have),
+            thousands(day.ceiling.unwrap_or(0))
+        ),
+        plan::Want::Lit => "already the right shade".to_string(),
+    };
     if plan.holds(today) {
-        match plan.on(today) {
-            Some(day) if day.short() > 0 => println!(
-                "  today        {} of {} there, {} to go",
-                thousands(day.have),
-                thousands(day.need),
-                thousands(day.short())
-            ),
-            Some(day) if day.need == 0 => println!("  today        must stay dark"),
-            Some(_) => println!("  today        already the right shade"),
-            None => println!("  today        the picture does not reach"),
-        }
-        if let Some(tomorrow) = today.succ_opt().and_then(|next| plan.on(next)) {
+        println!(
+            "  today        {}",
+            match plan.on(today) {
+                Some(day) => describe(day),
+                // No entry at all: outside the picture and with nothing on it,
+                // which `from_levels` does not bother recording.
+                None => "outside the picture — nothing owed".to_string(),
+            }
+        );
+        if let Some(next) = today.succ_opt().filter(|next| plan.holds(*next)) {
             println!(
                 "  tomorrow     {}",
-                if tomorrow.need == 0 {
-                    "must stay dark".to_string()
-                } else {
-                    format!(
-                        "{} of {} there",
-                        thousands(tomorrow.have),
-                        thousands(tomorrow.need)
-                    )
+                match plan.on(next) {
+                    Some(day) => describe(day),
+                    None => "outside the picture — nothing owed".to_string(),
                 }
             );
         }
