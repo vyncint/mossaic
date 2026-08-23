@@ -691,18 +691,18 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
     // Whether a reader will see a picture or a smudge. The pair measured is the
     // darkest and brightest the drawing actually uses: if those two are faint,
     // everything between them is worse.
-    if let Some((low, high)) = canvas.range() {
-        let shades = art::Shades {
-            ink: high,
-            field: low,
-        };
-        let (legibility, delta) = shades.worst();
-        println!("\n  shades {low} to {high}  ·  ΔE {delta:.0} at worst, {legibility}",);
+    if let Some((low, high, legibility, delta)) = canvas.closest_pair() {
+        let used: Vec<String> = canvas.palette().iter().map(u8::to_string).collect();
+        println!(
+            "\n  shades {}  ·  closest pair {low} and {high}  ·  ΔE {delta:.0}, {legibility}",
+            used.join(" ")
+        );
         if legibility != primer::Legibility::Clear {
             println!(
-                "  -> neighbouring shades are all but the same colour on some themes. \
-                 A picture\n     drawn in levels {low} and {high} will read as one shade for \
-                 some of its audience."
+                "  -> levels {low} and {high} are all but the same colour on some themes, so \
+                 whatever\n     they separate will read as one shade for part of your \
+                 audience. Leaving two\n     levels between the shades you need told apart is \
+                 what fixes it."
             );
         }
     }
@@ -1877,6 +1877,31 @@ fn parse_args() -> Option<Options> {
             "{} both draw the picture — pick one",
             given.join(" and ")
         ));
+    }
+
+    // A picture uses the whole week and carries its own shades, so neither of
+    // these means anything to one. Refused rather than ignored, and only when
+    // actually typed: `--top` has a default, and failing on a default nobody
+    // chose would make every picture command need a flag to unset it.
+    if template.is_some() || matrix.is_some() || picture.is_some() {
+        for (flag, why) in [
+            (
+                "top",
+                "chooses which rows the letters sit on; a picture uses the whole week",
+            ),
+            (
+                "background",
+                "shades the field behind the letters; a picture names its own shade for every day",
+            ),
+            (
+                "bg",
+                "shades the field behind the letters; a picture names its own shade for every day",
+            ),
+        ] {
+            if args.was_typed(flag) {
+                fail(&format!("--{flag} {why}"));
+            }
+        }
     }
 
     if let Some(name) = &template {

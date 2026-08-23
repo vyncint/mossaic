@@ -220,18 +220,15 @@ impl Editor {
             })
     }
 
-    /// How the darkest and brightest shades in the drawing will read, across
-    /// every palette GitHub ships.
+    /// The two shades in the drawing that look most alike, and how far apart
+    /// they are in the worst palette a reader might have.
+    ///
+    /// The closest pair rather than the widest, because the widest always
+    /// flatters: a drawing spanning levels 0 to 4 reads as ΔE 70 and can still
+    /// hold two shades nobody can separate. See [`art::Canvas::closest_pair`].
     #[must_use]
-    pub fn legibility(&self) -> Option<(Legibility, f32)> {
-        let (low, high) = self.canvas.range()?;
-        Some(
-            art::Shades {
-                ink: high,
-                field: low,
-            }
-            .worst(),
-        )
+    pub fn legibility(&self) -> Option<(u8, u8, Legibility, f32)> {
+        self.canvas.closest_pair()
     }
 
     /// Handle a keystroke.
@@ -537,8 +534,8 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
         editor.commits
     )));
     match editor.legibility() {
-        Some((legibility, delta)) => stats.push(Line::from(format!(
-            "  shades read as {legibility} — ΔE {delta:.0} in the worst palette GitHub ships"
+        Some((low, high, legibility, delta)) => stats.push(Line::from(format!(
+            "  closest shades {low} and {high} read as {legibility} — ΔE {delta:.0} at worst"
         ))),
         None => stats.push(Line::from(
             "  one shade only — nothing to tell apart yet".to_string(),

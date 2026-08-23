@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.5.0
+        uses: vyncint/mossaic/action@v0.6.0
         with:
           text: VYNCINT
           year: "2027"
@@ -58,19 +58,48 @@ Two things GitHub does that will bite you otherwise:
 
 ## Inputs
 
+Exactly one of `text`, `template`, `matrix` or `image` says **what** is being
+drawn. The rest are the same either way.
+
 | input | default | what it is |
 | --- | --- | --- |
-| `text` | *required* | what you are drawing, e.g. `VYNCINT` |
+| `text` | — | text through the 5×5 font, e.g. `VYNCINT` |
+| `template` | — | a pixel-art template by name, e.g. `dragon` |
+| `matrix` | — | a `.art` file in this repository — needs `actions/checkout` |
+| `image` | — | a PNG in this repository — needs `actions/checkout` |
+| `invert` | `false` | with `image`, bright pixels become busy days |
+| `dither` | `false` | with `image`, Floyd–Steinberg instead of four hard bands |
 | `user` | repository owner | whose contributions to compare against |
 | `year` | this year | which calendar |
 | `start-week` | centred | left edge, in columns — **keep it fixed** |
-| `top` | `1` | first row used, 0 = Sunday |
-| `background` | `0` | draw the background at this level instead of leaving it empty — **keep it fixed** |
+| `top` | `1` | first row used, 0 = Sunday. **Text only** — a picture uses the whole week |
+| `background` | `0` | draw the background at this level instead of leaving it empty — **keep it fixed**. **Text only** — a picture names its own shade for every day |
 | `timezone` | `UTC` | what "today" means |
 | `token` | `github.token` | see *Private contributions* below |
 | `fail-on` | `never` | `never`, `behind` (a *letter* day is short), or `holed` |
 | `summary` | `true` | write the report to the job summary |
 | `version` | `latest` | which mossaic release runs the tracking — pin a number to change only when you say so |
+
+### Tracking a picture
+
+```yaml
+      - id: art
+        uses: vyncint/mossaic/action@v0.6.0
+        with:
+          template: dragon
+          year: "2027"
+          timezone: Asia/Ho_Chi_Minh
+```
+
+Every output below works unchanged: a picture is the same plan underneath, so
+`verdict`, `headline`, `bright`, `owing-commits` and the rest mean what they
+always meant. `letters` counts the days the picture shades rather than the days
+inside letters, and `field-*` is zero, because a picture has no separate
+background — every day carries its own shade.
+
+`matrix` and `image` are **paths in your repository**, so the workflow needs an
+`actions/checkout` step before this one. Without it the action says so rather
+than reporting a missing file.
 
 **The plan is these inputs.** Tracking with a different `start-week` — or a
 different `background` — compares against a different plan and reports nonsense
@@ -187,7 +216,7 @@ on 290 days of the year is a job nobody reads.
 
 ## Notes
 
-- **Two knobs, two jobs.** The ref you pin (`@v0.5.0`, `@main`) chooses the
+- **Two knobs, two jobs.** The ref you pin (`@v0.6.0`, `@main`) chooses the
   *action's steps* — the glue that runs the tracker and shapes the outputs.
   The `version` input chooses the *tracker itself*, straight from crates.io.
   The default, `latest`, is fine for a daily report; pin a number when you

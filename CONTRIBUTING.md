@@ -315,12 +315,25 @@ The suite reads the directory rather than the embedded copies, deliberately:
 `build.rs` is as much under test as the files are, and a template that never
 got embedded is invisible to a test that only looks at what was embedded.
 
-**On what makes a good one.** Seven by fifty-three is a very wide, very short
-canvas — about 7.5:1 — so shapes that stretch along it read far better than
-ones that want to be square. Leave two levels between shades you need a reader
-to tell apart: GitHub's five greens are not evenly spaced, and neighbouring
-ones are all but identical on some themes. `--list-templates` and the editor
-both report the contrast, measured across every palette GitHub ships.
+**Use `0`, `2` and `4`, and nothing else.** This is the one rule worth learning
+before you draw anything. GitHub's five greens are not evenly spaced — every
+*adjacent* pair is 9 to 20 ΔE apart in the worst palette it ships, which is
+close enough to read as a single colour. `{0, 2, 4}` is the **only** set of
+three with no faint pair in it, and there is no clear set of four, so a picture
+using all five cannot avoid putting two near-identical greens beside each
+other. It will look thorough in your terminal and read as a smudge on the
+graph.
+
+The reference template learned this the hard way: `dragon.art` was drawn in all
+five shades first, and the rendered chart is what showed it up.
+`zero_two_four_is_the_largest_palette_with_no_faint_pair` proves the rule by
+enumeration, and `the_reference_template_reads_clearly` holds the reference to
+it. `--list-templates`, `--draw` and `--template` all report the **closest**
+pair a picture uses rather than the widest, because the widest always flatters.
+
+**On shape.** Seven by fifty-three is a very wide, very short canvas — about
+7.5:1 — so forms that stretch along it read far better than ones that want to
+be square. A serpent works; a portrait does not.
 
 ## 12. Code style
 

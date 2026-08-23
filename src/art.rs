@@ -823,6 +823,50 @@ impl Canvas {
         (low != high).then_some((low, high))
     }
 
+    /// Every level the picture uses, darkest first.
+    #[must_use]
+    pub fn palette(&self) -> Vec<u8> {
+        let histogram = self.histogram();
+        (0..=4u8)
+            .filter(|level| histogram[usize::from(*level)] > 0)
+            .collect()
+    }
+
+    /// The two shades in the picture that look most alike, and how far apart
+    /// they are in the worst palette a reader might have.
+    ///
+    /// **Not [`Canvas::range`].** The darkest and brightest shades in a drawing
+    /// are the two furthest apart, so measuring those answers "can anything
+    /// here be told from anything else" — which is the flattering question. A
+    /// picture drawn in levels 0, 3 and 4 spans ΔE 70 and still has two shades
+    /// a reader cannot separate, because 3 and 4 are ΔE 9.1 apart and they are
+    /// the ones sitting next to each other.
+    ///
+    /// This asks the useful question instead: of every pair of shades the
+    /// picture actually uses, which two look most alike? That is the pair that
+    /// decides whether the drawing reads.
+    ///
+    /// `None` for a canvas of one shade, which has no pair to compare.
+    #[must_use]
+    pub fn closest_pair(&self) -> Option<(u8, u8, Legibility, f32)> {
+        let used = self.palette();
+        let mut worst: Option<(u8, u8, f32)> = None;
+        for (index, low) in used.iter().enumerate() {
+            for high in used.iter().skip(index + 1) {
+                let delta = Shades {
+                    ink: *high,
+                    field: *low,
+                }
+                .worst()
+                .1;
+                if worst.is_none_or(|(_, _, seen)| delta < seen) {
+                    worst = Some((*low, *high, delta));
+                }
+            }
+        }
+        worst.map(|(low, high, delta)| (low, high, Legibility::of(delta), delta))
+    }
+
     /// The busiest day this canvas needs the year to have before its shades can
     /// be told apart.
     ///

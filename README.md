@@ -261,6 +261,14 @@ The font draws five rows of two shades on Mon–Fri. A **canvas** is the general
 case: seven rows, up to 53 columns, any of GitHub's five shades on any day —
 the weekend included, and the whole year at once.
 
+![The dragon template rendered as a GitHub contribution chart for 2027: a
+serpentine body sweeping up from the lower left to a head at the right, drawn
+in two greens on an empty field](art/dragon.png)
+
+That is `--template dragon` on 2027 — 146 days, 442 commits — drawn by the same
+rasteriser that draws the chart, so it is what the graph will actually look
+like rather than an impression of it.
+
 ```sh
 mossaic-art --list-templates                    # what there is, with thumbnails
 mossaic-art --template dragon --year 2027       # draw one, and see what it costs
@@ -291,6 +299,16 @@ a picture. A short row is padded with dark days, so an editor that strips
 trailing whitespace cannot corrupt one. Dropping a file into `art/templates/`
 is all it takes to add a template — `build.rs` finds it, and there is no list
 to edit. See [CONTRIBUTING §11](CONTRIBUTING.md#11-adding-a-pixel-art-template).
+
+**Use three shades, and use `0`, `2` and `4`.** GitHub's five greens are not
+evenly spaced: every *adjacent* pair is 9–20 ΔE apart in the worst palette it
+ships, which is close enough to read as one colour. `{0, 2, 4}` is the only
+three-shade set with no faint pair in it, and there is no clear set of four —
+so a picture using all five cannot avoid putting two near-identical greens
+side by side. mossaic reports the **closest** pair a picture uses rather than
+the widest, because the widest always flatters. The
+[table in docs/ART.md](docs/ART.md#three-shades-and-which-three) has the
+numbers.
 
 ### Drawing by hand
 

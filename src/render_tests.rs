@@ -3904,21 +3904,71 @@ fn every_template_file_is_a_valid_canvas() {
     );
 }
 
-/// The reference template exercises the whole format, because it is what a
-/// contributor copies. One that used two shades would teach two shades.
+/// The reference template is what a contributor copies, so what it teaches
+/// matters more than how many shades it manages to use.
+///
+/// It used to be asserted that it used **all five**, and that was the wrong
+/// property: five shades cannot be drawn without adjacent pairs, and adjacent
+/// pairs are ΔE 9-17 apart in the worst palette GitHub ships. The template
+/// looked thorough and read as a smudge. `{0, 2, 4}` is the largest palette
+/// with no faint pair in it — every other three-shade set has one — so that is
+/// what the reference draws and what the rules teach.
 #[test]
-fn the_reference_template_uses_every_shade() {
+fn the_reference_template_reads_clearly() {
     let dragon = crate::templates::find("dragon").expect("the reference template");
-    let histogram = dragon.canvas.histogram();
-    for (level, count) in histogram.iter().enumerate() {
-        assert!(
-            *count > 0,
-            "dragon uses no level-{level} days; the reference template should \
-             show all five: {histogram:?}"
-        );
-    }
+    let (low, high, legibility, delta) = dragon.canvas.closest_pair().expect("more than one shade");
+    assert_eq!(
+        legibility,
+        crate::primer::Legibility::Clear,
+        "the reference template's closest pair is {low} and {high} at ΔE {delta:.0}, \
+         which is not something a reader can rely on seeing"
+    );
     assert_eq!(dragon.canvas.width(), crate::art::CANVAS_COLS);
     assert_eq!(dragon.author(), Some("@vyncint"));
+}
+
+/// The fact the rule above rests on, checked rather than asserted in prose:
+/// three shades is the most that can be drawn with nothing faint between any
+/// two of them, and `{0, 2, 4}` is the only such set.
+#[test]
+fn zero_two_four_is_the_largest_palette_with_no_faint_pair() {
+    let clear = |set: &[u8]| {
+        set.iter().enumerate().all(|(index, low)| {
+            set.iter().skip(index + 1).all(|high| {
+                crate::art::Shades {
+                    ink: *high,
+                    field: *low,
+                }
+                .worst()
+                .0 == crate::primer::Legibility::Clear
+            })
+        })
+    };
+    assert!(clear(&[0, 2, 4]));
+
+    // Every other three-shade set has a pair a reader may not separate.
+    let mut clear_triples = Vec::new();
+    for a in 0..=4u8 {
+        for b in (a + 1)..=4 {
+            for c in (b + 1)..=4 {
+                if clear(&[a, b, c]) {
+                    clear_triples.push([a, b, c]);
+                }
+            }
+        }
+    }
+    assert_eq!(clear_triples, vec![[0, 2, 4]], "{clear_triples:?}");
+
+    // And no set of four is clear, which is why the rule is three.
+    for a in 0..=4u8 {
+        for b in (a + 1)..=4 {
+            for c in (b + 1)..=4 {
+                for d in (c + 1)..=4 {
+                    assert!(!clear(&[a, b, c, d]), "{a}{b}{c}{d} should not be clear");
+                }
+            }
+        }
+    }
 }
 
 /// A canvas survives being written and read again, which is what makes a saved
