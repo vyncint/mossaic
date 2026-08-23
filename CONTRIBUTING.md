@@ -255,6 +255,10 @@ new glyph that is not documented fails the suite.
 
 ## 11. Adding a pixel-art template
 
+> [#57](https://github.com/vyncint/mossaic/issues/57) is the same thing written
+> as an invitation, with a worked example and a list of ideas to claim. This
+> section is the reference; that issue is the walkthrough.
+
 A **template** is a whole-year picture: seven rows by up to 53 columns, in any
 of GitHub's five shades. Contributing one is dropping a file into
 `art/templates/` — there is no list to edit, because `build.rs` finds every
