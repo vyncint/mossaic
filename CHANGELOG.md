@@ -9,6 +9,45 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-23
+
+### Changed
+
+- **Refreshed the lockfile.** `cc` 1.4.3 → 1.4.4, `darling` 0.24.0 → 0.24.1
+  (with `_core` and `_macro`), `either` 1.17.0 → 1.18.0, `log` 0.4.33 → 0.4.34,
+  `uuid` 1.24.1 → 1.25.0. Four of those — `cc`, `darling`, `either`, `log` —
+  are genuinely compiled; `uuid` is in the resolution but not the build.
+
+  This matters only to the binaries. `cargo install mossaic --locked` builds
+  what this file names, so refreshing it is what puts those versions in an
+  installed `mossaic`. A library consumer resolves its own dependencies and is
+  unaffected either way.
+
+  `cargo deny check` passes on the new lockfile: advisories, bans, licences and
+  sources all clean.
+
+- **`generic-array` stays at 0.14.7, and cannot move.** `cargo update` reports
+  0.14.9 as available, but `crypto-common 0.1.7` requires it *exactly*:
+
+  ```
+  generic-array = "=0.14.7"
+      required by crypto-common 0.1.7
+      ... digest 0.10.7 -> sha2 0.10.9 -> termwiz 0.23.3
+      ... -> ratatui-termwiz 0.1.2 -> ratatui 0.30.2 -> mossaic
+  ```
+
+  0.1.7 is the newest of the 0.1 line, and the relaxed requirement only arrives
+  in `crypto-common` 0.2, which needs `digest` 0.11, which needs `sha2` 0.11,
+  which needs a `termwiz` that depends on it. None of that is this crate's to
+  move.
+
+  It is also never compiled here. `ratatui-termwiz` is an optional backend and
+  mossaic uses crossterm, so nothing in that subtree — `generic-array`, `sha2`,
+  `digest`, `termwiz` — reaches a build: `cargo tree` does not list it, and a
+  full build produces zero artefacts from it against ratatui's ninety. The
+  entry is in the lockfile because a lockfile records the whole resolution,
+  optional branches included.
+
 ## [0.6.1] - 2026-08-23
 
 ### Fixed
@@ -735,7 +774,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/vyncint/mossaic/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/vyncint/mossaic/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/vyncint/mossaic/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/vyncint/mossaic/compare/v0.4.0...v0.5.0
