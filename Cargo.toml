@@ -1,6 +1,6 @@
 [package]
 name = "mossaic"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2021"
 # Minimum supported Rust version. Verified by the `msrv` CI job, which reads this
 # field; bumping it is a minor (not patch) change.
@@ -8,8 +8,11 @@ edition = "2021"
 # 1.88 is dictated by ratatui 0.30. Everything else in the tree needs less: the
 # graphics and colour code is plain std.
 rust-version = "1.88"
-description = "Plan and track GitHub contribution art — what today owes to draw your name by December, and whether the year can still be drawn at all"
-keywords = ["github", "contributions", "contribution-art", "sixel", "kitty"]
+description = "Draw pixel art in your GitHub contribution graph — a terminal chart, an editor, and a planner that says what today owes"
+# `tui` earns its place over `contributions`, which `contribution-art` already
+# covers: the chart, the designer and the glyph viewer are all terminal UIs, and
+# that is how someone looking for one searches.
+keywords = ["github", "contribution-art", "tui", "sixel", "kitty"]
 categories = ["command-line-utilities", "visualization"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/vyncint/mossaic"

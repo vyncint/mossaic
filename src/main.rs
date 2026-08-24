@@ -3,6 +3,7 @@
 //! library beside it.
 
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 
 use chrono::{Datelike, Local, NaiveDate};
@@ -104,8 +105,24 @@ fn main() {
 
     // try_init rather than init/run so a non-tty (a pipe, CI) gets a readable
     // message instead of a panic. It still installs the terminal-restoring hook.
-    let mut terminal = ratatui::try_init()
-        .unwrap_or_else(|error| fail(&format!("needs an interactive terminal ({error})")));
+    let mut terminal = ratatui::try_init().unwrap_or_else(|error| {
+        // With a terminal, a `--file` that cannot be read is shown *in* the
+        // chart, with `r` to retry — better than exiting, because the fix is
+        // usually to write the file in another pane. Without one there is no
+        // chart to show it in, and reporting only the missing terminal names
+        // the wrong problem: a typo'd path in a script used to come back as
+        // "needs an interactive terminal", which is true and useless.
+        if let Source::File(path) = &source {
+            if !Path::new(path).is_file() {
+                fail(&format!(
+                    "no calendar file at {path}\n\n  \
+                     mossaic-art TEXT --snapshot {path}   write one\n  \
+                     mossaic --demo   a sample year instead"
+                ));
+            }
+        }
+        fail(&format!("needs an interactive terminal ({error})"))
+    });
 
     // Ask now: raw mode is on, so the replies come back unbuffered and unechoed,
     // and anything a terminal prints instead of answering lands on the alternate

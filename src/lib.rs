@@ -173,6 +173,22 @@ pub fn thousands(n: u32) -> String {
     out
 }
 
+/// The singular or the plural of a word, chosen by a count.
+///
+/// Here because the alternative is what mossaic used to print: `1 template(s)`,
+/// `6 cell(s)`, `59 day(s)` — on the first lines a new user reads. Taking both
+/// forms rather than appending an `s` keeps the irregular cases honest, and
+/// leaves the number's own formatting (widths, thousands separators) to the
+/// call site, which is where it belongs.
+#[must_use]
+pub fn plural<'a, N: PartialEq + From<u8>>(n: N, one: &'a str, many: &'a str) -> &'a str {
+    if n == N::from(1) {
+        one
+    } else {
+        many
+    }
+}
+
 pub mod app;
 pub mod art;
 pub mod calendar;

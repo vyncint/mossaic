@@ -53,26 +53,37 @@ fn list_templates_shows_a_picture_and_not_just_a_name() -> termlens::Result<()> 
     // satisfied by a screen the rest of it has not reached yet. Every
     // assertion below is then a race, and it loses on a loaded runner.
     terminal.wait_exit()?;
-    let screen = terminal.screen();
+    // History *and* screen. The catalogue outgrew one screenful when it stopped
+    // being a catalogue of one, so the first entry has scrolled off by the time
+    // the process exits — and "did this reach the terminal" is the question the
+    // test is actually asking, not "is it still visible".
+    let text = terminal.screen().full_text();
 
-    assert!(screen.contains("dragon"), "the name:\n{screen}");
-    assert!(screen.contains("Dragon"), "the title:\n{screen}");
-    assert!(screen.contains("@vyncint"), "the author:\n{screen}");
-    assert!(screen.contains("53 columns"), "the size:\n{screen}");
-    assert!(screen.contains("built in"), "where it came from:\n{screen}");
+    assert!(text.contains("dragon"), "the name:\n{text}");
+    assert!(text.contains("Dragon"), "the title:\n{text}");
+    assert!(text.contains("@vyncint"), "the author:\n{text}");
+    assert!(text.contains("53 columns"), "the size:\n{text}");
+    assert!(text.contains("built in"), "where it came from:\n{text}");
+
+    // Every template in the catalogue, not just the first: a listing that
+    // silently stopped after one would satisfy the assertions above.
+    for name in ["dragon", "invader", "pulse", "wave"] {
+        assert!(
+            text.contains(name),
+            "{name} is missing from the catalogue:\n{text}"
+        );
+    }
 
     // The thumbnail is the reason to run this rather than read a directory
     // listing, and a name with no picture beside it would satisfy every
     // assertion above.
-    let blocks = (0..screen.rows())
-        .filter(|row| {
-            let text = screen.row_text(*row);
-            text.contains('\u{2588}') || text.contains('\u{2593}')
-        })
+    let blocks = text
+        .lines()
+        .filter(|line| line.contains('\u{2588}') || line.contains('\u{2593}'))
         .count();
     assert!(
         blocks >= 5,
-        "expected a seven-row thumbnail, found {blocks} row(s) of blocks:\n{screen}"
+        "expected a seven-row thumbnail, found {blocks} rows of blocks:\n{text}"
     );
     Ok(())
 }
@@ -181,7 +192,7 @@ fn painting_shows_up_on_screen_and_in_the_numbers() -> termlens::Result<()> {
         terminal.send(Key::Char('4'))?;
         terminal.send(Key::Char('l'))?;
     }
-    let screen = terminal.wait_frame(|screen| screen.contains("level 4     4 day(s)"))?;
+    let screen = terminal.wait_frame(|screen| screen.contains("level 4     4 days"))?;
 
     // Four days at level 4 cost four commits each at the default --commits.
     assert!(
@@ -203,10 +214,10 @@ fn undo_takes_the_drawing_back_and_says_when_there_is_no_more() -> termlens::Res
     terminal.wait_until(ready)?;
 
     terminal.send(Key::Char('3'))?;
-    terminal.wait_until(|screen| screen.contains("level 3     1 day(s)"))?;
+    terminal.wait_until(|screen| screen.contains("level 3     1 day "))?;
     terminal.send(Key::Char('u'))?;
     let screen = terminal.wait_frame(|screen| screen.contains("undone"))?;
-    assert!(screen.contains("level 3     0 day(s)"), "{screen}");
+    assert!(screen.contains("level 3     0 days"), "{screen}");
 
     terminal.send(Key::Char('u'))?;
     terminal.wait_until(|screen| screen.contains("nothing to undo"))?;
@@ -279,7 +290,7 @@ fn an_unsaved_drawing_is_not_lost_quietly() -> termlens::Result<()> {
     let mut terminal = spawn(&["--draw", "--year", "2027", "--plan", "/dev/null"])?;
     terminal.wait_until(ready)?;
     terminal.send(Key::Char('4'))?;
-    terminal.wait_until(|screen| screen.contains("level 4     1 day(s)"))?;
+    terminal.wait_until(|screen| screen.contains("level 4     1 day "))?;
     terminal.send(Key::Char('q'))?;
     terminal.wait_exit()?;
 

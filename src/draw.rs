@@ -20,6 +20,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::art::{self, Canvas, Grid, CANVAS_ROWS};
+use crate::plural;
 use crate::primer::{Appearance, Legibility, Palette, Season};
 use crate::thousands;
 
@@ -181,7 +182,8 @@ impl Editor {
             Some(previous) => {
                 self.canvas = previous;
                 self.dirty = true;
-                self.status = format!("undone — {} step(s) left", self.undo.len());
+                let left = self.undo.len();
+                self.status = format!("undone — {left} {} left", plural(left, "step", "steps"));
                 true
             }
             None => {
@@ -515,7 +517,10 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
         let rgb = palette.levels[usize::from(level)];
         let bar = "█".repeat(count * 30 / (editor.canvas.width() * CANVAS_ROWS).max(1));
         stats.push(Line::from(vec![
-            Span::raw(format!("  level {level}  {count:>4} day(s)  ")),
+            Span::raw(format!(
+                "  level {level}  {count:>4} {:<6}  ",
+                plural(count, "day", "days")
+            )),
             Span::styled(bar, Style::default().fg(Color::Rgb(rgb.0, rgb.1, rgb.2))),
             Span::raw(if level == 0 {
                 "  (must stay dark)".to_string()

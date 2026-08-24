@@ -16,121 +16,101 @@ use chrono::{Datelike, Local, NaiveDate};
 use mossaic::art::{self, Grid};
 use mossaic::cli::{Args, YEARS};
 use mossaic::primer::{Appearance, Palette, Season};
-use mossaic::{github, graphics, plan, png, primer, templates, thousands, Colour};
+use mossaic::{github, graphics, plan, plural, png, primer, templates, thousands, Colour};
 
-const HELP: &str = "\
-mossaic-art — write text into a GitHub contribution graph by dating commits
+const HELP: &str = r#"mossaic-art — draw on a GitHub contribution graph by dating commits
 
 usage:
-  mossaic-art TEXT [options]
-  mossaic-art --template NAME [options]
-  mossaic-art --matrix FILE [options]
+  mossaic-art TEXT [options]        write words through a 5x5 font
+  mossaic-art --template NAME       draw a picture from the catalogue
+  mossaic-art --matrix FILE         draw a picture of your own
+  mossaic-art --draw                draw one by hand, in an editor
 
-  TEXT                what to draw, e.g. VYNCINT. Letters, digits, punctuation
-                      and shapes: `I :heart: RUST`. A shape is written between
-                      colons, or pasted as the symbol or emoji it depicts.
-                      --font lists everything
+examples:
+  mossaic-art --draw                                 a blank year, by hand
+  mossaic-art --list-templates                       the pictures on offer
+  mossaic-art --template dragon --year 2027          a picture across next year
+  mossaic-art VYNCINT --year 2027                    what it looks like, and costs
+  mossaic-art VYNCINT --year 2027 --save             remember it
+  mossaic-art --track                                am I on pace?
+  mossaic-art --backfill --repo ../art --write       commit what the plan is short
 
-  Text is drawn through a 5x5 font on Mon-Fri. The three flags below draw a
-  *picture* instead: seven rows by up to 53 columns, any of GitHub's five
-  shades per day, using the whole week and the whole year.
-
-  --template NAME     draw a template from the catalogue. --list-templates
-                      shows what there is
+WHAT TO DRAW
+  TEXT                letters, digits, punctuation and shapes: `I :heart: RUST`.
+                      Drawn Mon-Fri through a 5x5 font; --font lists every glyph
+  --template NAME     a picture from the catalogue
   --list-templates    list the templates, with a thumbnail of each, and exit
-  --matrix FILE       (--file) draw a .art file: 7 rows of the shades 0-4, or
-                      of the blocks ░ ▒ ▓ █ with a space for 0.
-                      Lines starting with # are comments, and `# name:`,
-                      `# author:` and `# description:` are read as the
-                      picture's own. With --commits N a level-4 day costs N
-                      and every darker level is priced against it
-  --image FILE        turn a PNG into a picture: shrunk to fit the calendar,
-                      keeping its aspect ratio, and quantised to five shades.
+  --matrix FILE       (--file) a .art file: 7 rows of the shades 0-4, or of the
+                      blocks ░ ▒ ▓ █ with a space for 0. `#` starts a comment
+  --image FILE        a PNG, shrunk to fit the year and quantised to five shades.
                       A dark pixel is a busy day, the way ink reads on paper
-  --invert            with --image, map bright pixels to busy days instead
-  --dither            with --image, spread the rounding error into
-                      neighbouring days (Floyd-Steinberg), so a gradient
-                      reads as one rather than as four bands
-  --draw              open the editor and draw on the year by hand: arrows or
-                      hjkl to move, 0-4 to paint a shade, space to cycle one,
-                      the mouse to paint directly, u to undo and s to save.
-                      With --template or --matrix it opens that picture; on
-                      its own it starts a blank year
-  --output FILE       (-o) where --draw saves, as a .art file
-                      (default: the picture's name, or drawing.art)
+  --invert            with --image, bright pixels become the busy days instead
+  --dither            with --image, spread the rounding error into neighbouring
+                      days (Floyd-Steinberg), so a gradient reads as one
+  --draw              open the editor: arrows or hjkl to move, 0-4 to paint a
+                      shade, space to cycle one, the mouse to paint, u to undo,
+                      s to save. With --template or --matrix it opens that picture
+  --output FILE       (-o) where --draw saves (default: the picture's name)
+
+  A picture is seven rows by up to 53 columns, any of GitHub's five shades per
+  day, using the whole week and the whole year. Text uses Mon-Fri and one shade.
+
+WHERE IT GOES
   --year YEAR         which year's calendar (default: this one)
-  --commits N         commits per lit day (default 4); keep it uniform for one
-                      flat shade
-  --background LEVEL  (--bg) draw the background as a shade instead of leaving
-                      it empty, 0-3 (default 0). The letters stay at level 4, so
-                      --background 1 draws them on a light green field rather
-                      than on nothing — which is how you draw art without
-                      going dark for most of the year. Levels two or more
-                      apart are legible in every palette GitHub ships; one
-                      apart is not
-  --top ROW           first calendar row used, 0 = Sunday (default 1, so Mon-Fri)
-  --start-week N      left edge in weeks (default: centred)
-  --merge PATH        a saved `gh api graphql` calendar to draw on top of, so the
-                      preview accounts for contributions already there
-  --snapshot PATH     write a calendar file for `mossaic --file PATH`
-  --repo DIR          where --write puts the commits
-  --write             actually create the commits in --repo (local only)
-  --backfill          commit what each day already past is still short of the
-                      plan, measured against the real calendar — the flag for
-                      catching up. Unlike a plain --write it never adds to a day
-                      that is already bright, which over an active year is what
-                      stops the art raising the very peak it is measured
-                      against, and it leaves days still to come alone. --today
-                      is what \"past\" means. Needs --repo, and --write to commit
-  --login NAME        name shown in the snapshot (default: preview)
+  --start-week N      left edge, in weeks (default: centred)
+  --commits N         commits per lit day (default 4)
+  --top ROW           first calendar row, 0 = Sunday (default 1, so Mon-Fri).
+                      Text only; a picture uses all seven rows
+  --background LEVEL  (--bg) draw the background as a shade 0-3 rather than
+                      leaving it empty, so the whole year stays green. Text
+                      only. Keep it two levels clear of the letters, or the
+                      two greens are too close to tell apart
+
+TRACKING
+  --track [USER]      how far along, what today owes, and whether the picture can
+                      still be drawn at all. Reads --merge if given, otherwise
+                      asks gh for USER (default: whoever gh is)
+  --today DATE        what counts as today, as YYYY-MM-DD (default: the clock),
+                      so a report is repeatable and a future day can be asked
+  --merge PATH        a saved calendar to draw on top of, so the preview accounts
+                      for contributions already there
+  --plan PATH         where the plan lives (default: mossaic-plan.json)
+  --save              write the plan, so later runs need no flags at all
+
+MAKING THE COMMITS
+  --repo DIR          the repository --write commits into (local only)
+  --write             actually create the commits
+  --backfill          commit only what each past day is still short of the plan,
+                      never adding to a day that is already bright, and leaving
+                      days still to come alone. Needs --repo, and --write to commit
   --name NAME         commit author name (default: git config)
   --email ADDRESS     commit author email (default: git config)
+
+OUTPUT
+  --snapshot PATH     write a calendar file for `mossaic --file PATH`
+  --login NAME        the name that snapshot carries (default: preview)
+  --format F          text (default), json or markdown — what --track prints.
+                      The GitHub Action reads json and markdown
   --color WHEN        (--colour) auto (default), always or never. auto means
                       colour when stdout is a terminal and NO_COLOR is unset
   --no-color          (--no-colour) the same as --color never
-  --format F          text (default), json or markdown — what --track prints.
-                      json and markdown are what the GitHub Action reads
-  --plan PATH         where the plan is read from and written to
-                      (default: mossaic-plan.json)
-  --save              write the plan, so later runs need no flags at all
   --font              print every glyph the font has, and exit
-  --png PATH          with --font, write the glyphs to a PNG instead of the
-                      terminal — the sheet the README shows
-  --track [USER]      compare the plan with what has actually been contributed:
-                      how far along, what today owes, and whether the text can
-                      still be drawn at all. Reads --merge if given, otherwise
-                      asks gh for USER (default: whoever gh is)
-  --today DATE        what \"today\" means, as YYYY-MM-DD (default: the clock).
-                      A report is then reproducible, and a day that has not
-                      arrived can be asked what it will owe
+  --png PATH          with --font, write the glyph sheet to a PNG instead
+
   -V, --version       print the version
   -h, --help          show this help
-
-examples:
-  mossaic-art --draw                                  draw a year by hand
-  mossaic-art --template dragon --draw -o mine.art    start from one, save as mine
-  mossaic-art --list-templates                        see the pictures on offer
-  mossaic-art --template dragon --year 2027           draw one across the year
-  mossaic-art --matrix mine.art --year 2027 --save    draw your own, and keep it
-  mossaic-art VYNCINT --year 2027                     what it would look like, and cost
-  mossaic-art VYNCINT --year 2027 --background 1      letters on a field, not on nothing
-  mossaic-art VYNCINT --year 2027 --track             am I getting there, and what today owes
-  mossaic-art VYNCINT --year 2027 --snapshot a.json   then: mossaic --file a.json
-  mossaic-art VYNCINT --year 2027 --repo ../art --write   local commits, never pushed
-  mossaic-art --backfill --repo ../art --write        commit just what the plan is short
-  mossaic-art --track --today 2027-06-01              what that day will owe
-  mossaic-art \"I :heart: RUST\" --year 2027            a shape among the letters
-  mossaic-art --font                                  every glyph, side by side
-  mossaic-art --font --png art/font.png               the same sheet, as an image
 
 Save the plan once and later runs need no flags at all:
 
   mossaic-art VYNCINT --year 2027 --start-week 6 --save
   mossaic-art --track          # reads mossaic-plan.json
 
+Pictures, templates and the .art format: docs/ART.md
+  https://github.com/vyncint/mossaic/blob/main/docs/ART.md
+
 also installed:
   mossaic          the chart itself
-  mossaic-glyphs   what this terminal makes of the fallback cells";
+  mossaic-glyphs   what this terminal makes of the fallback cells"#;
 
 fn main() {
     let Some(options) = parse_args() else {
@@ -223,11 +203,13 @@ fn main() {
         .unwrap_or_else(|error| fail(&error));
     if placed.skipped > 0 {
         eprintln!(
-            "note: {} pixel(s) fell outside {} and were dropped — the first and \
+            "note: {} lit {} fell outside {} and {} dropped — the first and \
              last calendar columns are partial weeks, so {} of {} columns hold a \
              whole letter",
             placed.skipped,
+            plural(placed.skipped, "pixel", "pixels"),
             grid.year,
+            plural(placed.skipped, "was", "were"),
             grid.usable_weeks(),
             grid.weeks
         );
@@ -301,11 +283,12 @@ fn main() {
     if shades.field > 0 {
         let (legibility, delta) = drawn.worst();
         println!(
-            "background level {} under letters at level {}  ·  {} background day(s), \
+            "background level {} under letters at level {}  ·  {} background {}, \
              {} each  ·  ΔE {delta:.0} at worst, {legibility}",
             drawn.field,
             drawn.ink,
             thousands(placed.field.len() as u32),
+            plural(placed.field.len(), "day", "days"),
             ink.field,
         );
         match legibility {
@@ -338,13 +321,15 @@ fn main() {
             })
             .count();
         println!(
-            "drawing over {} day(s) already active (busiest {})",
+            "drawing over {} {} already active (busiest {})",
             existing.len(),
+            plural(existing.len(), "day", "days"),
             existing.values().copied().max().unwrap_or(0)
         );
         println!(
             "peak after merge {peak}  ·  letters land at level {art_level}/4  ·  \
-             {rivals} existing day(s) as bright or brighter"
+             {rivals} existing {} as bright or brighter",
+            plural(rivals, "day", "days")
         );
         if art_level < 4 {
             let days: Vec<NaiveDate> = placed.lit.keys().copied().collect();
@@ -527,7 +512,11 @@ fn show_templates(colour: bool) {
         .max()
         .unwrap_or(0);
 
-    println!("{} template(s):\n", catalogue.len());
+    println!(
+        "{} {}:\n",
+        catalogue.len(),
+        plural(catalogue.len(), "template", "templates")
+    );
     for template in &catalogue {
         let author = template
             .author()
@@ -598,8 +587,10 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
     }
     if skipped > 0 {
         eprintln!(
-            "note: {skipped} cell(s) fell outside {} and were dropped — the first \
-             and last calendar columns are partial weeks",
+            "note: {skipped} {} of the picture fell outside {} — the first and \
+             last calendar columns are partial weeks, so a full-width picture \
+             overhangs them. Try --start-week, or a narrower picture.",
+            plural(skipped, "shade", "shades"),
             grid.year
         );
     }
@@ -799,12 +790,14 @@ fn track_canvas(
     match plan.verdict() {
         plan::Verdict::Done => println!("  Drawn. Every day is the shade the picture asks for."),
         plan::Verdict::Reachable => println!(
-            "  On track — {drawn} of {wanted} shaded day(s) are right, \
-             {owing_days} to go."
+            "  On track — {drawn} of {wanted} shaded {} right, \
+             {owing_days} to go.",
+            plural(wanted, "day is", "days are")
         ),
         plan::Verdict::Holed { holes } => println!(
-            "  Cannot be drawn cleanly — {holes} day(s) are brighter than the \
-             picture wants,\n  and nothing takes a contribution away."
+            "  Cannot be drawn cleanly — {holes} {} brighter than the \
+             picture wants,\n  and nothing takes a contribution away.",
+            plural(holes, "day is", "days are")
         ),
     }
 
@@ -845,9 +838,11 @@ fn track_canvas(
     );
 
     println!(
-        "\n  still owing  {} day(s) · {} contributions",
+        "\n  still owing  {} {} · {} {}",
         thousands(owing_days as u32),
-        thousands(owing_commits)
+        plural(owing_days, "day", "days"),
+        thousands(owing_commits),
+        plural(owing_commits, "contribution", "contributions")
     );
 
     // What a day is owed turns on `want`, not on whether `need` is zero. Both
@@ -895,7 +890,11 @@ fn track_canvas(
 
     let holes = plan.holes();
     if !holes.is_empty() {
-        println!("\n  {} day(s) already too bright:", holes.len());
+        println!(
+            "\n  {} {} already too bright:",
+            holes.len(),
+            plural(holes.len(), "day", "days")
+        );
         for day in holes.iter().take(8) {
             println!(
                 "    {}  has {}, wants at most {}",
@@ -931,8 +930,9 @@ fn backfill_canvas(options: &Options, grid: &Grid, levels: &BTreeMap<NaiveDate, 
         return;
     }
     println!(
-        "{} day(s) up to {today} are short, {} contributions in total",
+        "{} {} short up to {today}, {} contributions in total",
         owed.len(),
+        plural(owed.len(), "day is", "days are"),
         thousands(total)
     );
     match (&options.repo, options.write) {
@@ -1046,13 +1046,15 @@ fn backfill(
     );
     let (letter_days, letter_commits) = plan.owing();
     println!(
-        "  letters     {letter_days} day(s) short, {} commits",
+        "  letters     {letter_days} {} short, {} commits",
+        plural(letter_days, "day", "days"),
         thousands(letter_commits)
     );
     if shades.field > 0 {
         let (field_days, field_commits) = plan.field_owing();
         println!(
-            "  background  {field_days} day(s) short, {} commits",
+            "  background  {field_days} {} short, {} commits",
+            plural(field_days, "day", "days"),
             thousands(field_commits)
         );
     }
@@ -1067,8 +1069,10 @@ fn backfill(
         println!("  reaching    days before {today}, which are the ones only back-dating reaches");
         if ahead > 0 {
             println!(
-                "              {ahead} day(s) from {today} on are short too, and left alone — \
-                 contribute on those as they come"
+                "              {ahead} {} from {today} on {} short too, and left alone — \
+                 contribute on those as they come",
+                plural(ahead, "day", "days"),
+                plural(ahead, "is", "are")
             );
         }
     }
@@ -1077,11 +1081,13 @@ fn backfill(
     // commits changes that.
     if let plan::Verdict::Holed { holes } = plan.verdict() {
         println!(
-            "\n  warning: {} cannot be drawn cleanly in {} — {holes} day(s) inside the\n  \
-             letters are already lit, and nothing takes those away. Backfilling will\n  \
+            "\n  warning: {} cannot be drawn cleanly in {} — {holes} {} inside the\n  \
+             letters already lit, and nothing takes those away. Backfilling will\n  \
              brighten the letters, and the text will still read with holes in it.\n  \
              `mossaic-art --track` sweeps --start-week for a placement with fewer.",
-            plan.text, plan.year
+            plan.text,
+            plan.year,
+            plural(holes, "day", "days")
         );
     }
 
@@ -1095,9 +1101,11 @@ fn backfill(
         return;
     }
     println!(
-        "\n  {} commit(s) across {} day(s), earliest {}, latest {}",
+        "\n  {} {} across {} {}, earliest {}, latest {}",
         thousands(total),
+        plural(total, "commit", "commits"),
         owed.len(),
+        plural(owed.len(), "day", "days"),
         owed.keys().next().expect("not empty"),
         owed.keys().next_back().expect("not empty"),
     );
@@ -1273,7 +1281,8 @@ fn track_progress(
     );
     if owing_days > 0 {
         println!(
-            "  owing       {owing_days} day(s) short, {} contributions between them",
+            "  owing       {owing_days} {} short, {} contributions between them",
+            plural(owing_days, "day", "days"),
             thousands(owing_commits)
         );
     }
@@ -1295,7 +1304,8 @@ fn track_progress(
         let (field_owing_days, field_owing_commits) = plan.field_owing();
         if field_owing_days > 0 {
             println!(
-                "  owing       {field_owing_days} background day(s) short, {} contributions",
+                "  owing       {field_owing_days} background {} short, {} contributions",
+                plural(field_owing_days, "day", "days"),
                 thousands(field_owing_commits)
             );
         }
@@ -1305,8 +1315,9 @@ fn track_progress(
             "  holes       {}",
             paint(
                 &format!(
-                    "{} day(s) inside the letters are lit and cannot be unlit",
-                    holes.len()
+                    "{} {} lit inside the letters and cannot be unlit",
+                    holes.len(),
+                    plural(holes.len(), "day is", "days are")
                 ),
                 danger()
             )
@@ -1314,8 +1325,9 @@ fn track_progress(
     }
     if plan.around() > 0 {
         println!(
-            "  around      {} day(s) outside the text have contributions",
-            plan.around()
+            "  around      {} {} outside the text with contributions",
+            plan.around(),
+            plural(plan.around(), "day", "days")
         );
     }
 
@@ -1346,8 +1358,9 @@ fn track_progress(
                 )
             );
             println!(
-                "    {holes} day(s) inside the letters already have contributions, and\n    \
-                 nothing takes those away — the text would read with holes in it."
+                "    {holes} {} inside the letters already have contributions, and\n    \
+                 nothing takes those away — the text would read with holes in it.",
+                plural(holes, "day", "days")
             );
             match plan::best_start_week(
                 grid,
@@ -1487,7 +1500,8 @@ fn track_progress(
     }
     println!("\n  the rest of the year");
     println!(
-        "    {future} letter day(s) still to come, {} contributions",
+        "    {future} letter {} still to come, {} contributions",
+        plural(future, "day", "days"),
         thousands(future_commits)
     );
     if past > 0 {
@@ -1497,8 +1511,9 @@ fn track_progress(
         // would not even read the plan, so the placement could differ from the
         // one just reported on.
         println!(
-            "    {past} letter day(s) already past, {} contributions — only back-dated\n    \
+            "    {past} letter {} already past, {} contributions — only back-dated\n    \
              commits reach those:\n\n      mossaic-art {}--backfill --repo ../art --write\n",
+            plural(past, "day", "days"),
             thousands(past_commits),
             match options.plan_loaded {
                 true => String::new(),
@@ -1548,7 +1563,7 @@ fn show_font(colour: bool) {
 
     let characters: Vec<char> = art::alphabet().collect();
     println!(
-        "{} glyphs, {}x{} each — add one to FONT in src/art.rs\n",
+        "{} glyphs, {}x{} each — write any of them with mossaic-art TEXT\n",
         characters.len(),
         art::GLYPH_COLS,
         art::GLYPH_ROWS

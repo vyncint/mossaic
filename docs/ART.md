@@ -211,6 +211,19 @@ mossaic-art --list-templates                # what there is, with thumbnails
 mossaic-art --template dragon --year 2027   # draw one
 ```
 
+Four ship with it, and every one of them is a file in
+[`art/templates/`](../art/templates):
+
+| name | what it is |
+|---|---|
+| `dragon` | a serpentine dragon coiling across the whole year |
+| `wave` | one clean sine rolling across the year |
+| `pulse` | a heartbeat trace: a quiet line, a spike every few weeks |
+| `invader` | a space invader, centred |
+
+They are worth reading as much as drawing: each is seven lines of digits, and
+copying one into your own file is the quickest way to start.
+
 ```
 Dragon  ·  2027  ·  53 of 53 columns  ·  146 days  ·  442 commits
 
@@ -494,7 +507,7 @@ arrive rather than be asked for:
 
 ```yaml
 - id: art
-  uses: vyncint/mossaic/action@v0.6.0
+  uses: vyncint/mossaic/action@v0.6.3
   with:
     text: VYNCINT
     year: "2027"

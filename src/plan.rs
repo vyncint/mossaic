@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{Datelike, NaiveDate};
 
 use crate::art::{self, Grid, GLYPH_ROWS};
-use crate::thousands;
+use crate::{plural, thousands};
 
 /// What the art wants of a day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -913,8 +913,13 @@ impl Report {
         match self.verdict {
             "drawn" => format!("{} · {} — drawn", self.text, self.year),
             "holed" => format!(
-                "{} · {} — {} of {} bright, {} hole(s) that cannot be unlit",
-                self.text, self.year, self.bright, self.letters, self.holes
+                "{} · {} — {} of {} bright, {} {} that cannot be unlit",
+                self.text,
+                self.year,
+                self.bright,
+                self.letters,
+                self.holes,
+                plural(self.holes, "hole", "holes")
             ),
             // The background is work too, and saying "0 to go" while three
             // hundred field days are bare is the kind of confidently wrong a
@@ -941,13 +946,15 @@ impl Report {
         out.push_str(&match self.verdict {
             "drawn" => format!("**{} is drawn.**\n\n", self.text),
             "holed" => format!(
-                "**Cannot be drawn cleanly** — {} day(s) inside the letters are already \
+                "**Cannot be drawn cleanly** — {} {} inside the letters already \
                  lit, and nothing takes those away.\n\n",
-                self.holes
+                self.holes,
+                plural(self.holes, "day is", "days are")
             ),
             _ => format!(
-                "**On track** — {} contribution(s) to go{}.\n\n",
+                "**On track** — {} {} to go{}.\n\n",
                 thousands(self.owing_commits),
+                plural(self.owing_commits, "contribution", "contributions"),
                 match self.field_owing_commits {
                     0 => String::new(),
                     owed => format!(", and {} for the background", thousands(owed)),
@@ -962,8 +969,9 @@ impl Report {
         ));
         if self.owing_days > 0 {
             out.push_str(&format!(
-                "| still owing | {} day(s) · {} contributions |\n",
+                "| still owing | {} {} · {} contributions |\n",
                 self.owing_days,
+                plural(self.owing_days, "day", "days"),
                 thousands(self.owing_commits)
             ));
         }
@@ -978,8 +986,9 @@ impl Report {
             ));
             if self.field_owing_days > 0 {
                 out.push_str(&format!(
-                    "| background owing | {} day(s) · {} contributions |\n",
+                    "| background owing | {} {} · {} contributions |\n",
                     self.field_owing_days,
+                    plural(self.field_owing_days, "day", "days"),
                     thousands(self.field_owing_commits)
                 ));
             }
@@ -1032,8 +1041,9 @@ impl Report {
         }
         if self.overdue_days > 0 {
             out.push_str(&format!(
-                "| already past | {} day(s) · {} contributions, back-dating only |\n",
+                "| already past | {} {} · {} contributions, back-dating only |\n",
                 self.overdue_days,
+                plural(self.overdue_days, "day", "days"),
                 thousands(self.overdue_commits)
             ));
         }
@@ -1041,7 +1051,8 @@ impl Report {
         if let (Some(week), Some(holes)) = (self.suggested_start_week, self.suggested_holes) {
             if holes < self.holes {
                 out.push_str(&format!(
-                    "\n`--start-week {week}` would leave {holes} hole(s) instead of {}.\n",
+                    "\n`--start-week {week}` would leave {holes} {} instead of {}.\n",
+                    plural(holes, "hole", "holes"),
                     self.holes
                 ));
             }

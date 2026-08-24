@@ -916,10 +916,15 @@ impl Canvas {
     /// Lay the canvas on a year and report the shade each day should end at.
     ///
     /// `start` is the calendar column the canvas's first column lands on.
-    /// Columns that fall outside the year are counted in the returned total
-    /// rather than silently dropped — the first and last calendar columns are
-    /// partial weeks, so a full-width picture always loses a few days at the
-    /// ends and the caller should be able to say so.
+    /// The returned total counts the cells that fell outside the year and
+    /// **would have been drawn** — the first and last calendar columns are
+    /// partial weeks, so a full-width picture overhangs them.
+    ///
+    /// Blank cells are not counted, because losing one costs the picture
+    /// nothing. Counting them meant a 53-column template warned about six
+    /// dropped cells on every year, all six of them empty margin: a `note:`
+    /// on the path everybody takes, which teaches people to stop reading
+    /// notes. What is worth interrupting for is a *shade* that will not fit.
     ///
     /// Returns the level for **every** day it covers, including the level-0
     /// ones. That is the difference between a canvas and text: a dark day
@@ -930,19 +935,19 @@ impl Canvas {
         let mut levels = BTreeMap::new();
         let mut skipped = 0;
         for (offset, column) in self.columns.iter().enumerate() {
-            let Some(week) = start.checked_add(offset) else {
-                skipped += CANVAS_ROWS;
-                continue;
+            let week = match start.checked_add(offset) {
+                Some(week) if week < grid.weeks => week,
+                // Past the end of the year: nothing in this column lands.
+                _ => {
+                    skipped += column.iter().filter(|level| **level > 0).count();
+                    continue;
+                }
             };
-            if week >= grid.weeks {
-                skipped += CANVAS_ROWS;
-                continue;
-            }
             for (row, level) in column.iter().enumerate() {
                 let date = grid.date_at(week, row);
                 if grid.holds(date) {
                     levels.insert(date, *level);
-                } else {
+                } else if *level > 0 {
                     skipped += 1;
                 }
             }
