@@ -116,8 +116,8 @@ fn main() {
             if !Path::new(path).is_file() {
                 fail(&format!(
                     "no calendar file at {path}\n\n  \
-                     mossaic-art TEXT --snapshot {path}   write one\n  \
-                     mossaic --demo   a sample year instead"
+                     mossaic-art TEXT --snapshot FILE   write one\n  \
+                     mossaic --demo                     a sample year instead"
                 ));
             }
         }
@@ -396,9 +396,9 @@ fn parse_args() -> Option<Invocation> {
     let login = login.or_else(github::whoami).unwrap_or_else(|| {
         fail(
             "could not detect a GitHub user.\n\n  \
-             mossaic <username>   chart someone by name\n  \
-             gh auth login          authenticate, then just `mossaic`\n  \
-             mossaic --demo       see what it looks like first",
+             mossaic <username>  chart someone by name\n  \
+             mossaic --demo      see what it looks like first\n  \
+             gh auth login       authenticate, then just `mossaic`",
         )
     });
     Some(Invocation {
