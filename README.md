@@ -289,6 +289,9 @@ That is `--template dragon` on 2027 — 146 days, 442 commits — drawn by the s
 rasteriser that draws the chart, so it is what the graph will actually look
 like rather than an impression of it.
 
+Four templates ship with it — `dragon`, `wave`, `pulse` and `invader` — and
+each is a seven-line text file you can copy and edit.
+
 ```sh
 mossaic-art --list-templates                    # what there is, with thumbnails
 mossaic-art --template dragon --year 2027       # draw one, and see what it costs

@@ -3916,15 +3916,52 @@ fn every_template_file_is_a_valid_canvas() {
 #[test]
 fn the_reference_template_reads_clearly() {
     let dragon = crate::templates::find("dragon").expect("the reference template");
-    let (low, high, legibility, delta) = dragon.canvas.closest_pair().expect("more than one shade");
-    assert_eq!(
-        legibility,
-        crate::primer::Legibility::Clear,
-        "the reference template's closest pair is {low} and {high} at ΔE {delta:.0}, \
-         which is not something a reader can rely on seeing"
-    );
     assert_eq!(dragon.canvas.width(), crate::art::CANVAS_COLS);
     assert_eq!(dragon.author(), Some("@vyncint"));
+}
+
+/// Every template in the catalogue, not only the reference one.
+///
+/// This is the gate on contributed art, and it cannot be replaced by reading
+/// the file: a picture whose two closest shades are nine ΔE apart looks
+/// obviously two-toned in the `.art` source, because `2` and `3` are different
+/// characters — and reads as one flat colour on github.com. Only measuring
+/// catches it.
+#[test]
+fn every_template_reads_clearly() {
+    for (name, source) in crate::templates::builtin_sources() {
+        let canvas =
+            crate::art::Canvas::parse(source).unwrap_or_else(|error| panic!("{name}: {error}"));
+        // One shade has nothing to tell apart from anything.
+        let Some((low, high, legibility, delta)) = canvas.closest_pair() else {
+            continue;
+        };
+        assert_eq!(
+            legibility,
+            crate::primer::Legibility::Clear,
+            "{name}: its closest pair is {low} and {high} at ΔE {delta:.0}, \
+             which is not something a reader can rely on seeing"
+        );
+    }
+}
+
+/// No template loses a shade off the end of the year it is drawn across.
+///
+/// The `note:` about a picture overhanging the calendar is for pictures that
+/// genuinely do not fit. Shipping one that trips it on every year — as the
+/// reference template did, on six blank cells — trains people to ignore the
+/// note, which costs more than the note is worth.
+#[test]
+fn no_template_overhangs_the_year() {
+    for year in [2026, 2027, 2028, 2029] {
+        let grid = crate::art::Grid::new(year).expect("a real year");
+        for (name, source) in crate::templates::builtin_sources() {
+            let canvas =
+                crate::art::Canvas::parse(source).unwrap_or_else(|error| panic!("{name}: {error}"));
+            let (_, skipped) = canvas.place(&grid, canvas.centred(&grid));
+            assert_eq!(skipped, 0, "{name} loses {skipped} shades off {year}");
+        }
+    }
 }
 
 /// The fact the rule above rests on, checked rather than asserted in prose:

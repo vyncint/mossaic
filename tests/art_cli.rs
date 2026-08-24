@@ -45,7 +45,10 @@ fn the_font_can_be_looked_at() {
         .unwrap_or_else(|| panic!("no glyph count in {text}"));
     assert!(count >= 39, "{count} glyphs: {text}");
     assert!(text.contains("glyphs, 5x5 each"), "{text}");
-    assert!(text.contains("add one to FONT in src/art.rs"), "{text}");
+    assert!(
+        text.contains("write any of them with mossaic-art TEXT"),
+        "{text}"
+    );
     // Every character it claims, drawn.
     for character in ['A', 'Z', '0', '9', '-', '.'] {
         assert!(
@@ -903,7 +906,7 @@ fn a_background_is_drawn_as_a_shade_and_priced_as_one() {
         text.contains("background level 1 under letters at level 4"),
         "{text}"
     );
-    assert!(text.contains("290 background day(s), 1 each"), "{text}");
+    assert!(text.contains("290 background days, 1 each"), "{text}");
     assert!(text.contains("clear"), "level 1 under 4 is clear: {text}");
     assert!(!text.contains("faint"), "{text}");
 
@@ -1678,19 +1681,19 @@ fn backfill_reaches_only_the_days_that_have_gone() {
     let mid = stdout(&art(&args("2026-08-19")));
     // The same 34 days and 3,464 commits `--track` calls "already past": both
     // answers come from one plan and one date, so they agree by construction.
-    assert!(mid.contains("3,464 commit(s) across 34 day(s)"), "{mid}");
+    assert!(mid.contains("3,464 commits across 34 days"), "{mid}");
     assert!(
         mid.contains("latest 2026-08-14"),
         "nothing after today: {mid}"
     );
     assert!(
-        mid.contains("23 day(s) from 2026-08-19 on are short too, and left alone"),
+        mid.contains("23 days from 2026-08-19 on are short too, and left alone"),
         "and it says what it is leaving: {mid}"
     );
 
     // Later in the year, more of it is reachable.
     let end = stdout(&art(&args("2026-12-31")));
-    assert!(end.contains("5,994 commit(s) across 57 day(s)"), "{end}");
+    assert!(end.contains("5,994 commits across 57 days"), "{end}");
 
     // Before the year starts, none of it is — and it says why rather than
     // claiming the plan is finished.
@@ -1702,7 +1705,7 @@ fn backfill_reaches_only_the_days_that_have_gone() {
 
     // A year that cannot be drawn cleanly says so before an irreversible write.
     assert!(
-        mid.contains("cannot be drawn cleanly in 2026") && mid.contains("61 day(s) inside the"),
+        mid.contains("cannot be drawn cleanly in 2026") && mid.contains("61 days inside the"),
         "a warning belongs where the commits do: {mid}"
     );
 }
