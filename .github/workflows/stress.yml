@@ -39,8 +39,9 @@ on:
         description: Full-suite iterations per OS, split across the shards
         required: false
         default: "100"
-  schedule:
-    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+  # Scheduled runs are disabled. Uncomment the block below to restore them.
+  # schedule:
+  #   - cron: "23 6 * * 1" # Mondays 06:23 UTC
 
 permissions:
   contents: read
