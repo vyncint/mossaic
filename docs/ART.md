@@ -507,7 +507,7 @@ arrive rather than be asked for:
 
 ```yaml
 - id: art
-  uses: vyncint/mossaic/action@v0.6.3
+  uses: vyncint/mossaic/action@v0.7.0
   with:
     text: VYNCINT
     year: "2027"
@@ -584,3 +584,19 @@ The file stores the placement *resolved*, so a text that was centred keeps the
 column it was centred on. Typed flags still win over the saved ones, so
 `--year 2028` is a one-off rather than a surprise. `--plan PATH` puts the file
 somewhere else.
+
+**A plan is version-locked to the tool that wrote it.** Every key is checked,
+not just every value: a plan carrying a key this build does not recognise is
+refused by name rather than applied at its default. That closes the case
+where `backgruond: 2` — one transposition in a hand edit — silently turned
+about 290 background days into keep-dark days at exit 0, on the file that is
+the input to `--backfill --write`, where contributions cannot be unlit. The
+cost is the other direction: a plan written by a *newer* mossaic is refused
+too. Save it again with the version you are running.
+
+**A picture plan needs a mossaic that understands `art`.** A plan saved from
+`--template`, `--matrix` or `--image` stores the picture inline in the `art`
+key. An older build ignores that key and falls back to drawing the `text`
+field, which for a picture is its name — so a 146-day dragon becomes a
+79-day word, at exit 0, and `--backfill` then asks for a different date range
+and a different total.

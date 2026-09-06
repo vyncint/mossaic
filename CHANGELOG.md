@@ -9,6 +9,150 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-06
+
+Twenty findings and one security advisory, all reported against 0.6.3 with a
+measured reproduction. The thread through most of them: something the tool
+accepted, or printed, or counted, and then did other than what it said.
+
+### Security
+
+- **Escape sequences in a `.art` header reached the terminal, the saved plan
+  and the Action output** ([GHSA-jp9f-97rv-j4hx]). The three header fields —
+  `# name:`, `# author:`, `# description:` — were printed exactly as the file
+  wrote them, while every other piece of untrusted text went through
+  `printable()` where it enters, which is the rule `src/lib.rs` states in as
+  many words. A `.art` file is the one thing this project asks strangers to
+  send: #57 invites it and CONTRIBUTING §11 makes the review path "open the
+  file with `mossaic-art`", so a reviewer running `--matrix theirs.art`, or
+  anyone running `--list-templates`, executed whatever the header said — a
+  window-title change, an `OSC 52` clipboard write, or a cursor-position query
+  whose reply is typed back into the shell once the tool exits. Nothing warned,
+  because the point of an escape sequence is that it is not displayed, and
+  `--no-colour` suppressed it on no path. It travelled: through `--save` into
+  the plan and back out raw on reload, through `--format json`'s `headline`,
+  through `--format markdown` into `$GITHUB_STEP_SUMMARY`, and out of the
+  Action's `headline` output. `build.rs` embeds `art/templates/*.art`, so a
+  merged template would have shipped its payload to every user on every
+  listing. Now cleaned in the `Canvas` meta reader — one place, covering every
+  downstream printer — and bounded to 200 characters, since an unbounded
+  `# name:` produced a 200,061-byte first output line.
+
+### Added
+
+- **The terminal is given back on a signal.** Under a pty, `kill -INT`,
+  `-TERM` or `-HUP` on either binary emitted *zero bytes*: the shell was left
+  inside the alternate screen with mouse tracking on, ECHO/ICANON/ISIG off and
+  no working Ctrl-C, curable only by typing `reset` blind. `mossaic-art --draw`
+  had no panic hook either. Both now share one `restore` module, and the
+  process still reports as killed by the signal. Reported in #82.
+
+- **`start-week` and `columns` outputs on the Action**, and the placement in
+  the tracking header in both formats. action/README.md told readers "the
+  report prints the placement it used on its second line" — the only guard the
+  project offers against the one failure it calls silent and confident,
+  adopted by the consumer as its stated safety net — and no line in either
+  format carried it. Reported in #88.
+
+### Changed
+
+- **`--png`, `-o` and `--format` are refused where they do nothing.** Each was
+  accepted in every mode and honoured in one, at exit 0 with an empty stderr
+  and no file: `mossaic-art --template dragon --png preview.png` in a workflow
+  printed a cheerful report and produced nothing. #26 settled this principle
+  and enumerated three other flags; these were missed. Reported in #85.
+
+- **A plan's every key is checked, not just every value.** `background: 99`
+  was refused by name and `backgruond: 2` was accepted in silence, applying
+  the default — about 290 background days becoming keep-dark days, on the file
+  that is the input to `--backfill --write`. The cost is the forward
+  direction: a plan written by a newer mossaic is now refused too.
+  docs/ART.md's "Saving the plan" says so. Reported in #89.
+
+- **`--commits` is described as pricing the brightest day**, which is what it
+  does. "commits per lit day" applied to the shipped dragon predicts 584 where
+  the tool prints 442, and the help is the only description a `cargo install`
+  user gets. Reported in #93.
+
+### Fixed
+
+- **A closed pipe is not a crash.** `mossaic-art --font | less` and quitting,
+  `--list-templates | head`, `--format json | jq -e` with a jq that exits
+  early: all ordinary, all a panic at exit 101. `--png` was the one with a
+  price — a valid, complete PNG on disk and a status of 101, so a wrapper that
+  checks it deletes the file and retries. Reported in #83.
+
+- **The hyphen the font draws can start a text.** `-` is listed three times in
+  this project's own documents and `mossaic-art -` was `unknown option "-"`;
+  reaching for `--` gave `unknown option "--"`, so the escape hatch named
+  itself as the mistake. `--` now means the rest is positional, in the shared
+  parser, so a dash-led login works in the chart too. Reported in #92.
+
+- **The cost table counts the days the year has.** A full-width picture is 371
+  cells against a year of 365, so the preview table disagreed with the header
+  above it and with what `--write` makes — immediately after a note saying
+  cells had been dropped. The legibility verdict came from the same raw
+  canvas, so a picture that drew nothing inside the year still reported
+  `shades 0 4 · ΔE 70, clear`. Reported in #78.
+
+- **The chart header counts what has happened.** It was the one figure
+  `--today` did not move: reading the shipped calendar as of March printed
+  December's 9,527 above a grid showing 2,043, beside "23 active days".
+  Reported in #81.
+
+- **`--track --save --format json` writes a document and nothing else.** The
+  `saved …` confirmation was the single `println!` that could run ahead of it,
+  at exit 0 with an empty stderr. Reported in #84.
+
+- **A template that does not parse is named.** The skip is deliberate policy;
+  the silence was not, and `--list-templates` is the command its own doc
+  comment calls "the command you would reach for to find out which one is
+  broken". `--template <stem>` now gives the parse error rather than "no
+  template named", and a broken local file no longer silently shadows a
+  built-in. Reported in #86.
+
+- **A malformed `--file` is not blamed on `gh`.** The shared parser's only
+  wording was "unexpected response from gh", on a run where gh never executed.
+  Reported in #90.
+
+- **The release builds its own binaries.** `binaries.yml` and `install.yml`
+  sat on `on: release`, and GitHub raises no workflow-starting event for a
+  release created with `GITHUB_TOKEN` — so neither had ever run from that
+  trigger, and every release from 0.6.0 on had no binaries until somebody
+  dispatched two workflows by hand. Reported in #73.
+
+- **An empty CHANGELOG section fails before `cargo publish`.** The extraction
+  ran only after the publish, so a blank section put the version permanently
+  on crates.io and *then* failed the release. The script also tells "absent"
+  from "present and empty", and the oldest section no longer absorbs the link
+  block. Reported in #80.
+
+- **The example workflow is audited.** `track.example.yml` tells you to copy
+  it into a public repository of your own and was the one file the zizmor job
+  never read: whoever followed it inherited workflow-level `issues: write` for
+  every step, including one running a mutable tag on somebody else's
+  repository. Reported in #87.
+
+- **One Action run asks GitHub once per day.** The two `--format` calls each
+  made their own query and their own `Local::now()`, so across a local
+  midnight the gate and the message were about different days. Reported in
+  #79.
+
+- **`fail-on: holed` names the picture.** Its only message interpolated
+  `text:`, which is empty for `template:`, `matrix:` and `image:`. Reported in
+  #91.
+
+- **The three plural sites 0.6.3 missed**, and the markdown sentence it
+  reworded into nonsense — the verb moved in front of "inside the letters", so
+  "already lit" became a clause on the letters rather than the days, on the
+  path the Action publishes. The sixteen quoted blocks in README and
+  docs/ART.md are regenerated, and a test now asserts in both directions that
+  the tool prints what the pages quote. Reported in #94.
+
+- **CONTRIBUTING names all five test files** and counts them correctly; §3 is
+  four layers with the file named for each. It named two of five and was 39%
+  under. Reported in #95.
+
 ## [0.6.3] - 2026-08-24
 
 ### Added
@@ -923,6 +1067,7 @@ there was none.
 [termlens]: https://github.com/vyncint/termlens
 
 [Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.3...HEAD
+[0.7.0]: https://github.com/vyncint/mossaic/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/vyncint/mossaic/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/vyncint/mossaic/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/vyncint/mossaic/compare/v0.6.0...v0.6.1
@@ -934,3 +1079,4 @@ there was none.
 [0.2.0]: https://github.com/vyncint/mossaic/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vyncint/mossaic/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vyncint/mossaic/releases/tag/v0.1.0
+[GHSA-jp9f-97rv-j4hx]: https://github.com/vyncint/mossaic/security/advisories/GHSA-jp9f-97rv-j4hx
