@@ -505,8 +505,10 @@ fn tally<'a>(days: impl Iterator<Item = &'a Day>) -> (usize, u32) {
 /// contribution in there is a hole, higher when the plan draws a background
 /// those days can hide in.
 ///
-/// `today` decides ties, through [`chosen`]: among columns that cost the same
-/// it prefers one that has not begun.
+/// `today` decides ties: among columns that cost the same number of holes, one
+/// that has not begun yet wins. A clean column in March is arithmetic, not
+/// advice — the only way to draw there is by back-dating into days that have
+/// gone.
 pub fn best_start_week(
     grid: &Grid,
     columns: usize,
