@@ -2449,6 +2449,61 @@ fn control_characters_never_leave_the_parser() {
     assert_eq!(crate::printable("héllo ✓"), "héllo ✓", "text is left alone");
 }
 
+/// GHSA-jp9f-97rv-j4hx.
+///
+/// The calendar path was cleaned in the 0.1.0 review; the `.art` header was
+/// not, and a `.art` file is the one thing this project asks strangers to
+/// send. A reviewer running `mossaic-art --matrix theirs.art` or
+/// `--list-templates` executed whatever the header said: a window-title
+/// change, an `OSC 52` clipboard write, or a cursor-position query whose
+/// reply is typed back into the shell once the tool exits. `build.rs` embeds
+/// `art/templates/*.art`, so a merged template shipped its payload to every
+/// user on every listing.
+#[test]
+fn control_characters_never_leave_an_art_header() {
+    let evil = "\u{1b}]0;PWNED\u{7}\u{1b}[31mEVIL\u{1b}[0m";
+    let source = format!(
+        "# name: {evil}\n# author: {evil}\n# description: {evil}\n\
+         0100010\n0010100\n0001000\n0010100\n0100010\n0000000\n0000000\n"
+    );
+    let canvas = crate::art::Canvas::parse(&source).expect("the body is a valid canvas");
+    let meta = canvas.meta();
+    for (label, field) in [
+        ("name", meta.name.as_deref()),
+        ("author", meta.author.as_deref()),
+        ("description", meta.description.as_deref()),
+    ] {
+        let field = field.unwrap_or_else(|| panic!("{label} is read"));
+        assert!(
+            !field.chars().any(char::is_control),
+            "{label} still carries control characters: {field:?}"
+        );
+        assert!(
+            field.contains("PWNED"),
+            "the text itself is harmless: {field:?}"
+        );
+    }
+
+    // A bare carriage return is enough to overwrite what was shown, and does
+    // not look like an escape sequence to anyone reading the file.
+    let source = "# name: SAFE\rEVIL\n0100010\n0010100\n0001000\n0010100\n\
+                  0100010\n0000000\n0000000\n";
+    let canvas = crate::art::Canvas::parse(source).unwrap();
+    assert_eq!(canvas.meta().name.as_deref(), Some("SAFEEVIL"));
+
+    // And a header is bounded: unbounded, a 200,000-character name produced a
+    // 200,061-byte first output line and rode through `--save` into the plan.
+    let long = format!(
+        "# name: {}\n0100010\n0010100\n0001000\n0010100\n0100010\n0000000\n0000000\n",
+        "A".repeat(200_000)
+    );
+    let canvas = crate::art::Canvas::parse(&long).unwrap();
+    assert!(
+        canvas.meta().name.as_deref().unwrap().chars().count() <= 200,
+        "a header field must be bounded"
+    );
+}
+
 #[test]
 fn a_calendar_cannot_span_more_than_a_year() {
     // Two dates millennia apart used to size the grid by the distance between

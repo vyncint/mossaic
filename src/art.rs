@@ -962,16 +962,45 @@ impl Canvas {
     }
 }
 
+/// The most a header field may carry.
+///
+/// A `# name:` is a title in a listing and the first word of a report line, so
+/// a few dozen characters is generous. Unbounded, a 200,000-character name
+/// produced a 200,061-byte first output line — and rode through `--save` into
+/// the plan and out of the Action's `headline` output.
+const MAX_META: usize = 200;
+
 /// Read one `# key: value` header line into `meta`.
 ///
 /// Unknown keys are ignored rather than refused. A `.art` file is a document as
 /// well as data — a contributor may want a `# note:` line — and a format that
 /// rejects a comment it does not recognise is one that breaks when it grows.
+///
+/// **The value is cleaned here**, which is the rule `crate::printable` states:
+/// untrusted text is cleaned where it enters rather than at each of the places
+/// that print it. A `.art` file is exactly the thing this project asks
+/// strangers to send — issue #57 invites it, and CONTRIBUTING §11 makes the
+/// review path "open the file with `mossaic-art`" — so a control character in
+/// a header reached the reviewer's terminal, the saved plan, the JSON and
+/// markdown reports and the Action's `headline` output, unfiltered, on a
+/// binary that had already fixed this same bug on the calendar path.
+/// `--no-colour` suppressed none of it, because the point of an escape
+/// sequence is that it is not displayed.
+///
+/// Cleaning here covers every downstream printer at once: the report header,
+/// `--list-templates`, both report formats, the saved plan's `art` string and
+/// the editor's title.
 fn read_meta(comment: &str, meta: &mut Meta) {
     let Some((key, value)) = comment.split_once(':') else {
         return;
     };
-    let value = value.trim().to_string();
+    // `printable` first, then trim: an escape sequence around whitespace
+    // would otherwise leave the whitespace behind.
+    let value: String = crate::printable(value.trim())
+        .trim()
+        .chars()
+        .take(MAX_META)
+        .collect();
     if value.is_empty() {
         return;
     }

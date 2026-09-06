@@ -47,9 +47,27 @@ What the project does continuously, enforced by required CI on every change:
 
 ## What has been found and fixed
 
-The 0.1.0 review, in the order the findings mattered. Each has a regression
-test named after it in `src/render_tests.rs`.
+The 0.1.0 review, in the order the findings mattered, and what has been found
+since. Each has a regression test named after it in `src/render_tests.rs`.
 
+- **Escape sequences in a `.art` header reached the terminal, the saved plan
+  and the Action output** (GHSA-jp9f-97rv-j4hx, fixed in 0.7.0). The three
+  header fields — `# name:`, `# author:`, `# description:` — were printed
+  exactly as the file wrote them, while every other piece of untrusted text
+  went through `printable()` where it enters. A `.art` file is the one thing
+  this project asks strangers to send: a reviewer running
+  `mossaic-art --matrix theirs.art`, or anyone running `--list-templates`,
+  executed whatever the header said — a window-title change, an `OSC 52`
+  clipboard write, or a cursor-position query whose reply is typed back into
+  the shell after the tool exits. `--no-colour` suppressed none of it. It rode
+  through `--save` into the plan, through `--format json`'s `headline`, through
+  `--format markdown` into `$GITHUB_STEP_SUMMARY` and out of the Action's
+  `headline` output; and `build.rs` embeds `art/templates/*.art`, so a merged
+  template would have shipped its payload to every user. The header is now
+  cleaned in the `Canvas` meta reader — where it enters, covering every
+  downstream printer at once — and bounded to 200 characters, since an
+  unbounded `# name:` produced a 200,061-byte first output line.
+  This is the same finding as the calendar-path one below, one file over.
 - **Escape sequences from a calendar reached the terminal.** A crafted
   `--file` snapshot, or a hostile API response, could put `ESC` into the login
   or an error message. The renderer was never the problem — ratatui drops
