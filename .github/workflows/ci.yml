@@ -141,6 +141,20 @@ jobs:
 
   # Workflow security audit (template injection, credential persistence,
   # unpinned actions, …). Accepted findings live in .github/zizmor.yml.
+  # The release path's one untested script. Three behaviours sat in it
+  # unnoticed — an empty section reported as absent, the oldest section
+  # absorbing the link block — and the empty case would have published the
+  # crate and *then* failed the release, leaving a version permanently on
+  # crates.io with no GitHub release and no platform archives.
+  release-scripts:
+    name: release scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: ./.github/scripts/test-extract-changelog.sh
+
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
@@ -154,14 +168,21 @@ jobs:
         # Version pinned; bump deliberately alongside a fresh local audit.
         # The composite action is audited too: it pulls actions of its own,
         # and it is the piece other people run in their repositories.
-        run: pipx run zizmor==1.29.0 --persona=pedantic .github/workflows/ action/action.yml
+        # `track.example.yml` is audited too, and is the file that most needs
+        # it: its first line tells you to copy it into a public repository of
+        # your own. It is not under `.github/workflows/`, so neither the glob
+        # nor GitHub itself ever parsed it — CI was green and the one file
+        # the gate existed for was the one it was not pointed at.
+        run: >-
+          pipx run zizmor==1.29.0 --persona=pedantic
+          .github/workflows/ action/action.yml action/track.example.yml
 
   # Single stable job name for branch protection: require this one check and
   # matrix/job changes never break the required-checks configuration.
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor]
+    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor, release-scripts]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every needed job succeeded

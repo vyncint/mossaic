@@ -103,8 +103,12 @@ than reporting a missing file.
 
 **The plan is these inputs.** Tracking with a different `start-week` — or a
 different `background` — compares against a different plan and reports nonsense
-confidently. The report prints the placement it used on its second line; if that
-ever changes, so did your plan.
+confidently. The report prints the placement it used **in its header**, in both
+formats — `### Heart · 2026 · week 35, 11 columns` — so if that ever changes,
+so did your plan. The `start-week` and `columns` outputs carry the same two
+numbers, which is the version worth asserting on: the figures in a report
+legitimately change every day, so a changed plan is otherwise indistinguishable
+from a normal day's drift.
 
 **`background`** turns the rest of the year into part of the picture rather
 than something to keep dark. `background: "1"` draws the letters at level 4 on

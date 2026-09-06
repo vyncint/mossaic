@@ -9,12 +9,33 @@ name: binaries
 # -- and when it does the fix must not be "cut another version". This workflow
 # is re-runnable against any existing tag.
 #
-# It fires when a release is published, and by hand for a tag whose artifacts
-# need rebuilding.
+# It is called by release.yml once the GitHub release exists, and can be run
+# by hand for a tag whose artifacts need rebuilding.
+#
+# NOT `on: release`. GitHub does not start workflow runs from events raised
+# by `GITHUB_TOKEN` — a deliberate anti-recursion rule — and release.yml
+# creates the release with exactly that token. So this trigger could never
+# fire, and never did: every run of this workflow through 0.6.3 was a manual
+# dispatch. Between the tag and somebody remembering, the release had no
+# binaries for any platform and `brew install` still served the previous
+# version. `workflow_call` makes the artifacts part of the release rather
+# than a thing that happens near it.
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: the release tag to build binaries for, e.g. v0.6.2
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        description: >-
+          PAT with contents:write on the tap repository. Named rather than
+          inherited: a called workflow with `secrets: inherit` gets every
+          secret this repository has, and this one needs exactly one. Absent
+          is fine — the formula job says so and the tap keeps what it has.
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -29,11 +50,11 @@ permissions:
 # interrupted between building and uploading leaves the release short an
 # archive, which is the failure this workflow exists to make recoverable.
 concurrency:
-  group: binaries-${{ inputs.tag || github.event.release.tag_name }}
+  group: binaries-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
-  TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  TAG: ${{ inputs.tag }}
 
 jobs:
   # Prebuilt binaries, so that using mossaic does not require a Rust toolchain.
@@ -293,7 +314,7 @@ jobs:
         if: steps.token.outputs.usable == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           version="${TAG#v}"

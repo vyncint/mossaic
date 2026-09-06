@@ -845,7 +845,18 @@ fn track_canvas(
         return;
     }
 
-    println!("{name} · {} — tracking {who}\n", grid.year);
+    // The placement, for the same reason the text path prints it below its
+    // own header: tracking with a different `--start-week` compares against
+    // a different plan and reports nonsense confidently. The text path had
+    // "the plan N of M columns from week W"; the picture path had nothing,
+    // and a picture is what the shipped consumer tracks.
+    println!(
+        "{name} · {} · week {}, {} {} — tracking {who}\n",
+        grid.year,
+        plan.start_week,
+        plan.columns,
+        plural(plan.columns, "column", "columns")
+    );
     println!("{}\n", art::preview(levels, grid, palette.as_ref()));
 
     let (owing_days, owing_commits) = plan.owing();
@@ -1289,7 +1300,14 @@ fn track_progress(
     // tracking with a different --start-week than the text was drawn with
     // compares against a different plan entirely. Printing which one is on
     // screen makes that visible rather than baffling.
-    println!("{}  ·  {}  ·  tracking {who}\n", plan.text, plan.year);
+    println!(
+        "{}  ·  {}  ·  week {}, {} {}  ·  tracking {who}\n",
+        plan.text,
+        plan.year,
+        plan.start_week,
+        plan.columns,
+        plural(plan.columns, "column", "columns")
+    );
     println!(
         "  the plan    {} of {} columns from week {}, on rows {}-{}",
         plan.columns,

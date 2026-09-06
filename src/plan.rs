@@ -962,7 +962,23 @@ impl Report {
     /// A summary that reads the same in a GitHub step summary, a Slack message,
     /// a Discord embed and an email — the four places this ends up.
     pub fn markdown(&self) -> String {
-        let mut out = format!("### {} · {}\n\n", self.text, self.year);
+        // The placement, in the header. action/README.md told readers "the
+        // report prints the placement it used on its second line; if that
+        // ever changes, so did your plan" — and no line in either format
+        // carried it. That sentence is the only guard the project offers
+        // against the one failure it calls silent and confident, and the
+        // consumer adopted it as its stated safety net: changing
+        // `start-week` only moved the numbers, which legitimately change
+        // every day anyway, so a changed plan was indistinguishable from a
+        // normal day's drift.
+        let mut out = format!(
+            "### {} · {} · week {}, {} {}\n\n",
+            self.text,
+            self.year,
+            self.start_week,
+            self.columns,
+            crate::plural(self.columns, "column", "columns")
+        );
         out.push_str(&match self.verdict {
             "drawn" => format!("**{} is drawn.**\n\n", self.text),
             "holed" => format!(

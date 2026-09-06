@@ -178,6 +178,18 @@ outputs:
   field-level:
     description: The level the background is drawn at. `0` when there is none.
     value: ${{ steps.track.outputs.field-level }}
+  start-week:
+    description: >-
+      The calendar column the plan starts at — **the placement it tracked
+      against**. Tracking with a different `start-week` compares against a
+      different plan and reports nonsense confidently, and the numbers in a
+      report legitimately change every day, so a changed plan is otherwise
+      indistinguishable from a normal day's drift. Assert this in your
+      workflow and the guard becomes a test rather than something to read for.
+    value: ${{ steps.track.outputs.start-week }}
+  columns:
+    description: How many calendar columns the plan spans.
+    value: ${{ steps.track.outputs.columns }}
   legibility:
     description: >-
       `clear`, `readable` or `faint` — how well the letters stand out from the
@@ -312,7 +324,21 @@ runs:
         if [ -n "${INPUT_YEAR}" ]; then args+=(--year "${INPUT_YEAR}"); fi
         if [ -n "${INPUT_START_WEEK}" ]; then args+=(--start-week "${INPUT_START_WEEK}"); fi
 
+        # Two renderings, one day. Each run makes its own GraphQL query and
+        # its own `Local::now()`, so across a local midnight the halves
+        # landed on different days: the json call reported `today-short=2`
+        # while the markdown body said "36 to go", and nothing in the message
+        # named the date, so the split was invisible. The consumer gates on
+        # the json output and posts the markdown, and with auto-commit that
+        # back-dated 2 empty commits for a day that had already ended.
+        #
+        # CONTRIBUTING §3 already states the rule this broke: "Pin `--today`
+        # in anything that reads a report." Neither call pinned it.
         "${ART}" "${args[@]}" --format json > "${report_dir}/report.json"
+        pinned_today="$(jq -r '.today.date // empty' "${report_dir}/report.json")"
+        if [ -n "${pinned_today}" ]; then
+          args+=(--today "${pinned_today}")
+        fi
         "${ART}" "${args[@]}" --format markdown > "${report_dir}/report.md"
 
         # Multi-line outputs need a delimiter the value cannot contain.
@@ -341,6 +367,8 @@ runs:
           "today-kind=" + (.today.kind // "outside"),
           "tomorrow-kind=" + (.tomorrow.kind // "outside"),
           "field-level=" + (.field_level | tostring),
+          "start-week=" + (.start_week | tostring),
+          "columns=" + (.columns | tostring),
           "legibility=" + .legibility,
           "separation=" + (.separation | floor | tostring),
           "field-days=" + (.field_days | tostring),
@@ -354,6 +382,16 @@ runs:
         fi
 
         verdict="$(jq -r .verdict "${report_dir}/report.json")"
+        # From the report, not from `text:`. `INPUT_TEXT` is empty by
+        # construction for `template:`, `matrix:` and `image:` — the step
+        # refuses more than one source — so the `holed` gate's only message
+        # arrived as a sentence with a hole where the noun should be, in a
+        # red annotation on an unattended cron. A picture is the case where
+        # `holed` is most likely, since it uses the whole week. `.text` is
+        # `VYNCINT` for text, `Dragon` for a template and `heart` for a
+        # matrix. Closed #9 fixed the same shape in the `behind` gate.
+        subject="$(jq -r '.text // empty' "${report_dir}/report.json")"
+        [ -n "${subject}" ] || subject="this plan"
         today_short="$(jq -r '.today.short // 0' "${report_dir}/report.json")"
         # A background day is short too, and `behind` is documented as being
         # about letter days. Without this, `background: "1"` failed the job on
@@ -362,7 +400,7 @@ runs:
         case "${INPUT_FAIL_ON}" in
           holed)
             if [ "${verdict}" = "holed" ]; then
-              echo "::error::${INPUT_TEXT} can no longer be drawn cleanly this year"
+              echo "::error::${subject} can no longer be drawn cleanly this year"
               exit 1
             fi
             ;;
