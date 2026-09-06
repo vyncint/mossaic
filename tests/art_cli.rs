@@ -2510,3 +2510,132 @@ fn a_file_the_user_named_is_not_blamed_on_gh() {
         let _ = std::fs::remove_file(&path);
     }
 }
+
+/// Every block the docs label "to reproduce this exactly" still reproduces.
+///
+/// These blocks are not illustrations, they are the project's fixtures:
+/// `--today` exists precisely so "a documented sample stops being true
+/// overnight" cannot happen, and the pages hand a reader a command and the
+/// exact output it produces. 0.6.3's plural pass changed the wording of
+/// sixteen quoted lines and regenerated none of them, so every figure
+/// matched and every line was worded differently — a reader diffing their
+/// own output against the page cannot tell wording drift from a real
+/// regression, and a contributor copying the documented wording into a new
+/// message reintroduces the plural the release removed.
+///
+/// AGENTS.md states the standard this enforces: "Documentation is checked,
+/// not maintained. Where a README states a fact the code owns, there is
+/// usually a test asserting the two agree."
+#[test]
+fn the_documented_reports_still_read_the_way_the_docs_print_them() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let m26 = root.join("art/vyncint-2026.json");
+    let m26 = m26.to_str().unwrap();
+    let m27 = root.join("art/vyncint-2027.json");
+    let m27 = m27.to_str().unwrap();
+
+    // Each documented invocation, and the quoted lines it has to produce.
+    // Pinned by `--today` and `--merge`, which is why this is possible.
+    let cases: Vec<(Vec<&str>, Vec<&str>)> = vec![
+        (
+            vec![
+                "VYNCINTNG",
+                "--year",
+                "2027",
+                "--no-colour",
+                "--plan",
+                "/dev/null",
+            ],
+            vec!["3 lit pixels fell outside 2027"],
+        ),
+        (
+            vec![
+                "VYNCINT",
+                "--year",
+                "2027",
+                "--background",
+                "1",
+                "--no-colour",
+                "--plan",
+                "/dev/null",
+            ],
+            vec!["290 background days, 1 each"],
+        ),
+        (
+            vec![
+                "VYNCINT",
+                "--year",
+                "2026",
+                "--start-week",
+                "6",
+                "--track",
+                "--merge",
+                m26,
+                "--today",
+                "2026-08-19",
+                "--no-colour",
+                "--plan",
+                "/dev/null",
+            ],
+            vec![
+                "owing       57 days short, 5,994 contributions between them",
+                "holes       61 days are lit inside the letters and cannot be unlit",
+                "around      23 days outside the text with contributions",
+                "61 days inside the letters already have contributions, and",
+                "23 letter days still to come, 2,530 contributions",
+                "34 letter days already past, 3,464 contributions",
+            ],
+        ),
+        (
+            vec![
+                "--template",
+                "dragon",
+                "--year",
+                "2027",
+                "--track",
+                "--merge",
+                m27,
+                "--today",
+                "2027-08-19",
+                "--no-colour",
+                "--plan",
+                "/dev/null",
+            ],
+            vec!["still owing  104 days · 302 contributions"],
+        ),
+    ];
+
+    let docs = ["README.md", "docs/ART.md"]
+        .iter()
+        .map(|name| std::fs::read_to_string(root.join(name)).expect("a documented page"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for (args, quoted) in cases {
+        let out = art(&args);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        for line in quoted {
+            assert!(
+                text.contains(line),
+                "the tool no longer prints a documented line.\n  wanted: {line}\n  from:  \
+                 mossaic-art {}\n--- got ---\n{text}",
+                args.join(" ")
+            );
+            assert!(
+                docs.contains(line),
+                "the docs no longer quote a line the tool prints: {line}"
+            );
+        }
+    }
+
+    // And nothing anywhere still prints a parenthesized plural, which is what
+    // 0.6.3 announced and what this test exists to keep true.
+    assert!(
+        !docs.contains("day(s)") && !docs.contains("commit(s)") && !docs.contains("pixel(s)"),
+        "a parenthesized plural is back in the docs"
+    );
+}

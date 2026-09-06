@@ -1156,13 +1156,16 @@ fn backfill(
     // commits changes that.
     if let plan::Verdict::Holed { holes } = plan.verdict() {
         println!(
+            // "are" — 0.6.3's plural pass dropped the verb here, so the
+            // sentence read "61 days inside the letters already lit".
             "\n  warning: {} cannot be drawn cleanly in {} — {holes} {} inside the\n  \
-             letters already lit, and nothing takes those away. Backfilling will\n  \
+             letters {} already lit, and nothing takes those away. Backfilling will\n  \
              brighten the letters, and the text will still read with holes in it.\n  \
              `mossaic-art --track` sweeps --start-week for a placement with fewer.",
             plan.text,
             plan.year,
-            plural(holes, "day", "days")
+            plural(holes, "day", "days"),
+            plural(holes, "is", "are")
         );
     }
 
