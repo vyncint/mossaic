@@ -35,6 +35,18 @@ jobs:
             echo "::error::Tag v${tag} does not match the crate version ${version}. Bump the version (docs/RELEASING.md) before tagging."
             exit 1
           fi
+      # Before `cargo publish`, which is the irreversible step. The
+      # extraction used to run only in `github-release`, which `needs:
+      # publish` — so a tag whose CHANGELOG section was present and empty
+      # put the version permanently on crates.io and *then* died on a
+      # message saying the section was missing. Recovery is not re-tagging
+      # (RELEASING.md forbids it); it is creating the release by hand.
+      #
+      # `ci`, `semver` and `publish` all descend from this job, so nothing
+      # publishes until the notes exist — which is what the runbook already
+      # implied happened.
+      - name: The CHANGELOG has notes for this version
+        run: .github/scripts/extract-changelog.sh "$GITHUB_REF_NAME" > /dev/null
 
   # Re-run the exact CI gates (fmt, clippy, test matrix, msrv, docs, deny).
   ci:
@@ -105,6 +117,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      # Re-extracted rather than carried through an artifact: the script is
+      # deterministic over a file this job checks out, and `verify-version`
+      # has already proved it succeeds. Passing it as an artifact would mean
+      # two more third-party actions for a `cat`.
       - name: Extract notes from CHANGELOG.md
         run: .github/scripts/extract-changelog.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
       - name: Create the release
@@ -115,6 +131,31 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --verify-tag
+
+  # The platform archives and the tap formula, and the check that what was
+  # published actually installs. Called rather than triggered: a release
+  # created with `GITHUB_TOKEN` raises no event that can start a workflow, so
+  # both of these sat on an `on: release` trigger that had never once fired.
+  # Every run of either through 0.6.3 was a manual dispatch, and between the
+  # tag and somebody remembering, the release had no binaries and
+  # `brew install` served the previous version.
+  binaries:
+    name: binaries
+    needs: github-release
+    uses: ./.github/workflows/binaries.yml
+    permissions:
+      contents: write # upload the archives to the release
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    with:
+      tag: ${{ github.ref_name }}
+
+  install:
+    name: install
+    needs: binaries
+    uses: ./.github/workflows/install.yml
+    with:
+      version: ${{ github.ref_name }}
 
   # Tell the repository that tests this tool against a real subject that a
   # new version exists, so the deep run happens now rather than at its next

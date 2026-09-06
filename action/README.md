@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.6.3
+        uses: vyncint/mossaic/action@v0.7.0
         with:
           text: VYNCINT
           year: "2027"
@@ -84,7 +84,7 @@ drawn. The rest are the same either way.
 
 ```yaml
       - id: art
-        uses: vyncint/mossaic/action@v0.6.3
+        uses: vyncint/mossaic/action@v0.7.0
         with:
           template: dragon
           year: "2027"
@@ -103,8 +103,12 @@ than reporting a missing file.
 
 **The plan is these inputs.** Tracking with a different `start-week` — or a
 different `background` — compares against a different plan and reports nonsense
-confidently. The report prints the placement it used on its second line; if that
-ever changes, so did your plan.
+confidently. The report prints the placement it used **in its header**, in both
+formats — `### Heart · 2026 · week 35, 11 columns` — so if that ever changes,
+so did your plan. The `start-week` and `columns` outputs carry the same two
+numbers, which is the version worth asserting on: the figures in a report
+legitimately change every day, so a changed plan is otherwise indistinguishable
+from a normal day's drift.
 
 **`background`** turns the rest of the year into part of the picture rather
 than something to keep dark. `background: "1"` draws the letters at level 4 on
@@ -216,7 +220,7 @@ on 290 days of the year is a job nobody reads.
 
 ## Notes
 
-- **Two knobs, two jobs.** The ref you pin (`@v0.6.3`, `@main`) chooses the
+- **Two knobs, two jobs.** The ref you pin (`@v0.7.0`, `@main`) chooses the
   *action's steps* — the glue that runs the tracker and shapes the outputs.
   The `version` input chooses the *tracker itself*, straight from crates.io.
   The default, `latest`, is fine for a daily report; pin a number when you

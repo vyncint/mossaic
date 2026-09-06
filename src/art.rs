@@ -802,7 +802,12 @@ impl Canvas {
             .flat_map(|column| column.iter().copied())
     }
 
-    /// How many days sit at each level, indexed by level.
+    /// How many *cells* sit at each level, indexed by level.
+    ///
+    /// This counts the canvas, which is 7 x width — not the year. Use it for
+    /// questions about the drawing itself; for anything a user budgets
+    /// against, ask [`levels_histogram`] about the days the calendar
+    /// actually has.
     #[must_use]
     pub fn histogram(&self) -> [usize; 5] {
         let mut counts = [0usize; 5];
@@ -826,7 +831,12 @@ impl Canvas {
     /// Every level the picture uses, darkest first.
     #[must_use]
     pub fn palette(&self) -> Vec<u8> {
-        let histogram = self.histogram();
+        Self::palette_of(&self.histogram())
+    }
+
+    /// The same, from a histogram somebody else counted.
+    #[must_use]
+    pub fn palette_of(histogram: &[usize; 5]) -> Vec<u8> {
         (0..=4u8)
             .filter(|level| histogram[usize::from(*level)] > 0)
             .collect()
@@ -849,7 +859,20 @@ impl Canvas {
     /// `None` for a canvas of one shade, which has no pair to compare.
     #[must_use]
     pub fn closest_pair(&self) -> Option<(u8, u8, Legibility, f32)> {
-        let used = self.palette();
+        Self::closest_pair_of(&self.histogram())
+    }
+
+    /// The same, over the shades a given histogram holds.
+    ///
+    /// Taking the histogram rather than the canvas is what lets the preview
+    /// ask about the shades that land *inside the year*: a picture whose only
+    /// ink falls in the partial weeks at either end drew nothing, and used to
+    /// report `shades 0 4 · closest pair 0 and 4 · ΔE 70, clear` — the one
+    /// check this project tells you to read twice, passing on a drawing that
+    /// does not exist.
+    #[must_use]
+    pub fn closest_pair_of(histogram: &[usize; 5]) -> Option<(u8, u8, Legibility, f32)> {
+        let used = Self::palette_of(histogram);
         let mut worst: Option<(u8, u8, f32)> = None;
         for (index, low) in used.iter().enumerate() {
             for high in used.iter().skip(index + 1) {
@@ -869,6 +892,8 @@ impl Canvas {
 
     /// The busiest day this canvas needs the year to have before its shades can
     /// be told apart.
+    ///
+    /// (see [`levels_histogram`] for the calendar-side counterpart)
     ///
     /// GitHub's scale has four steps, so a year whose busiest day is 1 holds
     /// exactly two shades: empty and full. A picture using any level between
@@ -962,16 +987,69 @@ impl Canvas {
     }
 }
 
+/// The most a header field may carry.
+///
+/// A `# name:` is a title in a listing and the first word of a report line, so
+/// a few dozen characters is generous. Unbounded, a 200,000-character name
+/// produced a 200,061-byte first output line — and rode through `--save` into
+/// the plan and out of the Action's `headline` output.
+const MAX_META: usize = 200;
+
+/// How many days sit at each level, over the days the calendar actually has.
+///
+/// The canvas-side [`Canvas::histogram`] counts cells — 7 x width, which for
+/// a full-width picture is 371 against a year of 365 or 366. The preview
+/// table and the editor panel used it, so they disagreed with the header
+/// above them and with what `--write` makes: a picture with ink in the
+/// partial weeks at either end priced out 322 days and 742 commits while the
+/// header said 317 and 722, and `--write` made 722. The note directly above
+/// the table had just said cells were dropped, and the table counted them
+/// anyway.
+///
+/// The tracking renderer always did it this way, which is why the shipped
+/// docs disagree with themselves: `docs/ART.md` prints one figure for the
+/// preview and another for the tracking table of the same plan, exactly the
+/// out-of-year cells apart.
+#[must_use]
+pub fn levels_histogram(levels: &std::collections::BTreeMap<chrono::NaiveDate, u8>) -> [usize; 5] {
+    let mut counts = [0usize; 5];
+    for level in levels.values() {
+        counts[usize::from(*level).min(4)] += 1;
+    }
+    counts
+}
+
 /// Read one `# key: value` header line into `meta`.
 ///
 /// Unknown keys are ignored rather than refused. A `.art` file is a document as
 /// well as data — a contributor may want a `# note:` line — and a format that
 /// rejects a comment it does not recognise is one that breaks when it grows.
+///
+/// **The value is cleaned here**, which is the rule `crate::printable` states:
+/// untrusted text is cleaned where it enters rather than at each of the places
+/// that print it. A `.art` file is exactly the thing this project asks
+/// strangers to send — issue #57 invites it, and CONTRIBUTING §11 makes the
+/// review path "open the file with `mossaic-art`" — so a control character in
+/// a header reached the reviewer's terminal, the saved plan, the JSON and
+/// markdown reports and the Action's `headline` output, unfiltered, on a
+/// binary that had already fixed this same bug on the calendar path.
+/// `--no-colour` suppressed none of it, because the point of an escape
+/// sequence is that it is not displayed.
+///
+/// Cleaning here covers every downstream printer at once: the report header,
+/// `--list-templates`, both report formats, the saved plan's `art` string and
+/// the editor's title.
 fn read_meta(comment: &str, meta: &mut Meta) {
     let Some((key, value)) = comment.split_once(':') else {
         return;
     };
-    let value = value.trim().to_string();
+    // `printable` first, then trim: an escape sequence around whitespace
+    // would otherwise leave the whitespace behind.
+    let value: String = crate::printable(value.trim())
+        .trim()
+        .chars()
+        .take(MAX_META)
+        .collect();
     if value.is_empty() {
         return;
     }

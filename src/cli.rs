@@ -26,6 +26,9 @@ pub struct Args {
     /// Long options that were actually typed, so a saved plan or a config can
     /// fill in the rest without overriding them.
     typed: Vec<String>,
+    /// Set once a bare `--` has been read: everything after it is a
+    /// positional, whatever it looks like.
+    end_of_options: bool,
 }
 
 impl Args {
@@ -51,19 +54,57 @@ impl Args {
             program,
             rest,
             typed: Vec::new(),
+            end_of_options: false,
         }
     }
 
     /// The next argument, whatever it is. Not `next`: this is not an iterator,
     /// and reading it as one would be a subtle way to lose an argument.
+    ///
+    /// A bare `--` is consumed here and switches the parser into
+    /// end-of-options: after it, [`Args::is_positional`] is true of
+    /// everything, so an argument that looks like a flag is text.
     pub fn next_arg(&mut self) -> Option<String> {
-        self.rest.pop_front()
+        let arg = self.rest.pop_front()?;
+        if arg == "--" && !self.end_of_options {
+            self.end_of_options = true;
+            return self.rest.pop_front();
+        }
+        Some(arg)
+    }
+
+    /// Whether `arg` should be read as text rather than matched against the
+    /// option names.
+    ///
+    /// The hyphen is the case that forced this. `-` is a glyph the font
+    /// draws, README lists it first among the punctuation, `action.yml`
+    /// names it in the `text:` input description and the binary's own
+    /// no-glyph message prints it in the alphabet — and it could not be
+    /// typed in the position all three documents put it in. `mossaic-art -`
+    /// was `unknown option "-"`, and `--` was itself `unknown option "--"`,
+    /// so the escape hatch a user reaches for reported the escape hatch as
+    /// the mistake. No quoting helped; the only route through was a
+    /// hand-written plan JSON, which nothing documents.
+    ///
+    /// Deliberately *not* "it looks like text, so treat it as text": that
+    /// would turn a mistyped `--yaer 2027` into a drawing.
+    #[must_use]
+    pub fn is_positional(&self, arg: &str) -> bool {
+        self.end_of_options || !arg.starts_with('-')
+    }
+
+    /// Whether a bare `--` has been read.
+    #[must_use]
+    pub fn past_end_of_options(&self) -> bool {
+        self.end_of_options
     }
 
     /// Whether an argument follows that is not itself an option — for the flags
     /// that take an optional value, like `--track [USER]`.
     pub fn peek_value(&self) -> bool {
-        self.rest.front().is_some_and(|next| !next.starts_with('-'))
+        self.rest
+            .front()
+            .is_some_and(|next| self.end_of_options || !next.starts_with('-'))
     }
 
     /// The value belonging to `flag`, or a readable exit.

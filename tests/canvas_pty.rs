@@ -213,6 +213,12 @@ fn undo_takes_the_drawing_back_and_says_when_there_is_no_more() -> termlens::Res
     let mut terminal = spawn(&["--draw", "--year", "2027", "--plan", "/dev/null"])?;
     terminal.wait_until(ready)?;
 
+    // Right one column first. The cursor starts at Sunday of week 0, which
+    // for 2027 is *outside* the year — the panel draws it `·` and says it
+    // costs nothing — and since 0.7.0 the level rows count only days the
+    // calendar has, so painting there moves no row. That distinction is the
+    // point of the fix, so the test has to respect it.
+    terminal.send(Key::Char('l'))?;
     terminal.send(Key::Char('3'))?;
     terminal.wait_until(|screen| screen.contains("level 3     1 day "))?;
     terminal.send(Key::Char('u'))?;
@@ -289,6 +295,8 @@ fn quitting_puts_the_terminal_back() -> termlens::Result<()> {
 fn an_unsaved_drawing_is_not_lost_quietly() -> termlens::Result<()> {
     let mut terminal = spawn(&["--draw", "--year", "2027", "--plan", "/dev/null"])?;
     terminal.wait_until(ready)?;
+    // Inside the year: see the note in `undo_takes_the_drawing_back`.
+    terminal.send(Key::Char('l'))?;
     terminal.send(Key::Char('4'))?;
     terminal.wait_until(|screen| screen.contains("level 4     1 day "))?;
     terminal.send(Key::Char('q'))?;
@@ -397,4 +405,89 @@ fn a_dark_day_inside_the_picture_still_says_stay_dark() -> termlens::Result<()> 
     );
     let _ = std::fs::remove_file(&art);
     Ok(())
+}
+
+// ------------------------------------------------------- signals
+
+/// A signal must hand the terminal back before it kills the process.
+///
+/// This is the out-of-process behaviour a PTY harness exists for: what is
+/// wrong is *what was not written to the tty*, so nothing in-process can see
+/// it. Before 0.7.0, `kill -INT` on either binary emitted **zero bytes**
+/// after the signal — leaving the shell inside the alternate screen with
+/// mouse tracking on, ECHO/ICANON/ISIG off, and no working Ctrl-C. The cure
+/// is to type `reset` blind, which a first-time user does not know, and
+/// nothing on screen says so.
+///
+/// The project had already decided this state was unacceptable: `main`
+/// installs a panic hook and says why. A signal reached the same state by a
+/// path with no guard at all, and `mossaic-art --draw` had neither guard.
+///
+/// Ctrl-C *typed into* the editor is a key, handled by the event loop; the
+/// damage always needed an actual signal, which is why `send(Key::Ctrl('c'))`
+/// would not reproduce it.
+/// Unix only: Windows has no POSIX signals, so there is nothing to deliver
+/// and nothing the restore could be asserted against.
+#[cfg(unix)]
+fn a_signal_gives_the_terminal_back(
+    signal: termlens::Signal,
+    expect: &str,
+) -> termlens::Result<()> {
+    let out = scratch("sig.art");
+    let mut terminal = spawn(&["--draw", "--year", "2027", "-o", out.to_str().unwrap()])?;
+    // Sync on the editor having painted: signalling a process that has not
+    // yet taken the terminal proves nothing about giving it back.
+    terminal.wait_frame(ready)?;
+
+    terminal.signal(signal)?;
+    let status = terminal.wait_exit()?;
+
+    // Still death-by-signal. A process that swallowed the signal and exited
+    // 0 would teach a shell's `$?`, a `timeout` wrapper and a supervisor the
+    // wrong thing about why it stopped.
+    let named = status
+        .signal()
+        .unwrap_or_else(|| panic!("must still die of the signal, got {status}"));
+    assert!(
+        named.contains(expect),
+        "expected {expect}, got {named} ({status})"
+    );
+
+    // And the terminal is back. Asserted on the emulated *state* rather than
+    // on the bytes: the emulator consumes the escape sequences, and the
+    // state they leave behind is what the user's shell would inherit — which
+    // is the thing that was wrong. Before the fix, zero bytes reached the tty
+    // after the signal, so all three of these stayed as the editor left them.
+    let screen = terminal.screen();
+    assert!(
+        !screen.alternate_screen(),
+        "{expect} left the shell inside the alternate screen"
+    );
+    assert!(
+        screen.mouse_modes().is_empty(),
+        "{expect} left mouse reporting on: {:?}",
+        screen.mouse_modes()
+    );
+    let (_, _, visible) = screen.cursor();
+    assert!(visible, "{expect} left the cursor hidden");
+    let _ = std::fs::remove_file(&out);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_gives_the_terminal_back() -> termlens::Result<()> {
+    a_signal_gives_the_terminal_back(termlens::Signal::Term, "Terminated")
+}
+
+#[cfg(unix)]
+#[test]
+fn sigint_gives_the_terminal_back() -> termlens::Result<()> {
+    a_signal_gives_the_terminal_back(termlens::Signal::Int, "Interrupt")
+}
+
+#[cfg(unix)]
+#[test]
+fn sighup_gives_the_terminal_back() -> termlens::Result<()> {
+    a_signal_gives_the_terminal_back(termlens::Signal::Hup, "Hangup")
 }

@@ -71,7 +71,7 @@ falls in December of the year before. `mossaic-art` says so rather than drawing 
 letter:
 
 ```
-note: 3 pixel(s) fell outside 2027 and were dropped — the first and last calendar
+note: 3 lit pixels fell outside 2027 and were dropped — the first and last calendar
 columns are partial weeks, so 52 of 53 columns hold a whole letter
 ```
 
@@ -103,7 +103,7 @@ Mon   ░░░░░░░░░░██░░░░░░██░░██�
       ░░░░░░░░░░██░░░░░░██░░░░██░░██░░░░████░░░░██░░██░░░░░░██░░░░░░██░░░░░░
 Wed   ░░░░░░░░░░██░░░░░░██░░░░░░██░░░░░░██░░██░░██░░██░░░░░░░░░░░░░░██░░░░░░
 
-background level 1 under letters at level 4  ·  290 background day(s), 1 each
+background level 1 under letters at level 4  ·  290 background days, 1 each
   ·  ΔE 35 at worst, clear
 ```
 
@@ -186,7 +186,7 @@ of work — three hundred easy days would otherwise drown out seven hard ones:
 
   letters     ████████████████████████████  75 of 75 bright
   background  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  0 of 290 at level 1
-  owing       290 background day(s) short, 290 contributions
+  owing       290 background days short, 290 contributions
 ```
 
 The preview marks each state: `██` a letter that is bright enough, `▒▒` one
@@ -323,7 +323,7 @@ mossaic-art --track
       2    71      0     114   2
       0   219    186       -   must stay dark
 
-  still owing  104 day(s) · 302 contributions
+  still owing  104 days · 302 contributions
   today        must stay dark
   tomorrow     must stay dark
 ```
@@ -365,15 +365,15 @@ VYNCINT  ·  2026  ·  tracking art/vyncint-2026.json
               a letter day has to reach 110 to match it
 
   letters     ██████░░░░░░░░░░░░░░░░░░░░░░  18 of 75 bright
-  owing       57 day(s) short, 5,994 contributions between them
-  holes       61 day(s) inside the letters are lit and cannot be unlit
-  around      23 day(s) outside the text have contributions
+  owing       57 days short, 5,994 contributions between them
+  holes       61 days are lit inside the letters and cannot be unlit
+  around      23 days outside the text with contributions
 
   <the year, drawn: bright where a letter is done, dim where it is owed,
    red where a day inside the letters is lit and cannot be unlit>
 
   VYNCINT cannot be drawn cleanly in 2026.
-    61 day(s) inside the letters already have contributions, and
+    61 days inside the letters already have contributions, and
     nothing takes those away — the text would read with holes in it.
     --start-week 1 would leave 23 instead of 61.
 
@@ -390,8 +390,8 @@ VYNCINT  ·  2026  ·  tracking art/vyncint-2026.json
     Tue Aug 25   keep dark
 
   the rest of the year
-    23 letter day(s) still to come, 2,530 contributions
-    34 letter day(s) already past, 3,464 contributions — only back-dated
+    23 letter days still to come, 2,530 contributions
+    34 letter days already past, 3,464 contributions — only back-dated
     commits reach those:
 
       mossaic-art VYNCINT --year 2026 --start-week 6 --top 1 --backfill --repo ../art --write
@@ -450,17 +450,17 @@ mossaic-art --backfill --repo ../art --write    # write it, locally
 # with --merge art/vyncint-2026.json --today 2026-08-19, to reproduce this exactly
 VYNCINT  ·  2026  ·  backfilling against art/vyncint-2026.json
 
-  letters     57 day(s) short, 5,994 commits
+  letters     57 days short, 5,994 commits
   a day gets  what it is short of 110, never a flat count
   reaching    days before 2026-08-19, which are the ones only back-dating reaches
-              23 day(s) from 2026-08-19 on are short too, and left alone — contribute on those as they come
+              23 days from 2026-08-19 on are short too, and left alone — contribute on those as they come
 
-  warning: VYNCINT cannot be drawn cleanly in 2026 — 61 day(s) inside the
+  warning: VYNCINT cannot be drawn cleanly in 2026 — 61 days inside the
   letters are already lit, and nothing takes those away. Backfilling will
   brighten the letters, and the text will still read with holes in it.
   `mossaic-art --track` sweeps --start-week for a placement with fewer.
 
-  3,464 commit(s) across 34 day(s), earliest 2026-02-09, latest 2026-08-14
+  3,464 commits across 34 days, earliest 2026-02-09, latest 2026-08-14
 
 (add --write to create them; this was a dry run)
 ```
@@ -507,7 +507,7 @@ arrive rather than be asked for:
 
 ```yaml
 - id: art
-  uses: vyncint/mossaic/action@v0.6.3
+  uses: vyncint/mossaic/action@v0.7.0
   with:
     text: VYNCINT
     year: "2027"
@@ -584,3 +584,19 @@ The file stores the placement *resolved*, so a text that was centred keeps the
 column it was centred on. Typed flags still win over the saved ones, so
 `--year 2028` is a one-off rather than a surprise. `--plan PATH` puts the file
 somewhere else.
+
+**A plan is version-locked to the tool that wrote it.** Every key is checked,
+not just every value: a plan carrying a key this build does not recognise is
+refused by name rather than applied at its default. That closes the case
+where `backgruond: 2` — one transposition in a hand edit — silently turned
+about 290 background days into keep-dark days at exit 0, on the file that is
+the input to `--backfill --write`, where contributions cannot be unlit. The
+cost is the other direction: a plan written by a *newer* mossaic is refused
+too. Save it again with the version you are running.
+
+**A picture plan needs a mossaic that understands `art`.** A plan saved from
+`--template`, `--matrix` or `--image` stores the picture inline in the `art`
+key. An older build ignores that key and falls back to drawing the `text`
+field, which for a picture is its name — so a 146-day dragon becomes a
+79-day word, at exit 0, and `--backfill` then asks for a different date range
+and a different total.

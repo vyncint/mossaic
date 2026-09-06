@@ -103,7 +103,7 @@ pub fn catalogue() -> Vec<Template> {
     let mut seen: Vec<String> = Vec::new();
 
     for dir in local_dirs() {
-        for (name, canvas) in read_dir(&dir) {
+        for (name, canvas) in read_dir(&dir).0 {
             if !seen.contains(&name) {
                 seen.push(name.clone());
                 found.push(Template {
@@ -133,12 +133,33 @@ pub fn catalogue() -> Vec<Template> {
     found
 }
 
-/// Every `.art` file in one directory, as `(stem, canvas)`.
-fn read_dir(dir: &Path) -> Vec<(String, Canvas)> {
+/// A `.art` file in a template directory that could not be read.
+///
+/// The skip is deliberate policy — one broken template must not take out
+/// `--list-templates` — but the file was skipped *in silence*, and
+/// `--list-templates` is precisely "the command you would reach for to find
+/// out which one is broken". It named nothing, counted nothing, and wrote no
+/// byte to stderr. So `--template mine` answered "no template named mine"
+/// for a file sitting right there under that name, and the natural
+/// conclusion was that the lookup was wrong rather than the file.
+#[derive(Debug, Clone)]
+pub struct Skipped {
+    /// The file name, as a listing should print it.
+    pub file: String,
+    /// The stem, so `--template <stem>` can find the reason.
+    pub stem: String,
+    /// What the parser said.
+    pub why: String,
+}
+
+/// Every `.art` file in one directory, as `(stem, canvas)`, plus what was
+/// skipped and why.
+fn read_dir(dir: &Path) -> (Vec<(String, Canvas)>, Vec<Skipped>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut found = Vec::new();
+    let mut skipped = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("art") {
@@ -147,15 +168,46 @@ fn read_dir(dir: &Path) -> Vec<(String, Canvas)> {
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let Ok(body) = std::fs::read_to_string(&path) else {
-            continue;
+        let file = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(stem)
+            .to_string();
+        let body = match std::fs::read_to_string(&path) {
+            Ok(body) => body,
+            Err(error) => {
+                skipped.push(Skipped {
+                    file,
+                    stem: stem.to_string(),
+                    why: error.to_string(),
+                });
+                continue;
+            }
         };
-        if let Ok(canvas) = Canvas::parse(&body) {
-            found.push((stem.to_string(), canvas));
+        match Canvas::parse(&body) {
+            Ok(canvas) => found.push((stem.to_string(), canvas)),
+            Err(why) => skipped.push(Skipped {
+                file,
+                stem: stem.to_string(),
+                why,
+            }),
         }
     }
     found.sort_by(|a, b| a.0.cmp(&b.0));
-    found
+    skipped.sort_by(|a, b| a.file.cmp(&b.file));
+    (found, skipped)
+}
+
+/// Every local `.art` file that could not be read, across every directory.
+///
+/// Separate from [`catalogue`] because most callers do not want it; the
+/// listing does, and so does the `--template` miss.
+#[must_use]
+pub fn skipped() -> Vec<Skipped> {
+    local_dirs()
+        .iter()
+        .flat_map(|dir| read_dir(dir).1)
+        .collect()
 }
 
 /// Find one template by name, or say what there was to choose from.
@@ -165,7 +217,19 @@ fn read_dir(dir: &Path) -> Vec<(String, Canvas)> {
 /// catalogue is short enough to print.
 pub fn find(name: &str) -> Result<Template, String> {
     let catalogue = catalogue();
-    if let Some(found) = catalogue.iter().find(|template| template.name == name) {
+    let found = catalogue.iter().find(|template| template.name == name);
+    // A local file with that stem is there and did not parse.
+    //
+    // Reported even when a built-in of the same name exists, which is the
+    // shadowing case: the same command drew two different pictures depending
+    // on whether the user's file happened to parse, with nothing printed
+    // either way. Somebody who put `templates/dragon.art` there meant it.
+    if found.is_none_or(|template| template.origin == Origin::Builtin) {
+        if let Some(broken) = skipped().into_iter().find(|s| s.stem == name) {
+            return Err(format!("{}: {}", broken.file, broken.why));
+        }
+    }
+    if let Some(found) = found {
         return Ok(found.clone());
     }
     if catalogue.is_empty() {

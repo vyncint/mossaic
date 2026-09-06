@@ -12,17 +12,24 @@ on:
   # So you can run it now instead of waiting for tomorrow.
   workflow_dispatch:
 
+# Read-only at the workflow level. `issues: write` is granted to the one
+# step that needs it, further down — a token every step can write issues
+# with, in a workflow that runs unattended on a cron and calls a third
+# party's action, is more scope than any of this needs.
 permissions:
   contents: read
-  # Only needed by the issue-comment step below.
-  issues: write
+
+concurrency:
+  group: contribution-art
+  cancel-in-progress: false
 
 jobs:
   track:
+    name: track
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.6.3
+        uses: vyncint/mossaic/action@v0.7.0
         with:
           text: VYNCINT
           year: "2027"
@@ -39,7 +46,7 @@ jobs:
           # the failure notification you already get does the reminding.
           fail-on: never
           # Which mossaic release does the tracking. The default, latest,
-          # follows crates.io; pin a number ("0.6.3") to freeze it.
+          # follows crates.io; pin a number ("0.7.0") to freeze it.
           # version: latest
 
       # ----------------------------------------------------------------- issue
@@ -47,6 +54,10 @@ jobs:
       # and put its number here.
       - name: Comment on the tracking issue
         if: steps.art.outputs.today-short != '0'
+        # The only step that writes anything back to this repository.
+        permissions:
+          contents: read
+          issues: write
         env:
           GH_TOKEN: ${{ github.token }}
           BODY: ${{ steps.art.outputs.markdown }}
@@ -78,7 +89,10 @@ jobs:
       # ----------------------------------------------------------------- email
       - name: Email
         if: vars.EMAIL_ENABLED == 'true'
-        uses: dawidd6/action-send-mail@v18
+        # SHA-pinned, like every action in this repository's own workflows:
+        # a mutable tag on somebody else's repository, in a workflow that
+        # runs unattended, is a supply chain you do not control.
+        uses: dawidd6/action-send-mail@94de994a9f6fffee200243214e17002e2920bb59 # v18
         with:
           server_address: smtp.gmail.com
           server_port: 465

@@ -10,8 +10,15 @@ is the full contributor document and wins wherever the two disagree.
 - `src/` — the library and three binaries: `mossaic` (the chart), `mossaic-art`
   (the planner), `mossaic-glyphs`. `graphics.rs` is the rasteriser, `primer.rs`
   the GitHub colour tokens, `art.rs` the 5×5 font.
-- `tests/` — `smoke.rs` and `pixels.rs` drive the real binary in a real PTY
-  through termlens; `art_cli.rs` drives the planner as a shell would.
+- `tests/` — five files, four layers (CONTRIBUTING §3 has the rule for which
+  one a change belongs in): `art_cli.rs` drives the planner as a shell does
+  and `chart_cli.rs` the chart with no terminal at all — that pair is where a
+  CLI assertion goes; `smoke.rs` and `canvas_pty.rs` drive the real binary in
+  a real PTY through termlens; `pixels.rs` does the same in a PTY that
+  answers the graphics probe.
+- `.claude/skills/termlens/SKILL.md` — the vendored termlens skill. PTY tests
+  follow it: content-based waits only, never a sleep; a readiness predicate
+  has to hold at the width under test.
 - `docs/DESIGN.md` — what was traded for what in the pixel path. **Read it
   before changing anything that emits kitty or sixel.**
 

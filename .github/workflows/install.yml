@@ -20,9 +20,16 @@
 # because the registry is what a user gets.
 name: install
 
+# NOT `on: release` — see the note in binaries.yml: a release created with
+# `GITHUB_TOKEN` raises no event that can start a workflow, so this trigger
+# never fired and nothing verified that a published crate installs.
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to verify (default: the newest published)"
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -36,7 +43,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: install-${{ github.event.release.tag_name || inputs.version || 'latest' }}
+  group: install-${{ inputs.version || 'latest' }}
   cancel-in-progress: false
 
 jobs:
@@ -63,12 +70,14 @@ jobs:
       - name: Ask the registry what was published
         id: crate
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          # One source now: `inputs.version` covers the dispatch and the call
+          # from release.yml alike. The `release` event this used to read
+          # could never fire here.
           WANTED: ${{ inputs.version }}
         run: |
           api="https://crates.io/api/v1/crates/mossaic"
           agent="mossaic-install-check (github actions)"
-          version="${WANTED:-${TAG#v}}"
+          version="${WANTED#v}"
           if [ -z "$version" ]; then
             version=$(curl -sSf -H "User-Agent: $agent" "$api" | jq -r .crate.max_stable_version)
           fi

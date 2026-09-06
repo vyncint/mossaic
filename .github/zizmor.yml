@@ -14,3 +14,10 @@ rules:
       - release.yml
       - install.yml
 
+  # Pinning this project's own action by tag is documented style: the tag is
+  # the release knob (`version:` in action/README.md), and a reader copying
+  # the example wants a version they can recognise, not a SHA. Third-party
+  # actions in the same file are SHA-pinned.
+  unpinned-uses:
+    ignore:
+      - track.example.yml

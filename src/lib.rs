@@ -200,9 +200,100 @@ pub mod image;
 pub mod plan;
 pub mod png;
 pub mod primer;
+pub mod restore;
 pub mod templates;
 pub mod term;
 pub mod ui;
 
 #[cfg(test)]
 mod render_tests;
+
+/// Treat a write to a reader that has gone as a clean exit, everywhere.
+///
+/// Rust's runtime sets `SIGPIPE` to `SIG_IGN`, so `println!` into a closed
+/// pipe panics and the process exits **101** — a code outside the set these
+/// binaries document (`0`, `1`, `2`), over a message nobody was listening
+/// to, with a backtrace note that reads like a crash in mossaic rather than
+/// the user closing a pager. `mossaic-art --font | less` and quitting,
+/// `--list-templates | head`, `--format json | jq -e …` with a jq that exits
+/// early: all ordinary, all a panic.
+///
+/// Which commands escaped was a pipe-buffer accident — the coloured glyph
+/// sheet is 53 KB and always went, the uncoloured one is 9 KB and survived
+/// on Linux but not macOS — so it read as a flake rather than a rule.
+///
+/// A hook rather than a rewrite of 141 `println!` sites: this is a property
+/// of *every* printing path, and a hook cannot be forgotten at the one site
+/// somebody adds next. `libc::signal(SIGPIPE, SIG_DFL)` is the usual
+/// one-liner and is barred here — it is an unsafe call and `Cargo.toml` is
+/// `unsafe_code = "forbid"`, which `SECURITY.md` advertises as posture. It
+/// would also give the wrong answer for `--png`, where the file is already
+/// on disk and the correct status is 0.
+///
+/// The payload is matched on both halves — the std message *and* the errno
+/// text — so a genuine panic that happens to mention a pipe still reports as
+/// a panic. If std ever rewords it, the worst case is the behaviour before
+/// 0.7.0, not something new.
+pub fn quiet_broken_pipe() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        let printing = payload.starts_with("failed printing to stdout")
+            || payload.starts_with("failed printing to stderr");
+        if printing && payload.contains("Broken pipe") {
+            // The reader got what it wanted and hung up. Nothing is left to
+            // say and nothing went wrong.
+            std::process::exit(0);
+        }
+        previous(info);
+    }));
+}
+
+/// Print `text` to stdout, treating a reader that has gone as a clean exit.
+///
+/// Rust's runtime sets `SIGPIPE` to `SIG_IGN`, so `println!` into a closed
+/// pipe panics and the process exits **101** — a code outside the set these
+/// binaries document, over a message nobody was listening to, with a
+/// backtrace note that reads like a crash in mossaic rather than the user
+/// closing a pager. `mossaic-art --font | less` and quitting,
+/// `--list-templates | head`, `--format json | jq -e …` with a jq that exits
+/// early: all ordinary, all a panic.
+///
+/// Which commands escaped was a pipe-buffer accident — the coloured glyph
+/// sheet is 53 KB and always panicked, the uncoloured one is 9 KB and
+/// survived on Linux but not macOS — so it read as a flake.
+///
+/// The `--png` case is the one with a price: a valid, complete PNG is
+/// already on disk and the caller was handed 101, so a wrapper that checks
+/// the status deletes the file and retries. Exiting **0** there is the
+/// correct answer, and is why this is a write-side check rather than
+/// restoring the default `SIGPIPE` disposition — which `unsafe_code =
+/// "forbid"` bars anyway.
+///
+/// Any other write failure is a real one and goes through the caller's own
+/// `fail`.
+pub fn print_or_exit(text: &str) {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => {}
+        // `| head -1`, `| grep -m1`, a pager the user quit: the reader got
+        // what it wanted and hung up. There is nothing left to say and
+        // nothing went wrong.
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => std::process::exit(0),
+        Err(e) => {
+            eprintln!("mossaic: cannot write to stdout: {e}");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// [`print_or_exit`] with a trailing newline, for the `println!` shape.
+pub fn println_or_exit(text: &str) {
+    print_or_exit(&format!("{text}\n"));
+}

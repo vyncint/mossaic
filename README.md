@@ -84,7 +84,7 @@ mossaic-art --track        # how far along, and what today owes
 
 ```
   letters     ██████████████████░░░░░░░░░░  50 of 75 bright
-  owing       25 day(s) short, 100 contributions between them
+  owing       25 days short, 100 contributions between them
 
   VYNCINT can still be drawn cleanly — 100 contributions to go.
 ```
@@ -145,7 +145,7 @@ placement that would salvage the most:
 
 ```
   VYNCINT cannot be drawn cleanly in 2026.
-    61 day(s) inside the letters already have contributions, and
+    61 days inside the letters already have contributions, and
     nothing takes those away — the text would read with holes in it.
     --start-week 1 would leave 23 instead of 61.
 ```
@@ -535,9 +535,12 @@ cargo install mossaic --locked
 
 ```sh
 cargo test                  # everything, no network
-cargo test --test smoke     # the real binary, in a real pty
-cargo test --test pixels    # …in a pty that says it can draw pixels
-cargo test -- --ignored     # the two that call the GitHub API
+cargo test --test art_cli    # the planner, driven as a shell drives it
+cargo test --test chart_cli  # the chart with no terminal at all
+cargo test --test smoke      # the real binary, in a real pty
+cargo test --test canvas_pty # the editor and the template list, in a pty
+cargo test --test pixels     # …in a pty that says it can draw pixels
+cargo test -- --ignored      # the two that call the GitHub API
 ```
 
 Three test layers, because they catch different things: in-process for anything

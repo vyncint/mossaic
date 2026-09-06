@@ -58,7 +58,8 @@ WHAT TO DRAW
 WHERE IT GOES
   --year YEAR         which year's calendar (default: this one)
   --start-week N      left edge, in weeks (default: centred)
-  --commits N         commits per lit day (default 4)
+  --commits N         commits for the brightest day; darker shades are priced
+                      against it (default 4)
   --top ROW           first calendar row, 0 = Sunday (default 1, so Mon-Fri).
                       Text only; a picture uses all seven rows
   --background LEVEL  (--bg) draw the background as a shade 0-3 rather than
@@ -113,6 +114,8 @@ also installed:
   mossaic-glyphs   what this terminal makes of the fallback cells"#;
 
 fn main() {
+    // Before anything prints: a reader that closes early is not a crash.
+    mossaic::quiet_broken_pipe();
     let Some(options) = parse_args() else {
         return;
     };
@@ -230,7 +233,15 @@ fn main() {
         };
         spec.save(&options.plan_path)
             .unwrap_or_else(|error| fail(&error));
-        println!(
+        // stderr, not stdout. Under `--format json` or `--format markdown`
+        // stdout is a *document*: this was its first line, so
+        // `--track --save --format json | jq .` handed a parser two lines of
+        // prose and still exited 0, with an empty stderr — no signal
+        // anywhere. Every other note a track run makes already goes here;
+        // this was the single `println!` that could run ahead of the
+        // document. It bit only on the run that writes the plan, so it read
+        // as a flake on first use.
+        eprintln!(
             "saved {} — from now on:\n  mossaic-art --track\n",
             options.plan_path.display()
         );
@@ -259,13 +270,15 @@ fn main() {
     let art_level = art::level(options.commits, peak);
     let total = placed.total();
     println!(
-        "{}  ·  {}  ·  {} of {} columns  ·  {} days  ·  {} commits\n",
+        "{}  ·  {}  ·  {} of {} columns  ·  {} {}  ·  {} {}\n",
         options.text.to_uppercase(),
         grid.year,
         columns.len(),
         grid.weeks,
         placed.lit.len(),
+        plural(placed.lit.len(), "day", "days"),
         thousands(total),
+        plural(total, "commit", "commits"),
     );
 
     let palette = options
@@ -428,6 +441,10 @@ fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
 
     let mut terminal = ratatui::try_init()
         .unwrap_or_else(|error| fail(&format!("--draw needs an interactive terminal ({error})")));
+    // The editor takes the alternate screen and enables mouse reporting, and
+    // until 0.7.0 had neither a panic hook nor a signal handler — so both of
+    // the exits nobody writes code for left the terminal borrowed.
+    mossaic::restore::guard_terminal();
     let mut out = std::io::stdout();
     let _ = execute!(out, EnableMouseCapture);
     let palette = mossaic::draw::palette();
@@ -501,7 +518,11 @@ fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
 /// `--list-templates`: the catalogue, with where each one came from.
 fn show_templates(colour: bool) {
     let catalogue = templates::catalogue();
-    if catalogue.is_empty() {
+    // Read before the early return: a directory holding only broken files
+    // used to print "no templates installed", which is the least helpful
+    // true sentence available.
+    let skipped = templates::skipped();
+    if catalogue.is_empty() && skipped.is_empty() {
         println!("no templates installed");
         return;
     }
@@ -560,7 +581,26 @@ fn show_templates(colour: bool) {
         }
         println!();
     }
-    println!("draw one:  mossaic-art --template {}", catalogue[0].name);
+    // What was skipped, and why. `templates::read_dir`'s own doc comment
+    // already called this command "the command you would reach for to find
+    // out which one is broken" — and it named nothing, counted nothing and
+    // wrote no byte to stderr. #57's walkthrough puts a first-time
+    // contributor on exactly this path: `cp your-name.art templates/ &&
+    // mossaic-art --list-templates`.
+    if !skipped.is_empty() {
+        println!(
+            "{} {} skipped:",
+            skipped.len(),
+            plural(skipped.len(), "file was", "files were")
+        );
+        for broken in &skipped {
+            println!("  {}: {}", broken.file, broken.why);
+        }
+        println!();
+    }
+    if let Some(first) = catalogue.first() {
+        println!("draw one:  mossaic-art --template {}", first.name);
+    }
 }
 
 /// Everything a run that draws a **picture** does, from preview to commits.
@@ -610,7 +650,15 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         };
         spec.save(&options.plan_path)
             .unwrap_or_else(|error| fail(&error));
-        println!(
+        // stderr, not stdout. Under `--format json` or `--format markdown`
+        // stdout is a *document*: this was its first line, so
+        // `--track --save --format json | jq .` handed a parser two lines of
+        // prose and still exited 0, with an empty stderr — no signal
+        // anywhere. Every other note a track run makes already goes here;
+        // this was the single `println!` that could run ahead of the
+        // document. It bit only on the run that writes the plan, so it read
+        // as a flake on first use.
+        eprintln!(
             "saved {} — from now on:\n  mossaic-art --track\n",
             options.plan_path.display()
         );
@@ -650,14 +698,21 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         return;
     }
 
-    let histogram = canvas.histogram();
+    // The days the *calendar* holds, not the cells the canvas has. A
+    // full-width picture is 7 x 53 = 371 cells against a year of 365, and the
+    // table used to count all of them — disagreeing with the header directly
+    // above it and with what `--write` makes, after a note that had just said
+    // cells were dropped.
+    let histogram = art::levels_histogram(&levels);
     println!(
-        "{name}  ·  {}  ·  {} of {} columns  ·  {} days  ·  {} commits\n",
+        "{name}  ·  {}  ·  {} of {} columns  ·  {} {}  ·  {} {}\n",
         grid.year,
         canvas.width(),
         grid.weeks,
         commits.len(),
+        plural(commits.len(), "day", "days"),
         thousands(total),
+        plural(total, "commit", "commits"),
     );
 
     let palette = options
@@ -682,8 +737,17 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
     // Whether a reader will see a picture or a smudge. The pair measured is the
     // darkest and brightest the drawing actually uses: if those two are faint,
     // everything between them is worse.
-    if let Some((low, high, legibility, delta)) = canvas.closest_pair() {
-        let used: Vec<String> = canvas.palette().iter().map(u8::to_string).collect();
+    // Asked about the shades that land inside the year. A picture whose only
+    // ink falls in the partial weeks drew nothing and still reported
+    // `shades 0 4 · ΔE 70, clear`: the one check this project tells you to
+    // read twice, passing on a drawing that does not exist. `closest_pair_of`
+    // returns `None` for a single shade, so such a run now prints no verdict
+    // at all rather than a flattering one.
+    if let Some((low, high, legibility, delta)) = art::Canvas::closest_pair_of(&histogram) {
+        let used: Vec<String> = art::Canvas::palette_of(&histogram)
+            .iter()
+            .map(u8::to_string)
+            .collect();
         println!(
             "\n  shades {}  ·  closest pair {low} and {high}  ·  ΔE {delta:.0}, {legibility}",
             used.join(" ")
@@ -781,7 +845,18 @@ fn track_canvas(
         return;
     }
 
-    println!("{name} · {} — tracking {who}\n", grid.year);
+    // The placement, for the same reason the text path prints it below its
+    // own header: tracking with a different `--start-week` compares against
+    // a different plan and reports nonsense confidently. The text path had
+    // "the plan N of M columns from week W"; the picture path had nothing,
+    // and a picture is what the shipped consumer tracks.
+    println!(
+        "{name} · {} · week {}, {} {} — tracking {who}\n",
+        grid.year,
+        plan.start_week,
+        plan.columns,
+        plural(plan.columns, "column", "columns")
+    );
     println!("{}\n", art::preview(levels, grid, palette.as_ref()));
 
     let (owing_days, owing_commits) = plan.owing();
@@ -1081,13 +1156,16 @@ fn backfill(
     // commits changes that.
     if let plan::Verdict::Holed { holes } = plan.verdict() {
         println!(
+            // "are" — 0.6.3's plural pass dropped the verb here, so the
+            // sentence read "61 days inside the letters already lit".
             "\n  warning: {} cannot be drawn cleanly in {} — {holes} {} inside the\n  \
-             letters already lit, and nothing takes those away. Backfilling will\n  \
+             letters {} already lit, and nothing takes those away. Backfilling will\n  \
              brighten the letters, and the text will still read with holes in it.\n  \
              `mossaic-art --track` sweeps --start-week for a placement with fewer.",
             plan.text,
             plan.year,
-            plural(holes, "day", "days")
+            plural(holes, "day", "days"),
+            plural(holes, "is", "are")
         );
     }
 
@@ -1225,7 +1303,14 @@ fn track_progress(
     // tracking with a different --start-week than the text was drawn with
     // compares against a different plan entirely. Printing which one is on
     // screen makes that visible rather than baffling.
-    println!("{}  ·  {}  ·  tracking {who}\n", plan.text, plan.year);
+    println!(
+        "{}  ·  {}  ·  week {}, {} {}  ·  tracking {who}\n",
+        plan.text,
+        plan.year,
+        plan.start_week,
+        plan.columns,
+        plural(plan.columns, "column", "columns")
+    );
     println!(
         "  the plan    {} of {} columns from week {}, on rows {}-{}",
         plan.columns,
@@ -1647,9 +1732,12 @@ fn write_font_sheet(path: &Path) {
 }
 
 /// Existing contributions from a saved `gh api graphql` response.
-fn load(path: &PathBuf, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
-    let calendar = github::from_file(&path.to_string_lossy(), None)
-        .unwrap_or_else(|error| fail(&format!("could not read {path:?}: {error}")));
+fn load(path: &Path, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
+    // `from_file` names the path itself now, so re-prefixing would print it
+    // twice — and it used to quote the path where every other path message
+    // in these tools does not.
+    let calendar =
+        github::from_file(&path.to_string_lossy(), None).unwrap_or_else(|error| fail(&error));
     let kept: BTreeMap<NaiveDate, u32> = calendar
         .days()
         .filter(|day| day.count > 0 && grid.holds(day.date))
@@ -1776,6 +1864,24 @@ fn parse_args() -> Option<Options> {
     let mut args = Args::from_env("mossaic-art");
 
     while let Some(arg) = args.next_arg() {
+        // Past a bare `--`, every argument is the text — checked before the
+        // flag names, or `-- --year` would still match the `--year` arm and
+        // `--` would mean "only the next one", which is nobody's convention.
+        if args.past_end_of_options() {
+            if options.text.is_empty() {
+                options.text = art::canonical(&arg).unwrap_or_else(|error| fail(&error));
+            } else {
+                // The trap `--` sets for a first-time user: it means
+                // *everything* after it, as it does in `ls` and `git`, so
+                // options have to come first. Say that rather than leaving
+                // them to work it out.
+                fail(&format!(
+                    "unexpected argument {arg:?} — everything after -- is the text, \
+                     so put the options before it"
+                ));
+            }
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => {
                 println!("{HELP}");
@@ -1871,8 +1977,17 @@ fn parse_args() -> Option<Options> {
                     tracking = args.next_arg();
                 }
             }
-            other if other.starts_with('-') => {
-                fail(&format!("unknown option {other:?} — try --help"))
+            // `is_positional` rather than a bare `starts_with('-')`: after a
+            // bare `--`, an argument that looks like a flag is text. The
+            // hyphen is a glyph the font draws and three documents list, and
+            // it could not be typed in the position they put it in.
+            other if !args.is_positional(other) => {
+                let hint = if options.text.is_empty() {
+                    " — if that is the text, write it after --"
+                } else {
+                    " — try --help"
+                };
+                fail(&format!("unknown option {other:?}{hint}"))
             }
             other if options.text.is_empty() => {
                 // Expanded here rather than at every use: the plan is saved
@@ -1881,6 +1996,49 @@ fn parse_args() -> Option<Options> {
                 options.text = art::canonical(other).unwrap_or_else(|error| fail(&error));
             }
             other => fail(&format!("unexpected argument {other:?}")),
+        }
+    }
+
+    // The same rule, for the three flags that named a companion and were
+    // then ignored without it. #26 settled the principle in the maintainer's
+    // own words — "They are side effects and inputs the user explicitly
+    // asked for … Either honour them or refuse the combination" — and
+    // enumerated `--snapshot`, `--write` and `--file`, all three of which
+    // are refused above. These were missed.
+    //
+    // Refusing rather than honouring, deliberately: honouring `--png` would
+    // mean deciding what a PNG of a preview, a template list, a tracking
+    // report and a backfill each *are*, and `--snapshot` plus
+    // `mossaic --file --png` already covers the one people want. Refusing
+    // keeps that door open.
+    //
+    // The cost of the silence was the shape a script cannot see:
+    // `mossaic-art --template dragon --png preview.png` in a workflow printed
+    // a cheerful report, exited 0 and produced nothing, so the next step read
+    // a file that was not there — or, in a job that regenerates art,
+    // republished the previous run's stale PNG.
+    for (flag, ignored, needs, what) in [
+        (
+            "--png",
+            png_path.is_some() && !font,
+            "--font",
+            "writes the glyph sheet",
+        ),
+        (
+            "-o",
+            options.output.is_some() && !options.draw,
+            "--draw",
+            "names the file the editor saves to",
+        ),
+        (
+            "--format",
+            args.was_typed("--format") && !track,
+            "--track",
+            "chooses how the tracking report is written",
+        ),
+    ] {
+        if ignored {
+            fail(&format!("{flag} {what} — it needs {needs}"));
         }
     }
 
@@ -1951,7 +2109,6 @@ fn parse_args() -> Option<Options> {
             ));
         }
     }
-
     if let Some(path) = &picture {
         let canvas = mossaic::image::load(path, image_options).unwrap_or_else(|error| fail(&error));
         let name = canvas

@@ -42,6 +42,8 @@ Terminals that draw pixels never use these. `mossaic --capabilities` says
 whether yours does.";
 
 fn main() {
+    // Before anything prints: a reader that closes early is not a crash.
+    mossaic::quiet_broken_pipe();
     // The shared parser, like the other two binaries. Parsing by hand made this
     // one disagree with them about everything a user notices: `--color=never` was
     // silently ignored, an unknown option exited 0, a stray argument was dropped,

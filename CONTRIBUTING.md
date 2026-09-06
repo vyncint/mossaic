@@ -16,7 +16,7 @@ getting along with terminals none of us has.
 ```sh
 git clone https://github.com/vyncint/mossaic
 cd mossaic
-cargo test          # 150-odd tests, hermetic and offline
+cargo test          # 223-odd tests, hermetic and offline
 cargo run           # the chart, for whoever `gh` is logged in as
 ```
 
@@ -42,7 +42,10 @@ that is `rust-version` in `Cargo.toml`, verified by the `msrv` job.
 | `src/{ui,app}.rs` | rendering and layout; state, keys and mouse |
 | `src/{art,png}.rs` | the 5×5 font and its costing; a small PNG encoder |
 | `src/render_tests.rs` | in-process tests: layout, colour, encoders, art, PNG |
+| `tests/art_cli.rs` | the planner driven as a shell drives it, no PTY |
+| `tests/chart_cli.rs` | the chart with no terminal at all: a script, a pipe, CI |
 | `tests/smoke.rs` | out-of-process tests: the real binary in a real PTY |
+| `tests/canvas_pty.rs` | the editor and the template list, in a real PTY |
 | `tests/pixels.rs` | the same, in a PTY that answers the graphics probe |
 | `docs/ART.md` | drawing text into a graph, and tracking the plan |
 | `docs/DESIGN.md` | why the pixel path is shaped the way it is |
@@ -50,16 +53,23 @@ that is `rust-version` in `Cargo.toml`, verified by the `msrv` job.
 
 ## 3. Testing policy
 
-Every behavioural change needs a test, and which of the three layers it belongs
+Every behavioural change needs a test, and which of the four layers it belongs
 in is usually obvious:
 
 - **In process** (`src/render_tests.rs`) for anything that is a function of
   inputs: layout maths, hit-testing, palettes, the encoders, the art font.
   Encoders are tested against the formats, not against themselves — the sixel is
   decoded back into pixels and compared to what the rasteriser drew.
-- **Out of process** (`tests/smoke.rs`, through
+- **Out of process, no PTY** (`tests/art_cli.rs` for `mossaic-art`,
+  `tests/chart_cli.rs` for the chart) for a command that prints and exits: a
+  flag's contract, an error message, an exit code, a file written. This is
+  where a new CLI assertion belongs, and it is the largest layer — a command
+  that needs no terminal should not be tested through one.
+- **Out of process, in a PTY** (`tests/smoke.rs` for the chart,
+  `tests/canvas_pty.rs` for the editor and the template list, both through
   [termlens](https://crates.io/crates/termlens)) for anything that involves the
-  event loop, the PTY, or escapes written around ratatui rather than through it.
+  event loop, the PTY, or escapes written around ratatui rather than through it
+  — including what happens on a signal, which is out-of-process by definition.
 - **Out of process, with pixels** (`tests/pixels.rs`) for anything that depends on
   the terminal *answering* the capability probe. Declare what is being simulated —
   `.graphics(Graphics::Kitty).cell_size(9, 19)` — rather than forcing the outcome

@@ -1,6 +1,6 @@
 [package]
 name = "mossaic"
-version = "0.6.3"
+version = "0.7.0"
 edition = "2021"
 # Minimum supported Rust version. Verified by the `msrv` CI job, which reads this
 # field; bumping it is a minor (not patch) change.
@@ -38,12 +38,17 @@ miniz_oxide = "0.9"
 # O_NONBLOCK, to read the terminal's capability replies without blocking on a
 # terminal that never answers. One constant, no unsafe.
 libc = "0.2"
+# Restoring the terminal on SIGINT/SIGTERM/SIGHUP without an unsafe
+# `sigaction`. Unix-only by nature — Windows has no POSIX signals — and
+# already in the tree at this version, since crossterm pulls it through
+# ratatui for its event stream.
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 [dev-dependencies]
 # The end-to-end suite: the real binary, in a real PTY, asserted on the rendered
 # screen — and, with `decode`, on the pixels of the images that went out over
 # kitty and sixel, which no rendered screen can show.
-termlens = { version = "0.7.0", features = ["decode"] }
+termlens = { version = "0.9", features = ["decode"] }
 
 [profile.release]
 lto = true

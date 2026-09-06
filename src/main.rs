@@ -88,6 +88,8 @@ struct Invocation {
 }
 
 fn main() {
+    // Before anything prints: a reader that closes early is not a crash.
+    mossaic::quiet_broken_pipe();
     let Some(invocation) = parse_args() else {
         return;
     };
@@ -129,7 +131,7 @@ fn main() {
     // screen where the first frame paints over it.
     let mut app = App::new(login, year, source);
     app.configure(term::probe(PROBE), options);
-    restore_mouse_on_panic();
+    mossaic::restore::guard_terminal();
 
     let outcome = run(&mut terminal, &mut app);
     let restored = ratatui::try_restore();
@@ -264,16 +266,6 @@ fn report_capabilities(options: Options) {
     println!("cells      {}", app.protocol_name());
 }
 
-/// A panic that unwinds past the event loop would otherwise leave mouse reporting
-/// on, and the shell printing escape codes at every click.
-fn restore_mouse_on_panic() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
-        previous(info);
-    }));
-}
-
 /// Returns `None` when there is nothing left to run, e.g. after printing help.
 fn parse_args() -> Option<Invocation> {
     let mut login = None;
@@ -289,6 +281,23 @@ fn parse_args() -> Option<Invocation> {
     let mut args = Args::from_env("mossaic");
 
     while let Some(arg) = args.next_arg() {
+        // Past a bare `--`, every argument is the login. See the same block
+        // in mossaic-art: a dash-led login has the same hole.
+        if args.past_end_of_options() {
+            if login.is_none() {
+                login = Some(arg);
+            } else {
+                // The trap `--` sets for a first-time user: it means
+                // *everything* after it, as it does in `ls` and `git`, so
+                // options have to come first. Say that rather than leaving
+                // them to work it out.
+                fail(&format!(
+                    "unexpected argument {arg:?} — everything after -- is the login, \
+                     so put the options before it"
+                ));
+            }
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => {
                 println!("{HELP}");
@@ -352,8 +361,15 @@ fn parse_args() -> Option<Invocation> {
             "--cell" => options.cell = Some(parse_cell(&args.value("--cell"))),
             "--png" => png = Some(args.value("--png")),
             "--capabilities" => capabilities = true,
-            other if other.starts_with('-') => {
-                fail(&format!("unknown option {other:?} — try --help"))
+            // The same hole, in the same shared parser: `mossaic -- -weirdlogin`
+            // reported `--` as the unknown option.
+            other if !args.is_positional(other) => {
+                let hint = if login.is_none() {
+                    " — if that is the login, write it after --"
+                } else {
+                    " — try --help"
+                };
+                fail(&format!("unknown option {other:?}{hint}"))
             }
             other => login = Some(other.to_string()),
         }
