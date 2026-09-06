@@ -345,6 +345,48 @@ plan wants dark, and contributing on it punches a hole in the drawing exactly
 as contributing inside a letter does. That is why the table above reports 219
 of them: they are part of the picture.
 
+### When a picture cannot be drawn where it sits
+
+`holed` is the one verdict you cannot answer by contributing more: days inside
+the picture are already brighter than the shade they are drawn at, and nothing
+takes a contribution away. So it is the verdict that most owes you a next move,
+and `--track` sweeps every column of the year to find one:
+
+```
+  Cannot be drawn cleanly — 5 days are brighter than the picture wants,
+  and nothing takes a contribution away.
+  --start-week 37 draws it cleanly.
+```
+
+It is offered in every format — `suggested_start_week` and `suggested_holes` in
+json, a line of its own in markdown, and the `suggested-start-week` output on
+the Action.
+
+Two things decide which column it picks.
+
+**Fewest holes wins.** If nothing draws the picture cleanly you are told the
+least bad column instead — `--start-week 12 would leave 3 holes instead of 25`
+— and if every column is equally bad you are told that, because an emptier year
+is then the only way out.
+
+**Among columns that tie, one that has not begun yet.** A clean column in March
+is arithmetic, not advice: the only way to draw there is `--backfill` into days
+five months gone. This matters more than it sounds. An eleven-column picture in
+a fifty-three column year can easily have nine placements costing zero holes,
+and ranked by column alone the answer is always the one in January.
+
+The preference only breaks ties. A past column that draws the picture cleanly
+still beats a future one that does not, because back-dating is a thing this tool
+does and unlighting a day is not.
+
+A column that would push part of the picture off the end of the year is never
+suggested: a truncated picture is not a cleaner drawing of the same picture, it
+is a smaller one. The first and last calendar columns are partial weeks, so a
+picture carrying ink right to its edges overhangs them wherever it is put, and
+is offered nothing at all. Blank margins are not counted — losing an empty cell
+costs the picture nothing — so `dragon`, fifty-three columns wide with quiet
+edges, still places.
+
 ## Tracking it, day by day
 
 Drawing the art is one command. Getting there while also living a normal year is
@@ -411,7 +453,10 @@ Four kinds of answer, and only two of them are work:
   Nothing takes contributions away, so it is a hole in the text for good. This is
   the honest answer to "why can't I write VYNCINT in 2026": not that it is
   expensive, but that the year has already been written on. `--track` counts the
-  holes, and sweeps `--start-week` to find the placement that runs into fewest.
+  holes, and sweeps `--start-week` to find the placement that runs into fewest —
+  for a picture as well as for text, preferring a column that has not begun when
+  several cost the same. See
+  [When a picture cannot be drawn where it sits](#when-a-picture-cannot-be-drawn-where-it-sits).
 - **A day outside the text with contributions.** Noise around the letters rather
   than damage to them; reported, not warned about.
 

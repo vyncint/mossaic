@@ -504,6 +504,11 @@ fn tally<'a>(days: impl Iterator<Item = &'a Day>) -> (usize, u32) {
 /// spoiling the letters — zero when the background is empty and any
 /// contribution in there is a hole, higher when the plan draws a background
 /// those days can hide in.
+///
+/// `today` decides ties: among columns that cost the same number of holes, one
+/// that has not begun yet wins. A clean column in March is arithmetic, not
+/// advice — the only way to draw there is by back-dating into days that have
+/// gone.
 pub fn best_start_week(
     grid: &Grid,
     columns: usize,
@@ -511,12 +516,13 @@ pub fn best_start_week(
     lit_shape: &[[bool; GLYPH_ROWS]],
     actual: &BTreeMap<NaiveDate, u32>,
     ceiling: u32,
+    today: NaiveDate,
 ) -> Option<(usize, usize)> {
     if columns > grid.weeks {
         return None;
     }
-    (0..=grid.weeks - columns)
-        .map(|start| {
+    chosen(
+        (0..=grid.weeks - columns).map(|start| {
             let holes = lit_shape
                 .iter()
                 .enumerate()
@@ -532,8 +538,96 @@ pub fn best_start_week(
                 .filter(|date| actual.get(date).is_some_and(|count| *count > ceiling))
                 .count();
             (start, holes)
-        })
-        .min_by_key(|(start, holes)| (*holes, *start))
+        }),
+        grid,
+        today,
+    )
+}
+
+/// Pick one placement out of a sweep: fewest holes first, and among columns
+/// that tie on holes, one that has not begun yet.
+///
+/// The tie-break is the whole of this function, and it earns its place from a
+/// live plan. `vyncint/contribution-art` draws an eleven-column heart in a
+/// fifty-three column year, and on 2026-09-06 that year had *nine* placements
+/// costing zero holes. Ranked by column alone the answer was **week 11** —
+/// clean, correct, and in March. The only way to draw there is `--backfill`
+/// into days five months gone, which is not what a reader who has just been
+/// told their year cannot be drawn is asking for. The earliest column that has
+/// not started is week 37, and that is an instruction they can follow this
+/// afternoon.
+///
+/// Holes still win outright. A past column that draws the picture cleanly beats
+/// a future one that does not, because back-dating is a thing this tool does
+/// and unlighting a day is not; the preference only breaks ties.
+fn chosen(
+    candidates: impl Iterator<Item = (usize, usize)>,
+    grid: &Grid,
+    today: NaiveDate,
+) -> Option<(usize, usize)> {
+    let swept: Vec<(usize, usize)> = candidates.collect();
+    let fewest = swept.iter().map(|(_, holes)| *holes).min()?;
+    // Ascending by column, because the sweep is, so `find` and `next` both
+    // mean "the earliest one".
+    let mut tied = swept.iter().filter(|(_, holes)| *holes == fewest);
+    let ahead = tied
+        .clone()
+        .find(|(start, _)| grid.date_at(*start, 0) >= today);
+    ahead.or_else(|| tied.next()).copied()
+}
+
+/// The placement that draws a **picture** with the fewest holes.
+///
+/// The canvas twin of [`best_start_week`], and it exists because the two
+/// differ in what a hole *is*. Text has one shade: a day is inside a letter
+/// or it is background, and a hole is any contribution on a day that must
+/// stay dark. A picture has five, so a day can be a hole by being too
+/// bright for the shade it is drawn at — level 2 with the year's peak on it
+/// is a hole exactly as level 0 with a single commit is. A boolean shape
+/// cannot express that, which is why this sweeps levels instead.
+///
+/// Rather than reimplement the test, each candidate is built into a real
+/// [`Plan`] and asked for its own [`Plan::holes`] — the same call
+/// [`Report`] makes for the `holes` field it publishes. A suggestion that
+/// disagreed with the verdict beside it would be worse than no suggestion,
+/// and the only way to be sure they agree is to ask the same question. It
+/// costs one plan per column, at most fifty-three of them, over a year of
+/// dates; the sweep is not the expensive part of a run that talks to the
+/// GitHub API first.
+///
+/// A placement that pushes lit cells out of the year is not a candidate.
+/// [`Canvas::place`](art::Canvas::place) counts those as `skipped`, and a
+/// truncated picture is not a cleaner drawing of the same picture — it is a
+/// different, smaller one. This is what keeps a full-width template
+/// answering `None` here, which was the whole of the old reasoning for
+/// never asking: it is now enforced by measuring the overhang rather than
+/// by declining to look.
+///
+/// Returns the column and the holes it leaves; `None` when no placement
+/// fits the year at all.
+#[must_use]
+pub fn best_start_week_of(
+    canvas: &art::Canvas,
+    grid: &Grid,
+    actual: &BTreeMap<NaiveDate, u32>,
+    today: NaiveDate,
+) -> Option<(usize, usize)> {
+    let width = canvas.width();
+    if width == 0 || width > grid.weeks {
+        return None;
+    }
+    chosen(
+        (0..=grid.weeks - width).filter_map(|start| {
+            let (levels, skipped) = canvas.place(grid, start);
+            if skipped > 0 || levels.is_empty() {
+                return None;
+            }
+            let plan = Plan::from_levels("", grid, &levels, start, width, actual);
+            Some((start, plan.holes().len()))
+        }),
+        grid,
+        today,
+    )
 }
 
 /// Contributions a year holds, keyed by date — the shape every function here
@@ -932,14 +1026,29 @@ impl Report {
     fn summarise(&self) -> String {
         match self.verdict {
             "drawn" => format!("{} · {} — drawn", self.text, self.year),
+            // The way out belongs here when there is one. This line is the
+            // Action's `headline` output and the subject of the issue the
+            // shipped consumer opens, so for a plan that is holed it is the
+            // whole of what most readers see — and "cannot be unlit" with no
+            // second half reads as "this year is lost" when it means "move it
+            // two columns right".
+            //
+            // Only a *clean* column earns the room. A subject line has one
+            // sentence in it, and "week 12 would leave 17 instead of 25" is a
+            // trade to weigh rather than a thing to do; that one stays in the
+            // body, where there is space to weigh it.
             "holed" => format!(
-                "{} · {} — {} of {} bright, {} {} that cannot be unlit",
+                "{} · {} — {} of {} bright, {} {} that cannot be unlit{}",
                 self.text,
                 self.year,
                 self.bright,
                 self.letters,
                 self.holes,
-                plural(self.holes, "hole", "holes")
+                plural(self.holes, "hole", "holes"),
+                match self.better_placement() {
+                    Some((week, 0)) => format!(" — week {week} draws it"),
+                    _ => String::new(),
+                }
             ),
             // The background is work too, and saying "0 to go" while three
             // hundred field days are bare is the kind of confidently wrong a
@@ -956,6 +1065,22 @@ impl Report {
                     owed => format!(" (+{} for the background)", thousands(owed)),
                 }
             ),
+        }
+    }
+
+    /// The placement worth moving to, if there is one: where it goes and the
+    /// holes it leaves.
+    ///
+    /// `None` when nothing was swept, when nothing fits, or when the best
+    /// column on offer is no better than the one the plan already sits in.
+    /// That last case is the one worth being strict about: a plan that is
+    /// holed everywhere is holed, and "try week 12, it is just as bad" is
+    /// advice that costs a reader a re-run to discover it was not advice.
+    #[must_use]
+    pub fn better_placement(&self) -> Option<(usize, usize)> {
+        match (self.suggested_start_week, self.suggested_holes) {
+            (Some(week), Some(holes)) if holes < self.holes => Some((week, holes)),
+            _ => None,
         }
     }
 
@@ -1092,14 +1217,23 @@ impl Report {
             ));
         }
 
-        if let (Some(week), Some(holes)) = (self.suggested_start_week, self.suggested_holes) {
-            if holes < self.holes {
-                out.push_str(&format!(
-                    "\n`--start-week {week}` would leave {holes} {} instead of {}.\n",
-                    plural(holes, "hole", "holes"),
+        if let Some((week, holes)) = self.better_placement() {
+            out.push_str(&match holes {
+                // Worth its own sentence. "would leave 0 holes instead of 5"
+                // is arithmetic the reader has to finish before they know it
+                // is the answer to their problem; "draws it cleanly" is the
+                // answer. The distinction only became reachable when
+                // pictures started being swept — a text plan wide enough to
+                // fill the year rarely has a spotless column to move to,
+                // and an eleven-column picture in a fifty-three column year
+                // usually has several.
+                0 => format!("\n`--start-week {week}` draws it cleanly.\n"),
+                left => format!(
+                    "\n`--start-week {week}` would leave {left} {} instead of {}.\n",
+                    plural(left, "hole", "holes"),
                     self.holes
-                ));
-            }
+                ),
+            });
         }
         out
     }

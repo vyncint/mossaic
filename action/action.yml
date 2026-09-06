@@ -190,6 +190,23 @@ outputs:
   columns:
     description: How many calendar columns the plan spans.
     value: ${{ steps.track.outputs.columns }}
+  suggested-start-week:
+    description: >-
+      The best column the year has for this plan — often the one it already
+      sits in, so it is worth acting on only when `suggested-holes` is below
+      `holes`. A `holed` plan is the case this exists for: it is the one
+      verdict that cannot be answered by contributing more, so the column to
+      move to is the only thing left to do about it. Empty when no column
+      fits: a placement that pushes part of the drawing out of the year is
+      never suggested, and the first and last calendar columns are partial
+      weeks, so a picture with ink right to its edges has nowhere to go.
+    value: ${{ steps.track.outputs.suggested-start-week }}
+  suggested-holes:
+    description: >-
+      The holes `suggested-start-week` would leave. `0` means that column
+      draws the plan cleanly; any other number below `holes` means less bad
+      rather than fixed.
+    value: ${{ steps.track.outputs.suggested-holes }}
   legibility:
     description: >-
       `clear`, `readable` or `faint` — how well the letters stand out from the
@@ -369,6 +386,8 @@ runs:
           "field-level=" + (.field_level | tostring),
           "start-week=" + (.start_week | tostring),
           "columns=" + (.columns | tostring),
+          "suggested-start-week=" + ((.suggested_start_week // "") | tostring),
+          "suggested-holes=" + ((.suggested_holes // "") | tostring),
           "legibility=" + .legibility,
           "separation=" + (.separation | floor | tostring),
           "field-days=" + (.field_days | tostring),

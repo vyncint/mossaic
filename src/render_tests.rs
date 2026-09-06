@@ -2385,7 +2385,15 @@ fn the_emptiest_placement_is_the_one_suggested() {
             }
         }
     }
-    let (best, holes) = best_start_week(&grid, columns.len(), 1, &columns, &busy, 0).unwrap();
+    // The first column's own Sunday as today, so every column is still ahead
+    // and the tie-break in `chosen` reduces to "the earliest" — which is what
+    // these assertions are about. Note it is *not* `grid.first`: column 0
+    // starts in the December before the year, and using Jan 1 here made the
+    // sweep skip past a perfectly good week 0. The preference for a column
+    // that has not begun has a test of its own below.
+    let today = grid.date_at(0, 0);
+    let (best, holes) =
+        best_start_week(&grid, columns.len(), 1, &columns, &busy, 0, today).unwrap();
     assert!(
         best >= 6,
         "it should clear the busy stretch, got week {best}"
@@ -2394,13 +2402,21 @@ fn the_emptiest_placement_is_the_one_suggested() {
 
     // With nothing in the way, the earliest placement wins — a stable answer
     // rather than an arbitrary one.
-    let (best, holes) =
-        best_start_week(&grid, columns.len(), 1, &columns, &Default::default(), 0).unwrap();
+    let (best, holes) = best_start_week(
+        &grid,
+        columns.len(),
+        1,
+        &columns,
+        &Default::default(),
+        0,
+        today,
+    )
+    .unwrap();
     assert_eq!((best, holes), (0, 0));
 
     // Text that cannot fit has no placement at all.
     let wide = art::bitmap("ABCDEFGHIJ").unwrap();
-    assert!(best_start_week(&grid, wide.len(), 1, &wide, &Default::default(), 0).is_none());
+    assert!(best_start_week(&grid, wide.len(), 1, &wide, &Default::default(), 0, today).is_none());
 }
 
 // ---------------------------------------------------------------- untrusted input
@@ -3153,13 +3169,31 @@ fn a_background_lets_the_letters_land_where_a_bare_graph_could_not() {
         date = date.succ_opt().unwrap();
     }
 
-    let (_, bare_holes) = best_start_week(&grid, columns.len(), 1, &columns, &busy, 0).unwrap();
+    let (_, bare_holes) = best_start_week(
+        &grid,
+        columns.len(),
+        1,
+        &columns,
+        &busy,
+        0,
+        grid.date_at(0, 0),
+    )
+    .unwrap();
     assert!(
         bare_holes > 0,
         "on a bare graph every quiet day inside the block is a hole"
     );
 
-    let (_, hidden) = best_start_week(&grid, columns.len(), 1, &columns, &busy, 1).unwrap();
+    let (_, hidden) = best_start_week(
+        &grid,
+        columns.len(),
+        1,
+        &columns,
+        &busy,
+        1,
+        grid.date_at(0, 0),
+    )
+    .unwrap();
     assert_eq!(
         hidden, 0,
         "a level-1 background is where those days belong, so nothing is a hole"
@@ -4422,4 +4456,163 @@ mod editor {
         assert!(!editor.help, "closed");
         assert_eq!(editor.canvas.at(0, 0), 3, "and the paint landed");
     }
+}
+
+// ------------------------------------------------------- suggesting a placement
+//
+// `holed` is the only verdict a reader cannot act on by contributing more, so
+// it is the one that most owes them a next move. Until 0.8.0 the picture path
+// passed `None` for the suggestion and printed the diagnosis alone — which is
+// the shape of plan most able to move, because a picture narrower than the
+// year has columns to move *to*. Issue #97, found on a live plan.
+
+/// The canvas equivalent of `the_emptiest_placement_is_the_one_suggested`.
+#[test]
+fn a_picture_is_offered_the_column_that_draws_it_cleanly() {
+    use crate::art::{Canvas, Grid};
+    use crate::plan::{best_start_week_of, Plan};
+    use std::collections::BTreeMap;
+
+    let grid = Grid::new(2027).unwrap();
+    // Five columns, both shades used, so a hole can be either "bright where it
+    // must be dark" or "brighter than the shade it is drawn at".
+    let canvas = Canvas::parse("# name: Blip\n04040\n40404\n04040\n40404\n04040\n40404\n04040\n")
+        .expect("a canvas");
+    assert_eq!(canvas.width(), 5);
+
+    // A busy stretch at the start of the year, and nothing after it.
+    let mut busy = BTreeMap::new();
+    for week in 0..8 {
+        for row in 0..7 {
+            let date = grid.date_at(week, row);
+            if grid.holds(date) {
+                busy.insert(date, 200);
+            }
+        }
+    }
+
+    let today = grid.date_at(0, 0);
+    let (week, holes) = best_start_week_of(&canvas, &grid, &busy, today).expect("a placement");
+    assert!(
+        week >= 8,
+        "it should clear the busy stretch, got week {week}"
+    );
+    assert_eq!(holes, 0, "and land somewhere with no holes at all");
+
+    // The suggestion has to agree with the verdict beside it, which is the
+    // whole reason the sweep builds real plans rather than reimplementing the
+    // test: taking the advice must actually produce a plan with no holes.
+    let (levels, skipped) = canvas.place(&grid, week);
+    assert_eq!(skipped, 0, "and lose no part of the picture off the end");
+    let moved = Plan::from_levels("Blip", &grid, &levels, week, canvas.width(), &busy);
+    assert_eq!(moved.holes().len(), 0, "the advice has to be true");
+
+    // Where it sits now, it is not.
+    let (here, _) = canvas.place(&grid, 0);
+    let stuck = Plan::from_levels("Blip", &grid, &here, 0, canvas.width(), &busy);
+    assert!(
+        !stuck.holes().is_empty(),
+        "the busy stretch has to hole the plan, or this proves nothing"
+    );
+}
+
+/// The old reasoning, kept — but enforced by measuring the overhang rather
+/// than by declining to look.
+#[test]
+fn a_full_width_picture_is_still_offered_nothing() {
+    use crate::art::{Canvas, Grid, CANVAS_COLS};
+    use crate::plan::best_start_week_of;
+
+    let grid = Grid::new(2027).unwrap();
+    let mut body = String::from("# name: Wide\n");
+    for _ in 0..7 {
+        body.push_str(&"4".repeat(CANVAS_COLS));
+        body.push('\n');
+    }
+    let canvas = Canvas::parse(&body).expect("a canvas");
+
+    // Every column of a full-width picture is ink, so the partial weeks at the
+    // ends of the year drop some of it wherever it is put. Nothing to suggest,
+    // which is exactly what the call site used to assume without checking.
+    assert!(
+        best_start_week_of(&canvas, &grid, &Default::default(), grid.date_at(0, 0)).is_none(),
+        "a picture as wide as the year has nowhere to go"
+    );
+}
+
+/// A clean column in March is arithmetic, not advice.
+#[test]
+fn a_placement_that_has_already_begun_loses_a_tie() {
+    use crate::art::{Canvas, Grid};
+    use crate::plan::best_start_week_of;
+
+    let grid = Grid::new(2027).unwrap();
+    let canvas = Canvas::parse("# name: Bar\n444\n444\n444\n444\n444\n444\n444\n").expect("canvas");
+
+    // An empty year: every placement costs zero holes, so every placement ties
+    // and only the tie-break decides.
+    let empty = Default::default();
+
+    // Asked in December of the year before, the earliest column wins. Week 1
+    // rather than week 0: the first calendar column is a partial week, so an
+    // all-ink picture placed there loses cells off the top of the year and is
+    // not a candidate at all.
+    let (early, _) = best_start_week_of(&canvas, &grid, &empty, grid.date_at(0, 0)).unwrap();
+    assert_eq!(
+        early, 1,
+        "with the whole year ahead, start as early as it fits"
+    );
+
+    // Asked in the middle of the year, a column in March is still clean and
+    // still useless: the only way to draw there is to back-date into days that
+    // have gone. The answer has to be a column that has not begun.
+    let midyear = grid.date_at(30, 0);
+    let (later, holes) = best_start_week_of(&canvas, &grid, &empty, midyear).unwrap();
+    assert_eq!(holes, 0, "the year is empty, so nothing is ever a hole");
+    assert_eq!(
+        later, 30,
+        "the earliest column that has not started, not the earliest column"
+    );
+    assert!(
+        grid.date_at(later, 0) >= midyear,
+        "and it genuinely has not started"
+    );
+}
+
+/// Holes still win outright — the preference for a future column only breaks
+/// ties, because back-dating is a thing this tool does and unlighting a day is
+/// not.
+#[test]
+fn a_cleaner_placement_beats_a_later_one() {
+    use crate::art::{Canvas, Grid};
+    use crate::plan::best_start_week_of;
+    use std::collections::BTreeMap;
+
+    let grid = Grid::new(2027).unwrap();
+    // A dark middle column, so a contribution there is a hole. An all-ink
+    // picture would prove nothing: `4` wants the year's peak, and a day
+    // holding less than that is *short*, which is a thing you fix by
+    // contributing — not a hole.
+    let canvas = Canvas::parse("# name: Bar\n404\n404\n404\n404\n404\n404\n404\n").expect("canvas");
+
+    // Everything from week 20 on is lightly lit, so no column from there on is
+    // clean. Weeks 0..20 are empty, and by week 30 they are all in the past.
+    let mut busy = BTreeMap::new();
+    for week in 20..grid.weeks {
+        for row in 0..7 {
+            let date = grid.date_at(week, row);
+            if grid.holds(date) {
+                busy.insert(date, 1);
+            }
+        }
+    }
+
+    let midyear = grid.date_at(30, 0);
+    let (week, holes) = best_start_week_of(&canvas, &grid, &busy, midyear).unwrap();
+    assert_eq!(holes, 0, "the empty first half draws it with no holes");
+    assert!(
+        grid.date_at(week, 0) < midyear,
+        "even though that means a column that has already begun — \
+         fewer holes beats sooner, got week {week}"
+    );
 }
