@@ -829,10 +829,17 @@ fn track_canvas(
         let year_total = actual
             .values()
             .fold(0u32, |sum, count| sum.saturating_add(*count));
-        // No suggestion: a picture is usually the full width of the year, so
-        // there is no column to move it to, and offering one that does not fit
-        // is worse than offering none.
-        let report = plan::Report::of(&plan, &who, year_total, today, None);
+        // The sweep, on the path that publishes. A picture used to pass
+        // `None` here on the reasoning that it "is usually the full width of
+        // the year, so there is no column to move it to" — true of the four
+        // shipped templates and wrong about every picture narrower than the
+        // year, which is the shape docs/ART.md asks contributors to draw.
+        // The overhang it was guarding against is now measured by
+        // `best_start_week_of` rather than assumed here, so a full-width
+        // template still gets exactly `None` — for the reason, not by
+        // refusing to look.
+        let suggestion = plan::best_start_week_of(canvas, grid, &actual, today);
+        let report = plan::Report::of(&plan, &who, year_total, today, suggestion);
         match options.format {
             Format::Json => println!(
                 "{}",
@@ -869,11 +876,29 @@ fn track_canvas(
              {owing_days} to go.",
             plural(wanted, "day is", "days are")
         ),
-        plan::Verdict::Holed { holes } => println!(
-            "  Cannot be drawn cleanly — {holes} {} brighter than the \
-             picture wants,\n  and nothing takes a contribution away.",
-            plural(holes, "day is", "days are")
-        ),
+        plan::Verdict::Holed { holes } => {
+            println!(
+                "  Cannot be drawn cleanly — {holes} {} brighter than the \
+                 picture wants,\n  and nothing takes a contribution away.",
+                plural(holes, "day is", "days are")
+            );
+            // `holed` is the one verdict a reader cannot act on by
+            // contributing more, so it is the one that most owes them a next
+            // move. The letters path has said this since it had a sweep; the
+            // picture path printed the diagnosis and stopped.
+            match plan::best_start_week_of(canvas, grid, &actual, today) {
+                Some((week, 0)) => println!("  --start-week {week} draws it cleanly."),
+                Some((week, left)) if left < holes => println!(
+                    "  --start-week {week} would leave {left} {} instead of {holes}.",
+                    plural(left, "hole", "holes")
+                ),
+                _ => println!(
+                    "  Every placement in {} runs into the same problem; an emptier\n  \
+                     year is the way out.",
+                    grid.year
+                ),
+            }
+        }
     }
 
     println!("\n  level  days   done   owing   each");
@@ -1277,8 +1302,15 @@ fn track_progress(
     // number the text report prints, so a notification never has to be parsed
     // out of a screen.
     if options.format != Format::Text {
-        let suggestion =
-            plan::best_start_week(grid, columns.len(), options.top, columns, &actual, hideable);
+        let suggestion = plan::best_start_week(
+            grid,
+            columns.len(),
+            options.top,
+            columns,
+            &actual,
+            hideable,
+            today,
+        );
         let year_total = actual
             .values()
             .fold(0u32, |sum, count| sum.saturating_add(*count));
@@ -1454,6 +1486,7 @@ fn track_progress(
                 columns,
                 &actual,
                 hideable,
+                today,
             ) {
                 Some((week, left)) if left < holes => {
                     println!("    --start-week {week} would leave {left} instead of {holes}.")

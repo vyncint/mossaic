@@ -150,6 +150,11 @@ placement that would salvage the most:
     --start-week 1 would leave 23 instead of 61.
 ```
 
+When a column draws it *cleanly* it says so instead — `--start-week 37 draws it
+cleanly.` — and it says it for pictures as well as for text, preferring a
+column that has not begun when several cost the same. A clean column in March
+is arithmetic; one starting next Sunday is advice.
+
 **A field beats an empty graph.** Letters on nothing means not contributing on
 the other 290 days of the year. `--background 1` draws the background as a shade
 instead, so the art is one green against another and the year stays alive — the

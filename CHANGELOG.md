@@ -9,6 +9,49 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A picture was never offered a better placement, even when one drew it
+  cleanly** (#97). `--track` on a picture passed `None` where the text path
+  passed a real sweep, so the tool said *"cannot be drawn cleanly"* and stopped
+  — for the one verdict a reader cannot answer by contributing more. The
+  reasoning at the call site was that a picture "is usually the full width of
+  the year, so there is no column to move it to", which is true of the four
+  shipped templates and wrong about every picture narrower than the year — the
+  shape `docs/ART.md` and #57 ask contributors to draw. The overhang it was
+  guarding against is now *measured*, so a full-width template still gets no
+  suggestion, for the reason rather than by refusing to look.
+
+  Found on a live plan: `vyncint/contribution-art` draws an eleven-column heart
+  and posts the report to a public issue. Five days inside the picture picked up
+  ordinary contributions after the plan was made, so every day it published
+  "this year is lost" when what it meant was "move it two columns right".
+
+### Added
+
+- **`suggested-start-week` and `suggested-holes` Action outputs**, so a
+  workflow can act on the answer rather than read it. `suggested-holes` of `0`
+  means that column draws the plan cleanly.
+
+### Changed
+
+- **A suggestion prefers a column that has not begun**, when several cost the
+  same number of holes. A clean column in March is arithmetic, not advice: the
+  only way to draw there is `--backfill` into days months gone. This is not a
+  corner case — an eleven-column picture in a fifty-three column year can have
+  nine placements costing zero holes, and ranked by column alone the answer is
+  always the one in January. Holes still win outright; the preference only
+  breaks ties, because back-dating is a thing this tool does and unlighting a
+  day is not. Applies to text as well as to pictures.
+- **A clean column is described as one.** `--start-week 37 draws it cleanly.`
+  rather than "would leave 0 holes instead of 5" — arithmetic the reader had to
+  finish before knowing it was the answer to their problem. The `holed` headline
+  carries it too, which is where it was most missing: that line is the Action's
+  `headline` output and the subject of the issue the shipped consumer opens.
+- **`plan::best_start_week` takes a `today`**, and `plan::best_start_week_of`
+  is its canvas twin. Breaking for anything calling the library directly; the
+  binaries and the Action are unaffected.
+
 ## [0.7.0] - 2026-09-06
 
 Twenty findings and one security advisory, all reported against 0.6.3 with a
@@ -1066,7 +1109,7 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.7.0...HEAD
 [0.7.0]: https://github.com/vyncint/mossaic/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/vyncint/mossaic/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/vyncint/mossaic/compare/v0.6.1...v0.6.2

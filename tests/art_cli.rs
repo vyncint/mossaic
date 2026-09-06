@@ -2639,3 +2639,135 @@ fn the_documented_reports_still_read_the_way_the_docs_print_them() {
         "a parenthesized plural is back in the docs"
     );
 }
+
+/// Issue #97: a picture that is holed has to be told where to go.
+///
+/// This is a CLI test rather than a unit one on purpose. The defect was a
+/// single argument at a call site — `Report::of(.., None)` on the picture path
+/// while the text path passed a real sweep — so every unit test of the sweep
+/// itself passed while the tool said nothing. The only layer that could have
+/// caught it is the one a user sees.
+#[test]
+fn a_holed_picture_is_told_where_it_can_be_drawn() {
+    // Five columns in a fifty-three column year, so there is somewhere to go.
+    // The old comment at the call site said a picture "is usually the full
+    // width of the year"; docs/ART.md asks contributors for exactly this shape.
+    let path = scratch("blip.art");
+    std::fs::write(
+        &path,
+        "# name: Blip\n04040\n40404\n04040\n40404\n04040\n40404\n04040\n",
+    )
+    .expect("the scratch file is writable");
+    let art_path = path.to_string_lossy().into_owned();
+
+    let run = |format: &str| {
+        let out = art(&[
+            "--matrix",
+            &art_path,
+            "--year",
+            "2026",
+            "--start-week",
+            "34",
+            "--track",
+            "--merge",
+            "art/vyncint-2026.json",
+            "--no-colour",
+            "--today",
+            "2026-08-19",
+            "--format",
+            format,
+        ]);
+        assert!(
+            out.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        stdout(&out)
+    };
+
+    let text = run("text");
+    assert!(text.contains("Cannot be drawn cleanly"), "{text}");
+    assert!(
+        text.contains("--start-week 41 draws it cleanly."),
+        "the diagnosis without the way out is the bug:\n{text}"
+    );
+
+    // Every format carries it, because the shipped consumer reads markdown and
+    // json and never sees the screen.
+    let markdown = run("markdown");
+    assert!(
+        markdown.contains("`--start-week 41` draws it cleanly."),
+        "{markdown}"
+    );
+
+    let json = run("json");
+    assert!(json.contains("\"suggested_start_week\": 41"), "{json}");
+    assert!(json.contains("\"suggested_holes\": 0"), "{json}");
+    // The headline is the Action's own output and the subject of the issue it
+    // opens, so it is where "this year is lost" was actually being published.
+    assert!(
+        json.contains("week 41 draws it"),
+        "the headline has to carry it too:\n{json}"
+    );
+
+    // Taking the advice has to work: the suggested column draws it with no
+    // holes at all, or the advice is worse than silence.
+    let moved = art(&[
+        "--matrix",
+        &art_path,
+        "--year",
+        "2026",
+        "--start-week",
+        "41",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--no-colour",
+        "--today",
+        "2026-08-19",
+        "--format",
+        "json",
+    ]);
+    let moved = stdout(&moved);
+    assert!(moved.contains("\"holes\": 0"), "{moved}");
+    assert!(moved.contains("\"verdict\": \"reachable\""), "{moved}");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A picture that already draws cleanly is offered nothing — there is nothing
+/// to offer, and a suggestion beside `reachable` reads as a correction.
+#[test]
+fn a_picture_on_track_is_not_told_to_move() {
+    let path = scratch("blip-clean.art");
+    std::fs::write(
+        &path,
+        "# name: Blip\n04040\n40404\n04040\n40404\n04040\n40404\n04040\n",
+    )
+    .expect("the scratch file is writable");
+
+    let out = art(&[
+        "--matrix",
+        &path.to_string_lossy(),
+        "--year",
+        "2026",
+        "--start-week",
+        "41",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        "--no-colour",
+        "--today",
+        "2026-08-19",
+        "--format",
+        "markdown",
+    ]);
+    let text = stdout(&out);
+    assert!(text.contains("**On track**"), "{text}");
+    assert!(
+        !text.contains("--start-week"),
+        "nothing to suggest, so nothing said:\n{text}"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}

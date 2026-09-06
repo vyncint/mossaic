@@ -123,12 +123,28 @@ least two levels between the two — the `legibility` output says `clear`,
 notification title), `markdown` (the whole report, fit for a message body),
 `json` (everything), and the scalars: `bright`, `letters`, `owing-days`,
 `owing-commits`, `holes`, `today-short`, `tomorrow-need`, `today-kind`,
-`tomorrow-kind`.
+`tomorrow-kind`, `start-week`, `columns`, `suggested-start-week`,
+`suggested-holes`.
 
 With a `background` set, also: `field-level`, `field-days`, `field-bright`,
 `field-owing-days`, `field-owing-commits`, plus `legibility` (`clear` /
 `readable` / `faint`) and `separation` (the CIE76 ΔE between the two shades in
 the worst palette a reader might have).
+
+`suggested-start-week` and `suggested-holes` say where the plan would be
+better placed. They matter for one verdict: `holed` is the only one you cannot
+answer by contributing more, so the column to move to is the only thing left to
+do about it — and until 0.8.0 a picture was never offered one. Act on them when
+`suggested-holes` is below `holes`; `0` there means that column draws the plan
+cleanly.
+
+```yaml
+      - name: Say where it can still be drawn
+        if: >-
+          steps.art.outputs.verdict == 'holed' &&
+          steps.art.outputs.suggested-holes == '0'
+        run: echo "move it to week ${{ steps.art.outputs.suggested-start-week }}"
+```
 
 `today-short` counts a background day too, so a daily "what do I owe today"
 notification keeps working unchanged when you add one. `today-kind` is what
