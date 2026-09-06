@@ -2310,3 +2310,203 @@ fn a_picture_that_draws_nothing_claims_no_legibility() {
         "and its header says so:\n{report}"
     );
 }
+
+/// A template that does not parse is named, not silently skipped.
+///
+/// `templates::read_dir`'s own doc comment calls `--list-templates` "the
+/// command you would reach for to find out which one is broken" — and it
+/// named nothing, counted nothing and wrote no byte to stderr. So the same
+/// file got "a canvas is exactly 7 rows" from `--matrix` and "no template
+/// named sixer" from `--template`: an error about a *name*, for a file
+/// sitting right there under that name, which sends the search to the wrong
+/// place.
+///
+/// #57 — this project's own good-first-issue walkthrough — puts a
+/// first-time contributor on exactly this path: `cp your-name.art
+/// templates/ && mossaic-art --list-templates`.
+#[test]
+fn a_broken_template_is_named_rather_than_skipped_in_silence() {
+    let dir = scratch("tpl");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("templates")).unwrap();
+    std::fs::write(dir.join("templates/broken.art"), "ZZZZZ\nZZZZ\n").unwrap();
+    std::fs::write(
+        dir.join("templates/sixer.art"),
+        "# name: Sixer\n000\n000\n000\n000\n000\n000\n",
+    )
+    .unwrap();
+    // A valid one beside them, so the listing still lists.
+    std::fs::write(
+        dir.join("templates/goodun.art"),
+        "# name: Goodun\n0000\n0400\n0040\n0004\n0000\n0000\n0000\n",
+    )
+    .unwrap();
+
+    let in_dir = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_mossaic-art"))
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .expect("the art binary runs")
+    };
+
+    let listing = in_dir(&["--list-templates", "--no-colour"]);
+    let text = String::from_utf8_lossy(&listing.stdout).into_owned();
+    assert!(
+        listing.status.success(),
+        "one broken file must not fail the listing"
+    );
+    assert!(text.contains("Goodun"), "the good one still lists:\n{text}");
+    for (file, why) in [("broken.art", "not a shade"), ("sixer.art", "7 rows")] {
+        assert!(text.contains(file), "{file} must be named:\n{text}");
+        assert!(text.contains(why), "and why it was skipped:\n{text}");
+    }
+
+    // And `--template <stem>` gives the parse error, not "no template named".
+    let miss = in_dir(&[
+        "--template",
+        "sixer",
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    let text = String::from_utf8_lossy(&miss.stderr).into_owned();
+    assert_eq!(miss.status.code(), Some(2), "{text}");
+    assert!(
+        text.contains("7 rows"),
+        "the parse error, not a name miss:\n{text}"
+    );
+    assert!(!text.contains("no template named"), "{text}");
+
+    // A broken local file that shadows a built-in no longer silently draws
+    // the built-in: the same command used to produce two different pictures
+    // depending on whether the user's file happened to parse.
+    std::fs::write(dir.join("templates/dragon.art"), "000\n000\n000\n").unwrap();
+    let shadowed = in_dir(&[
+        "--template",
+        "dragon",
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    let text = String::from_utf8_lossy(&shadowed.stderr).into_owned();
+    assert_eq!(shadowed.status.code(), Some(2), "{text}");
+    assert!(text.contains("dragon.art"), "{text}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A plan's mistyped key is refused by name, the way a bad value already was.
+///
+/// The loader was loud about every wrong *value* — `background: 99` is "not
+/// between 0 and 4" — and silent about a wrong *key*: `backgruond: 2` was
+/// accepted and the default applied, turning about 290 background days into
+/// keep-dark days at exit 0 with nothing on stderr. Dropping `art` turned a
+/// 146-day picture into a 79-day text. A plan is the input to
+/// `--backfill --write`, and contributions cannot be unlit.
+#[test]
+fn a_plan_with_a_key_it_does_not_know_is_refused() {
+    let plan = scratch("keys.json");
+    let good = r#"{"text":"VYNCINT","year":2027,"start_week":6,"top":1,
+                   "commits":4,"background":2,"user":null}"#;
+    std::fs::write(&plan, good).unwrap();
+    let out = art(&["--plan", plan.to_str().unwrap(), "--no-colour"]);
+    assert!(
+        out.status.success(),
+        "the control plan loads: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    for (label, body) in [
+        ("a typo", good.replace("background", "backgruond")),
+        ("a case change", good.replace("\"user\"", "\"User\"")),
+        (
+            "a key from the future",
+            good.replace("}", r#","outline":true}"#),
+        ),
+    ] {
+        std::fs::write(&plan, &body).unwrap();
+        let out = art(&["--plan", plan.to_str().unwrap(), "--no-colour"]);
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{label}: must be refused\n{text}"
+        );
+        assert!(text.contains("unknown field"), "{label}: by name\n{text}");
+    }
+
+    // A bad *value* is still refused the way it always was.
+    std::fs::write(&plan, good.replace("\"background\":2", "\"background\":99")).unwrap();
+    let out = art(&["--plan", plan.to_str().unwrap(), "--no-colour"]);
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(text.contains("background"), "{text}");
+    let _ = std::fs::remove_file(&plan);
+}
+
+/// A file the user named is not blamed on `gh`.
+///
+/// `--file` and the network share one parser, whose only wording was
+/// "unexpected response from gh" — so a truncated local file was reported as
+/// the GitHub CLI returning something odd, on a run where `gh` was never
+/// executed, and `{"data":{}}` was reported as GitHub having no such login.
+/// The reader then checks `gh auth status`, the username and the network:
+/// everything except the JSON in front of them. `--file` is also the flag
+/// most likely to be handed a file another process is still writing.
+#[test]
+fn a_file_the_user_named_is_not_blamed_on_gh() {
+    let cases: [(&str, &str); 4] = [
+        ("notjson", "not json"),
+        ("empty", ""),
+        ("nouser", r#"{"data":{}}"#),
+        ("nocalendar", r#"{"data":{"user":{"login":"x"}}}"#),
+    ];
+    for (label, body) in cases {
+        let path = scratch(&format!("{label}.json"));
+        std::fs::write(&path, body).unwrap();
+        let named = path.to_str().unwrap();
+
+        // Through the chart…
+        let out = Command::new(env!("CARGO_BIN_EXE_mossaic"))
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .args(["--file", named, "--png", "/tmp/mossaic-blame.png"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the chart binary runs");
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(out.status.code(), Some(2), "{label}: {text}");
+        assert!(text.contains(named), "{label}: the path is named\n{text}");
+        assert!(
+            !text.contains("gh"),
+            "{label}: and gh is not blamed\n{text}"
+        );
+
+        // …and through the tracker's --merge, which shares the loader.
+        let out = art(&[
+            "VYNCINT",
+            "--year",
+            "2026",
+            "--track",
+            "--merge",
+            named,
+            "--no-colour",
+            "--plan",
+            "/dev/null",
+        ]);
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(text.contains(named), "{label} via --merge:\n{text}");
+        assert!(!text.contains("gh"), "{label} via --merge:\n{text}");
+        // And the path is named once, not quoted and then repeated.
+        assert_eq!(
+            text.matches(named).count(),
+            1,
+            "{label}: the path appears once\n{text}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+}

@@ -35,7 +35,7 @@ pub fn fetch(login: &str, year: i32, today: NaiveDate) -> Result<Calendar, Strin
     let from = format!("{year}-01-01T00:00:00Z");
     let to = format!("{year}-12-31T23:59:59Z");
     let body = run_query(&[("login", login), ("from", &from), ("to", &to)])?;
-    parse(year, &body, Some(today))
+    parse(year, &body, Some(today), Source::Gh)
 }
 
 /// Load a calendar from a saved response instead of calling gh.
@@ -50,6 +50,7 @@ pub fn from_file(path: &str, now: Option<NaiveDate>) -> Result<Calendar, String>
         now.map_or_else(|| Local::now().year(), |date| date.year()),
         &body,
         now,
+        Source::File(path),
     )
 }
 
@@ -92,10 +93,58 @@ fn run_query(vars: &[(&str, &str)]) -> Result<String, String> {
     Ok(stdout)
 }
 
+/// Where a response came from, so an error can name the right thing.
+///
+/// `--file` and the network share one parser, and the parser's only wording
+/// was "unexpected response from gh". So a truncated local file the user
+/// wrote themselves was reported as their GitHub CLI returning something
+/// odd — on a run where `gh` was never executed — and `{"data":{}}` was
+/// reported as GitHub having no such login. They then checked
+/// `gh auth status`, the username and the network: everything except the
+/// JSON in front of them.
+///
+/// `--file` is also the flag most likely to be handed a file another
+/// process is still writing, which is exactly the truncated case. The plan
+/// loader two commands away already gets this right.
+#[derive(Debug, Clone, Copy)]
+enum Source<'a> {
+    /// The `gh` subprocess.
+    Gh,
+    /// A file the user named.
+    File(&'a str),
+}
+
+impl Source<'_> {
+    /// "…is not a saved contributions response: <serde>", or the gh wording.
+    fn not_readable(self, detail: &str) -> String {
+        match self {
+            Source::Gh => format!("unexpected response from gh: {detail}"),
+            Source::File(path) => {
+                format!("{path} is not a saved contributions response: {detail}")
+            }
+        }
+    }
+
+    /// The document parsed but holds no user.
+    fn no_user(self) -> String {
+        match self {
+            Source::Gh => "GitHub returned no user for that login".to_string(),
+            Source::File(path) => {
+                format!("{path} holds no user — a saved response has data.user")
+            }
+        }
+    }
+}
+
 /// `now` decides which days count as still to come; `None` means none of them do.
-fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calendar, String> {
+fn parse(
+    fallback_year: i32,
+    body: &str,
+    now: Option<NaiveDate>,
+    source: Source<'_>,
+) -> Result<Calendar, String> {
     let resp: Response =
-        serde_json::from_str(body).map_err(|e| format!("unexpected response from gh: {e}"))?;
+        serde_json::from_str(body).map_err(|e| source.not_readable(&e.to_string()))?;
 
     // Everything below this line came from somewhere else, so it is stripped of
     // control characters before it can reach a terminal.
@@ -111,7 +160,7 @@ fn parse(fallback_year: i32, body: &str, now: Option<NaiveDate>) -> Result<Calen
     let user = resp
         .data
         .and_then(|d| d.user)
-        .ok_or_else(|| "GitHub returned no user for that login".to_string())?;
+        .ok_or_else(|| source.no_user())?;
 
     let calendar = &user.contributions.calendar;
     let mut days = Vec::with_capacity(371);

@@ -518,7 +518,11 @@ fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
 /// `--list-templates`: the catalogue, with where each one came from.
 fn show_templates(colour: bool) {
     let catalogue = templates::catalogue();
-    if catalogue.is_empty() {
+    // Read before the early return: a directory holding only broken files
+    // used to print "no templates installed", which is the least helpful
+    // true sentence available.
+    let skipped = templates::skipped();
+    if catalogue.is_empty() && skipped.is_empty() {
         println!("no templates installed");
         return;
     }
@@ -577,7 +581,26 @@ fn show_templates(colour: bool) {
         }
         println!();
     }
-    println!("draw one:  mossaic-art --template {}", catalogue[0].name);
+    // What was skipped, and why. `templates::read_dir`'s own doc comment
+    // already called this command "the command you would reach for to find
+    // out which one is broken" — and it named nothing, counted nothing and
+    // wrote no byte to stderr. #57's walkthrough puts a first-time
+    // contributor on exactly this path: `cp your-name.art templates/ &&
+    // mossaic-art --list-templates`.
+    if !skipped.is_empty() {
+        println!(
+            "{} {} skipped:",
+            skipped.len(),
+            plural(skipped.len(), "file was", "files were")
+        );
+        for broken in &skipped {
+            println!("  {}: {}", broken.file, broken.why);
+        }
+        println!();
+    }
+    if let Some(first) = catalogue.first() {
+        println!("draw one:  mossaic-art --template {}", first.name);
+    }
 }
 
 /// Everything a run that draws a **picture** does, from preview to commits.
@@ -1688,9 +1711,12 @@ fn write_font_sheet(path: &Path) {
 }
 
 /// Existing contributions from a saved `gh api graphql` response.
-fn load(path: &PathBuf, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
-    let calendar = github::from_file(&path.to_string_lossy(), None)
-        .unwrap_or_else(|error| fail(&format!("could not read {path:?}: {error}")));
+fn load(path: &Path, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
+    // `from_file` names the path itself now, so re-prefixing would print it
+    // twice — and it used to quote the path where every other path message
+    // in these tools does not.
+    let calendar =
+        github::from_file(&path.to_string_lossy(), None).unwrap_or_else(|error| fail(&error));
     let kept: BTreeMap<NaiveDate, u32> = calendar
         .days()
         .filter(|day| day.count > 0 && grid.holds(day.date))

@@ -553,7 +553,24 @@ pub fn contributions(calendar: &crate::calendar::Calendar) -> BTreeMap<NaiveDate
 /// different plan and said so confidently. Saving it once removes the whole
 /// class of mistake: everything here is *resolved*, so a centred text keeps the
 /// column it was centred on even if the text later changes.
+/// A key `Spec` does not recognise is refused, not applied at its default.
+///
+/// The loader was loud about every wrong *value* — `background: 99` is
+/// "not between 0 and 4", by name — and silent about a wrong *key*:
+/// `backgruond: 2` was accepted and the default applied, turning about 290
+/// background days into keep-dark days at exit 0 with nothing on stderr.
+/// Dropping `art` did the same, turning a 146-day picture into a 79-day
+/// text; `--backfill` then asked for a different date range and a different
+/// total. A plan is the input to `--backfill --write`, and contributions
+/// cannot be unlit.
+///
+/// The cost is the forward direction CHANGELOG 0.6.0 deliberately left
+/// open: a plan written by a *newer* mossaic is now refused. That is the
+/// honest trade — the file is version-locked to the tool that wrote it in
+/// practice already, and refusing by name beats applying a default nobody
+/// chose. docs/ART.md's "Saving the plan" section says so.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Spec {
     /// What is being drawn.
     pub text: String,
@@ -659,8 +676,11 @@ impl Spec {
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let body = std::fs::read_to_string(path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-        let spec: Self = serde_json::from_str(&body)
-            .map_err(|error| format!("{} is not a mossaic plan: {error}", path.display()))?;
+        let spec: Self = serde_json::from_str(&body).map_err(|error| {
+            // serde names the key it did not know and lists the ones it does,
+            // which is the whole of what a typo needs.
+            format!("{} is not a mossaic plan: {error}", path.display())
+        })?;
         // Named as a problem with the file, and with the way out of it: 0.2.0
         // let `--commits -1` through, which `--save` then wrote down as four
         // billion, so a plan in the wild can be one this refuses. Saving it
