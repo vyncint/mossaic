@@ -426,6 +426,9 @@ fn a_dark_day_inside_the_picture_still_says_stay_dark() -> termlens::Result<()> 
 /// Ctrl-C *typed into* the editor is a key, handled by the event loop; the
 /// damage always needed an actual signal, which is why `send(Key::Ctrl('c'))`
 /// would not reproduce it.
+/// Unix only: Windows has no POSIX signals, so there is nothing to deliver
+/// and nothing the restore could be asserted against.
+#[cfg(unix)]
 fn a_signal_gives_the_terminal_back(
     signal: termlens::Signal,
     expect: &str,
@@ -471,16 +474,19 @@ fn a_signal_gives_the_terminal_back(
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
 fn sigterm_gives_the_terminal_back() -> termlens::Result<()> {
     a_signal_gives_the_terminal_back(termlens::Signal::Term, "Terminated")
 }
 
+#[cfg(unix)]
 #[test]
 fn sigint_gives_the_terminal_back() -> termlens::Result<()> {
     a_signal_gives_the_terminal_back(termlens::Signal::Int, "Interrupt")
 }
 
+#[cfg(unix)]
 #[test]
 fn sighup_gives_the_terminal_back() -> termlens::Result<()> {
     a_signal_gives_the_terminal_back(termlens::Signal::Hup, "Hangup")

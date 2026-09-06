@@ -87,6 +87,7 @@ pub fn on_panic() {
 /// Failing to register is not worth failing the run over: the terminal is
 /// no worse off than it was before 0.7.0, and the user asked to draw a
 /// chart, not to install a signal handler.
+#[cfg(unix)]
 pub fn on_signal() {
     use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
     let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGINT, SIGTERM, SIGHUP]) else {
@@ -101,6 +102,16 @@ pub fn on_signal() {
         }
     });
 }
+
+/// No-op off Unix.
+///
+/// Windows has no POSIX signals: a console application is torn down through
+/// a control handler with a different lifetime and a different contract, and
+/// pretending otherwise here would mean claiming a guarantee that is not
+/// installed. The panic hook covers the other unguarded exit on every
+/// platform.
+#[cfg(not(unix))]
+pub fn on_signal() {}
 
 /// Everything a TUI owes the terminal, installed in one call.
 ///
