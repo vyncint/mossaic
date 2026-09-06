@@ -9,6 +9,11 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-06
+
+One finding, filed from the repository that consumes this one: the tracker
+withheld its answer from exactly the plans that could still act on it.
+
 ### Fixed
 
 - **A picture was never offered a better placement, even when one drew it
@@ -1109,7 +1114,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/vyncint/mossaic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/vyncint/mossaic/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/vyncint/mossaic/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/vyncint/mossaic/compare/v0.6.1...v0.6.2

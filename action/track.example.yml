@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.7.0
+        uses: vyncint/mossaic/action@v0.8.0
         with:
           text: VYNCINT
           year: "2027"
@@ -46,7 +46,7 @@ jobs:
           # the failure notification you already get does the reminding.
           fail-on: never
           # Which mossaic release does the tracking. The default, latest,
-          # follows crates.io; pin a number ("0.7.0") to freeze it.
+          # follows crates.io; pin a number ("0.8.0") to freeze it.
           # version: latest
 
       # ----------------------------------------------------------------- issue
