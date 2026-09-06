@@ -2449,6 +2449,64 @@ fn control_characters_never_leave_the_parser() {
     assert_eq!(crate::printable("héllo ✓"), "héllo ✓", "text is left alone");
 }
 
+/// The header counts what happened, not what the year will hold.
+///
+/// Every figure on the chart honoured `--today` except the biggest one. It
+/// took `Calendar::total` — GitHub's number for the whole Jan-1..Dec-31
+/// range — while everything below came from `elapsed()`, so reading the
+/// shipped calendar as of March printed December's 9,527 above a grid
+/// showing 2,043 and beside "23 active days": a 4.7x overstatement of the
+/// one figure a screenshot carries.
+///
+/// Asserted against the *footer*, so the test cannot be satisfied by a
+/// header that is merely different — the two have to agree.
+#[test]
+fn the_header_agrees_with_the_footer_when_a_year_is_read_as_of_a_day() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("art/vyncint-2026.json");
+    let Ok(calendar) = crate::github::from_file(
+        path.to_str().unwrap(),
+        Some(NaiveDate::from_ymd_opt(2026, 3, 31).unwrap()),
+    ) else {
+        panic!("the shipped calendar loads");
+    };
+    let elapsed: u32 = calendar.elapsed().map(|day| day.count).sum();
+    let total = calendar.total;
+    assert_ne!(elapsed, total, "the fixture must have future days to test");
+
+    let mut app = ready(calendar);
+    let frame = render(&mut app, 170, 22);
+    let wanted = format!("{} contributions in 2026", crate::thousands(elapsed));
+    assert!(
+        frame.contains(&wanted),
+        "the header must count the elapsed days ({wanted}):\n{frame}"
+    );
+    assert!(
+        !frame.contains(&format!(
+            "{} contributions in 2026",
+            crate::thousands(total)
+        )),
+        "and must not print the whole year's figure over a partial grid"
+    );
+
+    // A finished year is unchanged: `total` is GitHub's own figure and can
+    // legitimately exceed the sum of visible days, which is why the switch
+    // is on `any(future)` rather than on a comparison.
+    let whole = crate::github::from_file(
+        path.to_str().unwrap(),
+        Some(NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()),
+    )
+    .expect("the same file, read whole");
+    let mut app = ready(whole);
+    let frame = render(&mut app, 170, 22);
+    assert!(
+        frame.contains(&format!(
+            "{} contributions in 2026",
+            crate::thousands(total)
+        )),
+        "a finished year still shows GitHub's own total:\n{frame}"
+    );
+}
+
 /// GHSA-jp9f-97rv-j4hx.
 ///
 /// The calendar path was cleaned in the 0.1.0 review; the `.art` header was

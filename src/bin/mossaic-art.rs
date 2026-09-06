@@ -675,7 +675,12 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         return;
     }
 
-    let histogram = canvas.histogram();
+    // The days the *calendar* holds, not the cells the canvas has. A
+    // full-width picture is 7 x 53 = 371 cells against a year of 365, and the
+    // table used to count all of them — disagreeing with the header directly
+    // above it and with what `--write` makes, after a note that had just said
+    // cells were dropped.
+    let histogram = art::levels_histogram(&levels);
     println!(
         "{name}  ·  {}  ·  {} of {} columns  ·  {} {}  ·  {} {}\n",
         grid.year,
@@ -709,8 +714,17 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
     // Whether a reader will see a picture or a smudge. The pair measured is the
     // darkest and brightest the drawing actually uses: if those two are faint,
     // everything between them is worse.
-    if let Some((low, high, legibility, delta)) = canvas.closest_pair() {
-        let used: Vec<String> = canvas.palette().iter().map(u8::to_string).collect();
+    // Asked about the shades that land inside the year. A picture whose only
+    // ink falls in the partial weeks drew nothing and still reported
+    // `shades 0 4 · ΔE 70, clear`: the one check this project tells you to
+    // read twice, passing on a drawing that does not exist. `closest_pair_of`
+    // returns `None` for a single shade, so such a run now prints no verdict
+    // at all rather than a flattering one.
+    if let Some((low, high, legibility, delta)) = art::Canvas::closest_pair_of(&histogram) {
+        let used: Vec<String> = art::Canvas::palette_of(&histogram)
+            .iter()
+            .map(u8::to_string)
+            .collect();
         println!(
             "\n  shades {}  ·  closest pair {low} and {high}  ·  ΔE {delta:.0}, {legibility}",
             used.join(" ")

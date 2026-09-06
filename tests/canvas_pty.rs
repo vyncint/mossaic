@@ -213,6 +213,12 @@ fn undo_takes_the_drawing_back_and_says_when_there_is_no_more() -> termlens::Res
     let mut terminal = spawn(&["--draw", "--year", "2027", "--plan", "/dev/null"])?;
     terminal.wait_until(ready)?;
 
+    // Right one column first. The cursor starts at Sunday of week 0, which
+    // for 2027 is *outside* the year — the panel draws it `·` and says it
+    // costs nothing — and since 0.7.0 the level rows count only days the
+    // calendar has, so painting there moves no row. That distinction is the
+    // point of the fix, so the test has to respect it.
+    terminal.send(Key::Char('l'))?;
     terminal.send(Key::Char('3'))?;
     terminal.wait_until(|screen| screen.contains("level 3     1 day "))?;
     terminal.send(Key::Char('u'))?;
@@ -289,6 +295,8 @@ fn quitting_puts_the_terminal_back() -> termlens::Result<()> {
 fn an_unsaved_drawing_is_not_lost_quietly() -> termlens::Result<()> {
     let mut terminal = spawn(&["--draw", "--year", "2027", "--plan", "/dev/null"])?;
     terminal.wait_until(ready)?;
+    // Inside the year: see the note in `undo_takes_the_drawing_back`.
+    terminal.send(Key::Char('l'))?;
     terminal.send(Key::Char('4'))?;
     terminal.wait_until(|screen| screen.contains("level 4     1 day "))?;
     terminal.send(Key::Char('q'))?;

@@ -470,13 +470,35 @@ fn header(app: &App) -> Line<'static> {
     ];
     if let Load::Ready(calendar) = &app.load {
         spans.push(separator(palette));
-        // github.com's own wording, under its own chart.
+        // github.com's own wording, under its own chart — and github.com
+        // counts what has *happened*, because it has no future data to count.
+        //
+        // This was the one figure `--today` did not move. It took
+        // `Calendar::total`, GitHub's number for the whole Jan-1..Dec-31
+        // range, while every statistic below it comes from `elapsed()` —
+        // "days that have actually happened, which is what statistics are
+        // drawn from". Reading the shipped calendar as of 2026-03-31 put
+        // December's 9,527 above a grid showing 2,043, a 4.7x overstatement,
+        // beside "23 active days"; docs/DESIGN.md §2 says days still to come
+        // "are excluded from every statistic", and this is the biggest one
+        // and the only one a screenshot carries.
+        //
+        // It also broke the two features where `--today` was meant to be
+        // used together: the `--snapshot` preview flow advertised the whole
+        // plan's cost as already paid, while the planner on the same data
+        // said thousands of contributions were still owed.
+        //
+        // The same `any(future)` test gates the "blank = still to come"
+        // legend below, so the header and that legend turn on together. A
+        // finished year, and the current year fetched with no `--today`, are
+        // unchanged: `total` and the sum of visible days agree there.
+        let counted = if calendar.days().any(|day| day.future) {
+            calendar.elapsed().map(|day| day.count).sum()
+        } else {
+            calendar.total
+        };
         spans.push(Span::styled(
-            format!(
-                "{} contributions in {}",
-                thousands(calendar.total),
-                app.year
-            ),
+            format!("{} contributions in {}", thousands(counted), app.year),
             Style::new().fg(palette.ansi(palette.fg)),
         ));
     }

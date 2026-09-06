@@ -2172,3 +2172,141 @@ fn the_help_prices_commits_the_way_the_report_does() {
         "the level table must price out to the header:\n{report}"
     );
 }
+
+/// The cost table counts the days the year has, not the cells the canvas has.
+///
+/// A full-width picture is 7 x 53 = 371 cells against a year of 365, and the
+/// preview table counted all of them — so it disagreed with the header
+/// directly above it and with what `--write` makes, immediately after a note
+/// saying cells had been dropped. The four shipped templates cannot catch
+/// this: all of them are drawn clear of the partial weeks across 2000-2100,
+/// which is why this plants its own ink there.
+///
+/// README says of the editor panel "the same arithmetic `--write` uses, not
+/// an estimate of it", and the table is what somebody budgets against before
+/// making commits that cannot be unmade.
+#[test]
+fn the_cost_table_prices_out_to_the_header() {
+    // 2027-01-01 is a Friday, so column 0's Sun..Thu and column 52's tail are
+    // outside the year. Ink in both, plus one cell that is genuinely inside.
+    let mut rows = vec![vec!['0'; 53]; 7];
+    rows[0][0] = '4'; // outside: before Jan 1
+    rows[6][52] = '4'; // outside: after Dec 31
+    rows[5][0] = '4'; // inside: Friday of week 0 is Jan 1 itself
+    rows[3][10] = '2'; // inside, comfortably
+    let body = format!(
+        "# name: Edges\n{}\n",
+        rows.iter()
+            .map(|row| row.iter().collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let path = scratch("edges.art");
+    std::fs::write(&path, body).unwrap();
+
+    let out = art(&[
+        "--matrix",
+        path.to_str().unwrap(),
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    let report = String::from_utf8_lossy(&out.stdout).into_owned();
+    let _ = std::fs::remove_file(&path);
+
+    // The header: `Edges  ·  2027  ·  N of 53 columns  ·  D days  ·  C commits`
+    let header = report.lines().next().unwrap_or_default();
+    let fields: Vec<&str> = header.split('·').map(str::trim).collect();
+    let header_days: usize = fields[3]
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let header_commits: u32 = fields[4]
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .replace(',', "")
+        .parse()
+        .unwrap();
+
+    // The table: `      4     2   4` and `      0   363   must stay dark`.
+    let (mut table_days, mut table_commits, mut dark) = (0usize, 0u32, 0usize);
+    for line in report.lines() {
+        let cells: Vec<&str> = line.split_whitespace().collect();
+        if cells.len() == 3 {
+            if let (Ok(level), Ok(days), Ok(each)) = (
+                cells[0].parse::<u8>(),
+                cells[1].replace(',', "").parse::<usize>(),
+                cells[2].replace(',', "").parse::<u32>(),
+            ) {
+                if level > 0 {
+                    table_days += days;
+                    table_commits += days as u32 * each;
+                }
+            }
+        }
+        if cells.len() == 5 && cells[0] == "0" && line.contains("must stay dark") {
+            dark = cells[1].replace(',', "").parse().unwrap();
+        }
+    }
+
+    assert_eq!(
+        table_days, header_days,
+        "the level rows must sum to the header's day count:\n{report}"
+    );
+    assert_eq!(
+        table_commits, header_commits,
+        "and price out to its commit total:\n{report}"
+    );
+    assert_eq!(
+        table_days + dark,
+        365,
+        "lit rows plus level 0 are the days 2027 has, not 53x7:\n{report}"
+    );
+}
+
+/// A picture whose only ink falls outside the year gets no legibility verdict.
+///
+/// The verdict was computed from the raw canvas, so a drawing that puts
+/// nothing at all inside the year still reported `shades 0 4 · closest pair
+/// 0 and 4 · ΔE 70, clear` — the one check this project tells you to read
+/// twice, passing on a drawing that does not exist.
+#[test]
+fn a_picture_that_draws_nothing_claims_no_legibility() {
+    let mut rows = vec![vec!['0'; 53]; 7];
+    rows[0][0] = '4';
+    rows[6][52] = '4';
+    let body = format!(
+        "# name: Outside\n{}\n",
+        rows.iter()
+            .map(|row| row.iter().collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let path = scratch("outside.art");
+    std::fs::write(&path, body).unwrap();
+    let out = art(&[
+        "--matrix",
+        path.to_str().unwrap(),
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    let report = String::from_utf8_lossy(&out.stdout).into_owned();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        !report.contains("closest pair"),
+        "a drawing with no ink in the year has no shades to compare:\n{report}"
+    );
+    assert!(
+        report.contains("0 days") && report.contains("0 commits"),
+        "and its header says so:\n{report}"
+    );
+}

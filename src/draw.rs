@@ -222,6 +222,27 @@ impl Editor {
             })
     }
 
+    /// How many days sit at each level, over the days the year actually has.
+    ///
+    /// `Canvas::histogram` counts *cells*, and the partial weeks at either
+    /// end are cells with no date behind them — the panel drew them as `·`
+    /// and told the user they "cost nothing", then counted them anyway. So
+    /// the rows read `level 4  1 day  4 commits each` four lines above
+    /// `0 commits in total`. `estimate()` has always filtered by `date_at`;
+    /// this is the same filter, for the rows beside it.
+    #[must_use]
+    pub fn histogram(&self) -> [usize; 5] {
+        let mut counts = [0usize; 5];
+        for week in 0..self.canvas.width() {
+            for row in 0..CANVAS_ROWS {
+                if self.date_at(week, row).is_some() {
+                    counts[usize::from(self.canvas.at(week, row)).min(4)] += 1;
+                }
+            }
+        }
+        counts
+    }
+
     /// The two shades in the drawing that look most alike, and how far apart
     /// they are in the worst palette a reader might have.
     ///
@@ -230,7 +251,11 @@ impl Editor {
     /// hold two shades nobody can separate. See [`art::Canvas::closest_pair`].
     #[must_use]
     pub fn legibility(&self) -> Option<(u8, u8, Legibility, f32)> {
-        self.canvas.closest_pair()
+        // Over the shades that land inside the year, for the same reason the
+        // preview does: a drawing whose only ink is in the partial weeks
+        // draws nothing, and a verdict on it would be about cells nobody
+        // will see.
+        art::Canvas::closest_pair_of(&self.histogram())
     }
 
     /// Handle a keystroke.
@@ -496,7 +521,7 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
     frame.render_widget(Paragraph::new(lines), body);
 
     // The numbers, which are the reason to draw here rather than in an editor.
-    let histogram = editor.canvas.histogram();
+    let histogram = editor.histogram();
     let peak = editor.peak();
     let mut stats: Vec<Line<'_>> = Vec::new();
     stats.push(Line::from(match editor.cursor_date() {
@@ -515,7 +540,8 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
     for level in (0..=4u8).rev() {
         let count = histogram[usize::from(level)];
         let rgb = palette.levels[usize::from(level)];
-        let bar = "█".repeat(count * 30 / (editor.canvas.width() * CANVAS_ROWS).max(1));
+        let total: usize = histogram.iter().sum();
+        let bar = "█".repeat(count * 30 / total.max(1));
         stats.push(Line::from(vec![
             Span::raw(format!(
                 "  level {level}  {count:>4} {:<6}  ",
