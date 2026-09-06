@@ -88,6 +88,8 @@ struct Invocation {
 }
 
 fn main() {
+    // Before anything prints: a reader that closes early is not a crash.
+    mossaic::quiet_broken_pipe();
     let Some(invocation) = parse_args() else {
         return;
     };
@@ -129,7 +131,7 @@ fn main() {
     // screen where the first frame paints over it.
     let mut app = App::new(login, year, source);
     app.configure(term::probe(PROBE), options);
-    restore_mouse_on_panic();
+    mossaic::restore::guard_terminal();
 
     let outcome = run(&mut terminal, &mut app);
     let restored = ratatui::try_restore();
@@ -262,16 +264,6 @@ fn report_capabilities(options: Options) {
     let mut app = App::new("preview".to_string(), Local::now().year(), Source::GitHub);
     app.configure(caps, options);
     println!("cells      {}", app.protocol_name());
-}
-
-/// A panic that unwinds past the event loop would otherwise leave mouse reporting
-/// on, and the shell printing escape codes at every click.
-fn restore_mouse_on_panic() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
-        previous(info);
-    }));
 }
 
 /// Returns `None` when there is nothing left to run, e.g. after printing help.

@@ -113,6 +113,8 @@ also installed:
   mossaic-glyphs   what this terminal makes of the fallback cells"#;
 
 fn main() {
+    // Before anything prints: a reader that closes early is not a crash.
+    mossaic::quiet_broken_pipe();
     let Some(options) = parse_args() else {
         return;
     };
@@ -428,6 +430,10 @@ fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
 
     let mut terminal = ratatui::try_init()
         .unwrap_or_else(|error| fail(&format!("--draw needs an interactive terminal ({error})")));
+    // The editor takes the alternate screen and enables mouse reporting, and
+    // until 0.7.0 had neither a panic hook nor a signal handler — so both of
+    // the exits nobody writes code for left the terminal borrowed.
+    mossaic::restore::guard_terminal();
     let mut out = std::io::stdout();
     let _ = execute!(out, EnableMouseCapture);
     let palette = mossaic::draw::palette();
