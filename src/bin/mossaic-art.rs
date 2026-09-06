@@ -58,7 +58,8 @@ WHAT TO DRAW
 WHERE IT GOES
   --year YEAR         which year's calendar (default: this one)
   --start-week N      left edge, in weeks (default: centred)
-  --commits N         commits per lit day (default 4)
+  --commits N         commits for the brightest day; darker shades are priced
+                      against it (default 4)
   --top ROW           first calendar row, 0 = Sunday (default 1, so Mon-Fri).
                       Text only; a picture uses all seven rows
   --background LEVEL  (--bg) draw the background as a shade 0-3 rather than
@@ -232,7 +233,15 @@ fn main() {
         };
         spec.save(&options.plan_path)
             .unwrap_or_else(|error| fail(&error));
-        println!(
+        // stderr, not stdout. Under `--format json` or `--format markdown`
+        // stdout is a *document*: this was its first line, so
+        // `--track --save --format json | jq .` handed a parser two lines of
+        // prose and still exited 0, with an empty stderr — no signal
+        // anywhere. Every other note a track run makes already goes here;
+        // this was the single `println!` that could run ahead of the
+        // document. It bit only on the run that writes the plan, so it read
+        // as a flake on first use.
+        eprintln!(
             "saved {} — from now on:\n  mossaic-art --track\n",
             options.plan_path.display()
         );
@@ -261,13 +270,15 @@ fn main() {
     let art_level = art::level(options.commits, peak);
     let total = placed.total();
     println!(
-        "{}  ·  {}  ·  {} of {} columns  ·  {} days  ·  {} commits\n",
+        "{}  ·  {}  ·  {} of {} columns  ·  {} {}  ·  {} {}\n",
         options.text.to_uppercase(),
         grid.year,
         columns.len(),
         grid.weeks,
         placed.lit.len(),
+        plural(placed.lit.len(), "day", "days"),
         thousands(total),
+        plural(total, "commit", "commits"),
     );
 
     let palette = options
@@ -616,7 +627,15 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         };
         spec.save(&options.plan_path)
             .unwrap_or_else(|error| fail(&error));
-        println!(
+        // stderr, not stdout. Under `--format json` or `--format markdown`
+        // stdout is a *document*: this was its first line, so
+        // `--track --save --format json | jq .` handed a parser two lines of
+        // prose and still exited 0, with an empty stderr — no signal
+        // anywhere. Every other note a track run makes already goes here;
+        // this was the single `println!` that could run ahead of the
+        // document. It bit only on the run that writes the plan, so it read
+        // as a flake on first use.
+        eprintln!(
             "saved {} — from now on:\n  mossaic-art --track\n",
             options.plan_path.display()
         );
@@ -658,12 +677,14 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
 
     let histogram = canvas.histogram();
     println!(
-        "{name}  ·  {}  ·  {} of {} columns  ·  {} days  ·  {} commits\n",
+        "{name}  ·  {}  ·  {} of {} columns  ·  {} {}  ·  {} {}\n",
         grid.year,
         canvas.width(),
         grid.weeks,
         commits.len(),
+        plural(commits.len(), "day", "days"),
         thousands(total),
+        plural(total, "commit", "commits"),
     );
 
     let palette = options
@@ -1782,6 +1803,24 @@ fn parse_args() -> Option<Options> {
     let mut args = Args::from_env("mossaic-art");
 
     while let Some(arg) = args.next_arg() {
+        // Past a bare `--`, every argument is the text — checked before the
+        // flag names, or `-- --year` would still match the `--year` arm and
+        // `--` would mean "only the next one", which is nobody's convention.
+        if args.past_end_of_options() {
+            if options.text.is_empty() {
+                options.text = art::canonical(&arg).unwrap_or_else(|error| fail(&error));
+            } else {
+                // The trap `--` sets for a first-time user: it means
+                // *everything* after it, as it does in `ls` and `git`, so
+                // options have to come first. Say that rather than leaving
+                // them to work it out.
+                fail(&format!(
+                    "unexpected argument {arg:?} — everything after -- is the text, \
+                     so put the options before it"
+                ));
+            }
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => {
                 println!("{HELP}");
@@ -1877,8 +1916,17 @@ fn parse_args() -> Option<Options> {
                     tracking = args.next_arg();
                 }
             }
-            other if other.starts_with('-') => {
-                fail(&format!("unknown option {other:?} — try --help"))
+            // `is_positional` rather than a bare `starts_with('-')`: after a
+            // bare `--`, an argument that looks like a flag is text. The
+            // hyphen is a glyph the font draws and three documents list, and
+            // it could not be typed in the position they put it in.
+            other if !args.is_positional(other) => {
+                let hint = if options.text.is_empty() {
+                    " — if that is the text, write it after --"
+                } else {
+                    " — try --help"
+                };
+                fail(&format!("unknown option {other:?}{hint}"))
             }
             other if options.text.is_empty() => {
                 // Expanded here rather than at every use: the plan is saved
@@ -1887,6 +1935,49 @@ fn parse_args() -> Option<Options> {
                 options.text = art::canonical(other).unwrap_or_else(|error| fail(&error));
             }
             other => fail(&format!("unexpected argument {other:?}")),
+        }
+    }
+
+    // The same rule, for the three flags that named a companion and were
+    // then ignored without it. #26 settled the principle in the maintainer's
+    // own words — "They are side effects and inputs the user explicitly
+    // asked for … Either honour them or refuse the combination" — and
+    // enumerated `--snapshot`, `--write` and `--file`, all three of which
+    // are refused above. These were missed.
+    //
+    // Refusing rather than honouring, deliberately: honouring `--png` would
+    // mean deciding what a PNG of a preview, a template list, a tracking
+    // report and a backfill each *are*, and `--snapshot` plus
+    // `mossaic --file --png` already covers the one people want. Refusing
+    // keeps that door open.
+    //
+    // The cost of the silence was the shape a script cannot see:
+    // `mossaic-art --template dragon --png preview.png` in a workflow printed
+    // a cheerful report, exited 0 and produced nothing, so the next step read
+    // a file that was not there — or, in a job that regenerates art,
+    // republished the previous run's stale PNG.
+    for (flag, ignored, needs, what) in [
+        (
+            "--png",
+            png_path.is_some() && !font,
+            "--font",
+            "writes the glyph sheet",
+        ),
+        (
+            "-o",
+            options.output.is_some() && !options.draw,
+            "--draw",
+            "names the file the editor saves to",
+        ),
+        (
+            "--format",
+            args.was_typed("--format") && !track,
+            "--track",
+            "chooses how the tracking report is written",
+        ),
+    ] {
+        if ignored {
+            fail(&format!("{flag} {what} — it needs {needs}"));
         }
     }
 
@@ -1957,7 +2048,6 @@ fn parse_args() -> Option<Options> {
             ));
         }
     }
-
     if let Some(path) = &picture {
         let canvas = mossaic::image::load(path, image_options).unwrap_or_else(|error| fail(&error));
         let name = canvas

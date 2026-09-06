@@ -525,10 +525,14 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
             Span::raw(if level == 0 {
                 "  (must stay dark)".to_string()
             } else {
-                format!(
-                    "  {} commits each",
-                    thousands(art::commits_to_reach(level, peak))
-                )
+                {
+                    let each = art::commits_to_reach(level, peak);
+                    format!(
+                        "  {} {} each",
+                        thousands(each),
+                        crate::plural(each, "commit", "commits")
+                    )
+                }
             }),
         ]));
     }

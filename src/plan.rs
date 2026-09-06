@@ -946,10 +946,18 @@ impl Report {
         out.push_str(&match self.verdict {
             "drawn" => format!("**{} is drawn.**\n\n", self.text),
             "holed" => format!(
-                "**Cannot be drawn cleanly** — {} {} inside the letters already \
-                 lit, and nothing takes those away.\n\n",
+                // The noun, not the verb. 0.6.3 moved the verb in front of
+                // "inside the letters", which turned "already lit" into a
+                // reduced relative clause on *the letters* — the sentence
+                // said the letters were lit rather than the days. The text
+                // renderer's equivalent still read correctly, so only the
+                // path the Action publishes regressed.
+                "**Cannot be drawn cleanly** — {} {} inside the letters {} already \
+                 lit, and nothing takes {} away.\n\n",
                 self.holes,
-                plural(self.holes, "day is", "days are")
+                plural(self.holes, "day", "days"),
+                plural(self.holes, "is", "are"),
+                plural(self.holes, "it", "them")
             ),
             _ => format!(
                 "**On track** — {} {} to go{}.\n\n",

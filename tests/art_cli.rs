@@ -759,9 +759,12 @@ fn a_saved_plan_makes_the_flags_optional() {
         "{}",
         String::from_utf8_lossy(&saved.stderr)
     );
+    // On stderr since 0.7.0: under `--format json` or `--format markdown`
+    // stdout is a document, and this line was its first. It is still shown,
+    // in every format, where a human at a terminal sees it.
     assert!(
-        stdout(&saved).contains("mossaic-art --track"),
-        "it says what is next"
+        String::from_utf8_lossy(&saved.stderr).contains("mossaic-art --track"),
+        "it says what is next, on stderr"
     );
     let spec: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("mossaic-plan.json")).unwrap())
@@ -1890,4 +1893,282 @@ fn every_binary_parses_arguments_the_same_way() {
             "{name} {flag}: {error}"
         );
     }
+}
+
+/// A flag that names a companion either honours it or refuses the pair.
+///
+/// #26 settled this in the maintainer's own words — "They are side effects
+/// and inputs the user explicitly asked for … Either honour them or refuse
+/// the combination" — and enumerated `--snapshot`, `--write` and `--file`,
+/// all three of which are refused. `--png`, `-o` and `--format` were missed:
+/// each was accepted in every mode and honoured in one, at exit 0, with an
+/// empty stderr and no file.
+///
+/// The cost is the shape a script cannot see.
+/// `mossaic-art --template dragon --png preview.png` in a workflow printed a
+/// cheerful report, exited 0 and produced nothing, so the next step read a
+/// file that was not there — or republished the previous run's stale PNG.
+/// `install.yml` only ever runs `--font --png`, the one pair that works.
+#[test]
+fn a_flag_that_names_a_companion_is_refused_without_it() {
+    let png = scratch("refused.png");
+    let png = png.to_str().unwrap();
+    let cases: [(&[&str], &str); 7] = [
+        (
+            &["--template", "dragon", "--year", "2027", "--png"],
+            "--font",
+        ),
+        (
+            &[
+                "--matrix",
+                "art/templates/dragon.art",
+                "--year",
+                "2027",
+                "--png",
+            ],
+            "--font",
+        ),
+        (&["VYNCINT", "--year", "2027", "--png"], "--font"),
+        (&["--list-templates", "--png"], "--font"),
+        (&["--track", "--png"], "--font"),
+        (&["--backfill", "--repo", "/tmp/nope", "--png"], "--font"),
+        (
+            &["--image", "art/dragon.png", "--year", "2027", "--png"],
+            "--font",
+        ),
+    ];
+    for (args, needs) in cases {
+        let _ = std::fs::remove_file(png);
+        let mut argv: Vec<&str> = args.to_vec();
+        argv.push(png);
+        argv.extend(["--no-colour", "--plan", "/dev/null"]);
+        let out = art(&argv);
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{args:?} must be refused\n{text}"
+        );
+        assert!(
+            text.contains(needs),
+            "{args:?}: the message names {needs}\n{text}"
+        );
+        assert!(
+            !Path::new(png).exists(),
+            "{args:?}: a refused run writes no file"
+        );
+    }
+
+    // The one pair that works is untouched.
+    let out = art(&["--font", "--png", png, "--no-colour"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(Path::new(png).exists(), "--font --png still writes it");
+    let _ = std::fs::remove_file(png);
+
+    // The two adjacent silent no-ops.
+    for (args, needs) in [
+        (
+            vec!["-o", "/tmp/nope.art", "VYNCINT", "--year", "2027"],
+            "--draw",
+        ),
+        (
+            vec!["VYNCINT", "--year", "2027", "--format", "json"],
+            "--track",
+        ),
+    ] {
+        let mut argv = args.clone();
+        argv.extend(["--no-colour", "--plan", "/dev/null"]);
+        let out = art(&argv);
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{args:?}\n{text}");
+        assert!(text.contains(needs), "{args:?}\n{text}");
+    }
+}
+
+/// `--` means the rest is text, including the hyphen the font draws.
+///
+/// `-` is a glyph this project lists three times — README's punctuation
+/// line, `action.yml`'s `text:` description, and the binary's own no-glyph
+/// message — and it could not be typed in the position all three put it in.
+/// Worse, `--` was itself reported as the unknown option, so the escape
+/// hatch a user reaches for named itself as the mistake, and no quoting
+/// helped. You reach for `mossaic-art -- "$TEXT"` precisely when the text is
+/// not yours to control, which is what the Action does with `text:`.
+#[test]
+fn a_double_dash_makes_the_rest_text() {
+    for (text, columns) in [("-", 5), ("-.-", 17), ("A-B", 17)] {
+        let out = art(&[
+            "--year",
+            "2027",
+            "--no-colour",
+            "--plan",
+            "/dev/null",
+            "--",
+            text,
+        ]);
+        let first = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            out.status.success(),
+            "{text:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            first.starts_with(&text.to_uppercase()),
+            "{text:?} is the subject: {first}"
+        );
+        assert!(
+            first.contains(&format!("{columns} of 53 columns")),
+            "{text:?} draws {columns} columns: {first}"
+        );
+    }
+
+    // An argument that looks like a flag is text after `--`.
+    let out = art(&["--no-colour", "--plan", "/dev/null", "--", "-h"]);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).starts_with("-H"),
+        "`-- -h` draws rather than printing help"
+    );
+
+    // A genuine unknown option is still one, and the message points at `--`
+    // when the argument could plausibly have been the text.
+    let out = art(&["-A-"]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text.contains("unknown option"), "{text}");
+    assert!(text.contains("--"), "the way out is named: {text}");
+
+    // And `--` means *everything* after it, as it does in `ls` and `git`, so
+    // an option written after the text is an error that says so.
+    let out = art(&["--", "-", "--year", "2027"]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(text.contains("put the options before it"), "{text}");
+}
+
+/// `--track --save` writes a machine document to stdout and nothing else.
+///
+/// The `saved …` confirmation was the single `println!` that could run ahead
+/// of the document, so `--format json | jq .` got two lines of prose first —
+/// at exit 0, with an empty stderr, so there was no signal anywhere. It bit
+/// only on the run that writes the plan, so it read as a flake on first use.
+#[test]
+fn saving_a_plan_does_not_write_prose_into_a_machine_document() {
+    let plan = scratch("saveformat.json");
+    let merge = Path::new(env!("CARGO_MANIFEST_DIR")).join("art/vyncint-2026.json");
+
+    for format in ["json", "markdown"] {
+        let _ = std::fs::remove_file(&plan);
+        let out = art(&[
+            "VYNCINT",
+            "--year",
+            "2026",
+            "--start-week",
+            "6",
+            "--track",
+            "--save",
+            "--plan",
+            plan.to_str().unwrap(),
+            "--merge",
+            merge.to_str().unwrap(),
+            "--today",
+            "2026-08-19",
+            "--format",
+            format,
+            "--no-colour",
+        ]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout);
+        match format {
+            "json" => {
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .unwrap_or_else(|e| panic!("stdout must be one JSON document: {e}\n{text}"));
+            }
+            _ => assert!(
+                text.starts_with("### "),
+                "stdout must start with the heading:\n{text}"
+            ),
+        }
+        // The confirmation is still shown — on stderr, where a human sees it.
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("mossaic-art --track"),
+            "the confirmation is not lost, only moved"
+        );
+        assert!(plan.exists(), "and the plan is written");
+    }
+    let _ = std::fs::remove_file(&plan);
+}
+
+/// `--help`'s description of `--commits` has to price what the tool prices.
+///
+/// It said "commits per lit day", and a reader who did that multiplication
+/// on the shipped dragon arrived at 584 where the tool prints 442 — a 32%
+/// overestimate from following the help exactly. `--commits` prices the
+/// *brightest* day; darker shades are priced against it, which docs/ART.md
+/// and the source comment both say correctly. The help is the only
+/// description a `cargo install` user gets: `docs/*` is excluded from the
+/// published archive and README never mentions the flag.
+#[test]
+fn the_help_prices_commits_the_way_the_report_does() {
+    let help = String::from_utf8_lossy(&art(&["--help"]).stdout).into_owned();
+    let line = help
+        .lines()
+        .find(|l| l.trim_start().starts_with("--commits"))
+        .expect("--commits is documented");
+    assert!(
+        line.contains("brightest"),
+        "the help must price the brightest shade, not every lit day: {line}"
+    );
+
+    // And the arithmetic it now describes is the one the report performs.
+    let report = String::from_utf8_lossy(
+        &art(&[
+            "--template",
+            "dragon",
+            "--year",
+            "2027",
+            "--no-colour",
+            "--plan",
+            "/dev/null",
+        ])
+        .stdout,
+    )
+    .into_owned();
+    let header: u32 = report
+        .lines()
+        .next()
+        .and_then(|l| l.rsplit("·").next())
+        .and_then(|tail| tail.split_whitespace().next().map(str::to_string))
+        .and_then(|n| n.replace(',', "").parse().ok())
+        .expect("the header names a commit total");
+    // Sum the level rows: `      4    75   4`.
+    let mut table = 0u32;
+    for line in report.lines() {
+        let cells: Vec<&str> = line.split_whitespace().collect();
+        // Edition 2021 here, so no let-chains.
+        if let [level, days, each] = cells.as_slice() {
+            if let (Ok(_), Ok(days), Ok(each)) = (
+                level.parse::<u32>(),
+                days.replace(',', "").parse::<u32>(),
+                each.replace(',', "").parse::<u32>(),
+            ) {
+                table += days * each;
+            }
+        }
+    }
+    assert_eq!(
+        table, header,
+        "the level table must price out to the header:\n{report}"
+    );
 }
