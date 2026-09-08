@@ -234,7 +234,9 @@ fn the_mouse_hovers_and_clicks() -> termlens::Result<()> {
     let stride = 3;
     let from = GRID_X + 10 * stride;
     let to = GRID_X + 20 * stride;
-    t.drag(MouseButton::Left, (from, row), (to, row))?;
+    // 0.10 spread the two coordinate pairs into four column-first arguments,
+    // so a transposed `find` result cannot be handed over by mistake.
+    t.drag(MouseButton::Left, from, row, to, row)?;
 
     let screen =
         t.wait_frame(|s| s.contains("contributions on ") || s.contains("No contributions on "))?;
@@ -703,8 +705,10 @@ fn a_drag_lands_on_the_day_it_ended_on() -> termlens::Result<()> {
     let stride = 3;
     t.drag(
         MouseButton::Left,
-        (GRID_X + 10 * stride, row),
-        (GRID_X + 30 * stride, row),
+        GRID_X + 10 * stride,
+        row,
+        GRID_X + 30 * stride,
+        row,
     )?;
 
     let screen = t.wait_frame(|s| s.contains(" on "))?;

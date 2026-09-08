@@ -48,7 +48,7 @@ signal-hook = { version = "0.3", default-features = false, features = ["iterator
 # The end-to-end suite: the real binary, in a real PTY, asserted on the rendered
 # screen — and, with `decode`, on the pixels of the images that went out over
 # kitty and sixel, which no rendered screen can show.
-termlens = { version = "0.9", features = ["decode"] }
+termlens = { version = "0.10", features = ["decode", "regex", "serde"] }
 
 [profile.release]
 lto = true

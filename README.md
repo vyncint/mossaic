@@ -545,8 +545,21 @@ cargo test --test chart_cli  # the chart with no terminal at all
 cargo test --test smoke      # the real binary, in a real pty
 cargo test --test canvas_pty # the editor and the template list, in a pty
 cargo test --test pixels     # …in a pty that says it can draw pixels
-cargo test -- --ignored      # the two that call the GitHub API
+cargo test --test emulation  # what the emulator drops — the invariant the rest rests on
+cargo test -- --ignored      # the GitHub API tests, and the termlens-cli suite
 ```
+
+`tests/emulation.rs` is the one to read first when something is inexplicable.
+Every other file here asserts on a grid a VT emulator produced from mossaic's
+bytes, so if mossaic emits a sequence that emulator does not implement, the
+grid is quietly wrong and every one of those assertions is being made against
+a plausible-looking fiction. It pins exactly what gets dropped — one `SGR 59`
+that changes no cell — in all three rendering modes.
+
+`tests/cli.rs` drives [`termlens-cli`], the command that ships beside the
+harness, against mossaic's own screens: saved, rendered to SVG with the
+palette intact, and diffed. It is `#[ignore]`d because it installs the tool,
+which a plain `cargo test` should not do behind your back; CI runs it by name.
 
 Three test layers, because they catch different things: in-process for anything
 that is a function of its inputs — including the encoders, checked *against the
@@ -585,3 +598,4 @@ option, the Rust ecosystem's standard. Contributions are dual licensed the same
 way unless you say otherwise.
 
 [termlens]: https://crates.io/crates/termlens
+[`termlens-cli`]: https://crates.io/crates/termlens-cli
