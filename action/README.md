@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.8.0
+        uses: vyncint/mossaic/action@v0.8.1
         with:
           text: VYNCINT
           year: "2027"
@@ -84,7 +84,7 @@ drawn. The rest are the same either way.
 
 ```yaml
       - id: art
-        uses: vyncint/mossaic/action@v0.8.0
+        uses: vyncint/mossaic/action@v0.8.1
         with:
           template: dragon
           year: "2027"
@@ -236,7 +236,7 @@ on 290 days of the year is a job nobody reads.
 
 ## Notes
 
-- **Two knobs, two jobs.** The ref you pin (`@v0.8.0`, `@main`) chooses the
+- **Two knobs, two jobs.** The ref you pin (`@v0.8.1`, `@main`) chooses the
   *action's steps* — the glue that runs the tracker and shapes the outputs.
   The `version` input chooses the *tracker itself*, straight from crates.io.
   The default, `latest`, is fine for a daily report; pin a number when you

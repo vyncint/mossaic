@@ -9,6 +9,62 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-08
+
+A chart that was not moving stopped saying so twelve times a second, and the
+suite gained the check that tells it whether any of its other assertions can
+be trusted.
+
+### Fixed
+
+- **An idle chart repainted on a timer, whether or not anything had changed**
+  (#102). `app.redraw` gated only the full clear, not the draw beneath it, so
+  the loop bracketed and drew on every 80 ms tick for the life of the process:
+  a DEC 2026 open/close pair on the wire about twelve and a half times a
+  second for a picture nobody was changing. Measured at 244 repaints over a
+  twenty-second idle wait, against 2 immediately after load; now 0.
+
+  It draws when something changed instead — input, the full-clear flag, or a
+  fetch landing, which is the one model change no event announces and is
+  detected by watching `Load::Loading` leave. The loading spinner is the
+  exception that shapes the guard: it turns off the frame counter with no
+  event behind it, so a fetch in flight keeps the loop painting.
+
+  Nothing on screen differs. The one accepted cost is that `today()` reads the
+  clock when `--today` is absent, so a chart left open across midnight no
+  longer corrects itself on the next tick — any key does it, and the
+  alternative was a wakeup every 80 ms forever.
+
+### Changed
+
+- **The `termlens` dev-dependency moves to 0.9 → 0.10.1**, with the `regex`
+  and `serde` features. The upgrade cost three call sites: `drag` now takes
+  four column-first arguments instead of two coordinate pairs, so a transposed
+  `find` result cannot be handed to it by mistake. Nothing that ships is
+  touched.
+
+- **`tests/emulation.rs` pins what the emulator drops**, which is the
+  invariant every other test here rests on. Each of them asserts against a
+  grid a VT emulator produced from mossaic's bytes, so a sequence that
+  emulator does not implement makes the grid quietly wrong and every
+  assertion in the repository a claim about a plausible-looking fiction.
+  0.10 made it checkable, and the answer is the same in all three rendering
+  modes — text cells, kitty and sixel: one `SGR 59`, underline colour, which
+  changes no cell. Pinned exactly, because anything joining that list might
+  change one.
+
+- **`tests/cli.rs` drives `termlens-cli`** against mossaic's own screens —
+  saved, rendered to SVG with every truecolour the chart chose still in it,
+  and diffed. `#[ignore]`d, because a `cargo test` that installs a tool
+  behind a contributor's back is a surprise this crate should not spring; CI
+  runs it by name, as it already does for the tests needing `gh`.
+
+- **The vendored termlens skill is refreshed to 0.10.1**, and
+  `check-skill-version.sh` now fails when that copy and the dependency
+  disagree on major.minor. Nothing can diff the copy against upstream — the
+  published crate does not ship the skill — but the two versions agreeing is
+  exactly the drift that happens.
+
 ## [0.8.0] - 2026-09-06
 
 One finding, filed from the repository that consumes this one: the tracker
@@ -1114,7 +1170,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/vyncint/mossaic/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/vyncint/mossaic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/vyncint/mossaic/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/vyncint/mossaic/compare/v0.6.2...v0.6.3
