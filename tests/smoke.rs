@@ -622,34 +622,36 @@ fn chrono_year(screen: &Screen) -> i32 {
 
 #[test]
 fn an_idle_chart_stops_writing() -> termlens::Result<()> {
-    // The chart repaints on a timer — 80 ms, so the loading spinner can turn —
-    // which means a frame goes out whether or not anything changed. What must
-    // *not* happen is that each of those frames rewrites the screen: ratatui
-    // diffs its buffer and the painter diffs the images, so a settled chart
-    // should cost a pair of synchronized-update brackets and nothing else.
+    // **The claim got stronger in #102.** The chart used to repaint on an
+    // 80 ms timer whether or not anything had changed, and this asserted the
+    // next best thing: that each of those frames rewrote *nothing*, because
+    // ratatui diffs its buffer and the painter diffs the images. Now there is
+    // no frame at all — so rather than counting printable characters in idle
+    // frames, this counts the idle frames, and there are none.
     //
-    // Invisible to every content predicate, because each of those frames shows
-    // exactly the right content. `printable_chars` is what sees it.
+    // Invisible to every content predicate either way, because a settled
+    // chart shows exactly the right thing whichever it does.
     let mut t = chart(&PREVIEW)?;
     t.wait_frame(loaded)?;
     let settled = t.screen().repaints();
-    // Let several more frames go by with no input at all.
-    t.wait_frame(|s| s.repaints() >= settled + 4)?;
 
-    let idle: Vec<u32> = t
-        .frame_timings()
-        .iter()
-        .filter(|frame| frame.index() > settled)
-        .map(|frame| frame.printable_chars())
-        .collect();
+    // A wait that has to expire: nothing is coming, because nothing changed.
+    let err = t
+        .wait_frame_for(|s| s.repaints() > settled, Duration::from_secs(2))
+        .expect_err("an idle chart must not repaint");
     assert!(
-        idle.len() >= 3,
-        "expected several idle frames to inspect, got {idle:?}"
+        matches!(err, termlens::Error::Timeout { .. }),
+        "expected a timeout, got: {err}"
     );
-    assert!(
-        idle.iter().all(|written| *written == 0),
-        "an idle chart rewrote the screen: printable characters per frame {idle:?}"
+    assert_eq!(
+        t.screen().repaints(),
+        settled,
+        "an idle chart put frames on the wire for a picture that was not moving"
     );
+
+    // And the loop is idle, not wedged: a keystroke still draws.
+    t.send(Key::Right)?;
+    t.wait_frame(|s| s.repaints() > settled)?;
     Ok(())
 }
 
@@ -678,9 +680,12 @@ fn nothing_rings_the_bell() -> termlens::Result<()> {
     ] {
         t.send(key)?;
     }
-    // A frame after the last of them, so every key has been through the loop.
-    let settled = t.screen().repaints();
-    let screen = t.wait_frame(|s| s.repaints() > settled + 1)?;
+    // Let the batch settle, so every key has been through the loop. Waiting
+    // for *more frames* was the idiom while the chart repainted on a timer;
+    // since #102 an idle chart produces none, and "the picture stopped
+    // changing" is both what this actually means and what survives the app
+    // getting quieter still.
+    let screen = t.wait_stable(Duration::from_millis(300))?;
     assert_eq!(
         screen.bells(),
         0,
@@ -800,9 +805,11 @@ fn the_wheel_does_nothing_behind_the_help_overlay() -> termlens::Result<()> {
     let help = t.wait_frame(|s| s.contains("This terminal"))?;
     t.scroll(GRID_X, row, Scroll::Up)?;
 
-    // Give it frames to have acted in, then check nothing did.
-    let settled = help.repaints();
-    let after = t.wait_frame(|s| s.repaints() > settled + 2)?;
+    // Give it time to have acted in, then check nothing did. Not "wait for
+    // two more frames": since #102 a scroll the overlay swallows produces no
+    // frame at all, which is the point being asserted.
+    let _ = help;
+    let after = t.wait_stable(Duration::from_millis(300))?;
     assert!(
         after.contains("This terminal"),
         "the overlay should still be up:\n{after}"
