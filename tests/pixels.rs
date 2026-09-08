@@ -607,7 +607,7 @@ fn a_flood_of_motion_is_drained_not_replayed() -> termlens::Result<()> {
     const CROSSED: u32 = 40;
     let from = 5 + 5 * 2;
     let to = from + CROSSED as u16 * 2;
-    terminal.drag(termlens::MouseButton::Left, (from, row), (to, row))?;
+    terminal.drag(termlens::MouseButton::Left, from, row, to, row)?;
     let after = terminal.wait_frame(|screen| screen.text().contains(" on "))?;
 
     let payloads = after.graphics().total() - base.total();

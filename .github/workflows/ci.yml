@@ -61,6 +61,11 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --all-features
+        env:
+          # Every screen a failing wait embeds is also written here, so the
+          # `report` step below can put it in the summary instead of leaving
+          # it in a log someone has to scroll (termlens 0.10).
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
       # Again from a timezone that is already tomorrow. Reports are pinned to
       # `--today` precisely so they do not depend on when they run, and the way
       # that rule gets broken is a new assertion about whatever day CI happened
@@ -69,6 +74,23 @@ jobs:
       - run: cargo test --all-features --test art_cli
         env:
           TZ: Pacific/Kiritimati
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
+      # The termlens-cli suite is `#[ignore]`d so a plain `cargo test` never
+      # installs anything behind a contributor's back (the same arrangement
+      # smoke.rs uses for the tests needing `gh`). CI is where it should run,
+      # so CI asks for it by name. The install is the version the lockfile
+      # names, so the tool and the library are one release.
+      - run: cargo test --all-features --test cli -- --ignored
+        env:
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
+      # A PTY failure is a picture, and a log is the worst place to read one.
+      # This renders every screen the suite left behind — and every insta
+      # `.snap.new` — into the job summary, with SVG and HTML uploaded. It
+      # installs termlens-cli itself, so nothing else here has to.
+      - uses: vyncint/termlens/.github/actions/report@e1b96c8203fd727fa3458af395719c429966ee82 # v0.10.1
+        if: failure()
+        with:
+          name: termlens-report-${{ matrix.os }}
 
   # The `cfg(not(unix))` path — a probe that asks nothing, since reading
   # `/dev/tty` with O_NONBLOCK is a unix arrangement — is code the matrix above
@@ -155,6 +177,20 @@ jobs:
           persist-credentials: false
       - run: ./.github/scripts/test-extract-changelog.sh
 
+  # The vendored termlens skill is refreshed by hand, and a stale copy is
+  # silent: agents working here get guidance for a version that is no longer
+  # the dependency. Nothing can diff it against upstream — the published crate
+  # does not ship the skill — but the two versions agreeing is checkable, and
+  # that is the drift that happens.
+  skill-version:
+    name: skill version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: ./.github/scripts/check-skill-version.sh
+
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
@@ -182,7 +218,7 @@ jobs:
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor, release-scripts]
+    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor, release-scripts, skill-version]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every needed job succeeded
