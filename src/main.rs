@@ -15,7 +15,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use ratatui::DefaultTerminal;
 
-use mossaic::app::{App, Graphics, Options, Source};
+use mossaic::app::{App, Graphics, Load, Options, Source};
 use mossaic::cli::Args;
 use mossaic::primer::{Appearance, Palette, Season};
 use mossaic::{github, graphics, png, term, ui};
@@ -148,6 +148,13 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
     let mut mouse = false;
     app.request();
 
+    // Whether anything has changed since the last frame went out. The first
+    // one always does; after that the loop draws only when there is something
+    // new to show (#102). Without this it drew on every `TICK`, so an idle
+    // chart put a synchronized-update bracket on the wire twelve times a
+    // second for a picture that was not moving.
+    let mut dirty = true;
+
     while !app.quit {
         if app.mouse != mouse {
             mouse = app.mouse;
@@ -157,7 +164,13 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
                 execute!(out, DisableMouseCapture)?;
             }
         }
+        // A fetch landing is the one model change no event announces, so it
+        // is detected rather than reported: `request` sets `Loading`, and
+        // `drain` leaves that state when a calendar or a failure arrives.
+        let was_loading = matches!(app.load, Load::Loading);
         app.drain();
+        dirty |= was_loading != matches!(app.load, Load::Loading);
+
         if std::mem::take(&mut app.redraw) {
             // Pixels the text layer never wrote are pixels it cannot erase, so
             // anything that moves or removes the image clears the screen first.
@@ -172,14 +185,23 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
             if let Some(painter) = &mut app.gfx {
                 painter.invalidate();
             }
+            dirty = true;
         }
         // One frame, bracketed: the text goes out through ratatui and the images
         // straight after it, and a terminal that understands DEC 2026 shows the
         // two together instead of a chart that arrives without its cells.
-        execute!(out, BeginSynchronizedUpdate)?;
-        terminal.draw(|frame| ui::draw(frame, app))?;
-        app.paint(&mut out)?;
-        execute!(out, EndSynchronizedUpdate)?;
+        //
+        // Drawn only when it would say something different. The spinner is the
+        // single thing that moves without an event, so a fetch in flight keeps
+        // the loop painting; everything else here is driven by a key, a mouse
+        // report, a resize, or that fetch landing.
+        if dirty || matches!(app.load, Load::Loading) {
+            execute!(out, BeginSynchronizedUpdate)?;
+            terminal.draw(|frame| ui::draw(frame, app))?;
+            app.paint(&mut out)?;
+            execute!(out, EndSynchronizedUpdate)?;
+            dirty = false;
+        }
 
         if event::poll(TICK)? {
             // Drain the queue rather than taking one event per frame: motion
@@ -189,8 +211,12 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         app.on_key(key.code, key.modifiers);
+                        dirty = true;
                     }
-                    Event::Mouse(event) => app.on_mouse(event),
+                    Event::Mouse(event) => {
+                        app.on_mouse(event);
+                        dirty = true;
+                    }
                     Event::Resize(..) => {
                         // A resize is also the moment a font size may have
                         // changed, and the cell was measured once at startup.
