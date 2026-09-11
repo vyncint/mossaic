@@ -87,7 +87,7 @@ jobs:
       # This renders every screen the suite left behind — and every insta
       # `.snap.new` — into the job summary, with SVG and HTML uploaded. It
       # installs termlens-cli itself, so nothing else here has to.
-      - uses: vyncint/termlens/.github/actions/report@e1b96c8203fd727fa3458af395719c429966ee82 # v0.10.1
+      - uses: vyncint/termlens/.github/actions/report@b8af0fa457dd023aa708a493b7f485256009f1a5 # v0.11.0
         if: failure()
         with:
           name: termlens-report-${{ matrix.os }}
