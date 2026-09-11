@@ -9,6 +9,21 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Changed
+
+- **termlens 0.11** for the PTY suite, and the vendored skill with it. 0.11
+  is termlens's stability candidate: from it no promised item changes
+  incompatibly before its 1.0, so this requirement should hold for a while.
+
+  Its one breaking change lands here as a simplification.
+  `Screen::unsupported()` returns a view instead of a slice of `Arc<str>`,
+  and `unsupported_overflow()` folds into it — so the pinned list and "the
+  record is not truncated" are now **one** assertion in
+  `tests/emulation.rs`, because the view compares equal to a slice only
+  when the retained shapes match *and* nothing overflowed the bound. The
+  `Vec<String>` helper that existed to make the comparison possible is
+  gone.
+
 ## [0.8.1] - 2026-09-08
 
 A chart that was not moving stopped saying so twelve times a second, and the
