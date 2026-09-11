@@ -258,8 +258,16 @@ fn inspect_drives_mossaic_itself() {
         screen.contains("contributions in"),
         "the real chart:\n{screen}"
     );
+    // The trailer goes to **stderr** since termlens 0.11 (termlens#340), so
+    // what stdout carries is a saved screen — `inspect … > file` needs no
+    // editing before `render` or `diff` will read it.
     assert!(
-        screen.contains("still running at the deadline"),
-        "mossaic is a TUI, so inspect reports the deadline rather than an exit:\n{screen}"
+        String::from_utf8_lossy(&out.stderr).contains("still running at the deadline"),
+        "mossaic is a TUI, so inspect reports the deadline rather than an exit: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !screen.contains("--- "),
+        "and stdout is the screen alone:\n{screen}"
     );
 }

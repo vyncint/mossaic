@@ -5,7 +5,7 @@
 //! mossaic's bytes. If mossaic emits a sequence the emulator does not
 //! implement, that grid is quietly wrong and *every* screen assertion in this
 //! repository is being made against a plausible-looking fiction. termlens
-//! 0.10 made that checkable: `Screen::unsupported` lists what was dropped.
+//! made that checkable: `Screen::unsupported` lists what was dropped.
 //!
 //! These are deliberately whole-suite invariants rather than feature tests.
 //! They are cheap, and when one breaks the right response is to distrust the
@@ -45,10 +45,6 @@ fn chart(graphics: Option<Graphics>, cols: u16, rows: u16) -> termlens::Result<T
     Ok(t)
 }
 
-fn unsupported(screen: &Screen) -> Vec<String> {
-    screen.unsupported().iter().map(|s| s.to_string()).collect()
-}
-
 /// The invariant, in all three rendering modes. The image paths are the ones
 /// worth checking hardest: they put bytes on the wire that no cell shows, so
 /// a dropped sequence there is invisible in every other assertion.
@@ -61,17 +57,17 @@ fn the_emulator_drops_nothing_that_could_change_a_cell() -> termlens::Result<()>
     ] {
         let t = chart(graphics, 120, 30)?;
         let screen = t.screen();
+        // One comparison for both halves of the record: termlens 0.11's
+        // `Unsupported` view is equal to a slice only when the retained
+        // shapes match *and* nothing overflowed the bound, so a truncated
+        // record fails here rather than passing as a shorter list.
         assert_eq!(
-            unsupported(&screen),
+            screen.unsupported(),
             EXPECTED_UNSUPPORTED,
-            "{label}: mossaic emitted a sequence termlens does not model. \
-             Until it is understood, every screen assertion in this suite is \
-             being made against a grid that may be wrong."
-        );
-        assert_eq!(
-            screen.unsupported_overflow(),
-            0,
-            "{label}: the record is complete, not truncated"
+            "{label}: mossaic emitted a sequence termlens does not model, or \
+             the record was truncated. Until it is understood, every screen \
+             assertion in this suite is being made against a grid that may \
+             be wrong."
         );
         if graphics.is_some() {
             assert!(
