@@ -260,10 +260,15 @@ fn inspect_drives_mossaic_itself() {
     );
     // The trailer goes to **stderr** since termlens 0.11 (termlens#340), so
     // what stdout carries is a saved screen — `inspect … > file` needs no
-    // editing before `render` or `diff` will read it.
+    // editing before `render` or `diff` will read it. Which "still running"
+    // it is depends on what ended the wait: since termlens 0.11.3 (#374) a
+    // TUI that goes quiet for `--idle` reads `still running (killed on
+    // exit)`, and only one that keeps printing until `--timeout` says `at
+    // the deadline`. Both mean it did not exit, which is all this asserts.
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("still running at the deadline"),
-        "mossaic is a TUI, so inspect reports the deadline rather than an exit: {}",
+        String::from_utf8_lossy(&out.stderr).contains("still running"),
+        "mossaic is a TUI, so inspect reports it still running rather than an \
+         exit: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
