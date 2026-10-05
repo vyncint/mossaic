@@ -1520,7 +1520,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys",
@@ -1562,9 +1562,9 @@ dependencies = [
 
 [[package]]
 name = "termlens"
-version = "0.11.2"
+version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f87d209970e479a096785b98dc9f482934a5c74256a878385d1de18cb8ada20"
+checksum = "a6a01f95c453a05e278ea908c3e19cab25d716bce21347515d8ef965e93ba941"
 dependencies = [
  "insta",
  "libc",
