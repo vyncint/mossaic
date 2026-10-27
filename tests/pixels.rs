@@ -36,7 +36,13 @@ use std::time::Duration;
 use termlens::{Graphics, GraphicsPayload, GraphicsSeen, Key, Screen, Terminal};
 
 /// A year of contribution art, every day elapsed and no network anywhere.
-const PREVIEW: [&str; 2] = ["--file", "art/vyncint-2027.json"];
+///
+/// In the default scale, named: `--palette auto` takes its season from the
+/// wall clock, not from the year on screen (`Season::on`), so in the last week
+/// of October the chart drew in Halloween yellow and the green this file
+/// counts was nowhere — every run from the 25th to the 31st failed, and the
+/// week to Christmas would have done the same in blue.
+const PREVIEW: [&str; 4] = ["--file", "art/vyncint-2027.json", "--palette", "default"];
 /// Wide enough for pixel cells: a day is two columns, so 53 weeks plus the
 /// gutter plus the frame needs 112.
 const SIZE: (u16, u16) = (176, 34);
