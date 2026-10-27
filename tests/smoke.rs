@@ -22,7 +22,11 @@ use termlens::{Color, Key, MouseButton, Screen, Scroll, Terminal};
 
 /// A year of contribution art, drawn from a file: every day elapsed, every lit
 /// day at level 4, and no network anywhere.
-const PREVIEW: [&str; 2] = ["--file", "art/vyncint-2027.json"];
+///
+/// In the default scale, named: `--palette auto` takes its season from the
+/// wall clock (`Season::on`), so in the last week of October every colour
+/// asserted here came out Halloween's, and in the week to Christmas winter's.
+const PREVIEW: [&str; 4] = ["--file", "art/vyncint-2027.json", "--palette", "default"];
 /// Wide enough for the rounded cells, tall enough for the whole chart.
 const SIZE: (u16, u16) = (176, 34);
 
@@ -348,8 +352,9 @@ fn pixel_cells_leave_the_grid_rows_to_the_painter() -> termlens::Result<()> {
 
 #[test]
 fn the_theme_follows_the_terminals_background() -> termlens::Result<()> {
-    // Primer's own values, from the stylesheets github.com serves. No flag is
-    // passed here: the only thing that differs is what the terminal answers to
+    // Primer's own values, from the stylesheets github.com serves. No theme
+    // flag is passed here (`--palette` in PREVIEW names the season, not the
+    // appearance): the only thing that differs is what the terminal answers to
     // OSC 11, which is how a browser picks a theme too.
     let expect = |levels: [u32; 5]| -> Vec<Color> {
         levels
