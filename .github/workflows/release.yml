@@ -62,12 +62,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      # crates.io refuses a request with no User-Agent with a 403, and this
+      # probe used to send none and read every status but 200 as "not
+      # published yet" — so from v0.1.1 to v0.8.1 every release logged a 403,
+      # skipped the semver check "gracefully", and went green (#144). Only a
+      # 404 means there is no baseline; anything else is a probe that did not
+      # get an answer, and a check that cannot run must not pass.
       - name: Look for a published baseline on crates.io
         id: published
         run: |
-          status="$(curl -sS -o /dev/null -w '%{http_code}' https://crates.io/api/v1/crates/mossaic)"
+          agent="mossaic-release-semver (github actions)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -H "User-Agent: $agent" \
+            https://crates.io/api/v1/crates/mossaic)" || true
           echo "crates.io responded ${status}"
-          echo "found=$([ "$status" = "200" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          case "$status" in
+            200) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            404) echo "found=false" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::crates.io answered ${status:-nothing}, which says neither 'published' nor 'not published', so the semver check cannot be skipped"
+              exit 1
+              ;;
+          esac
       - name: Skip (first release, no baseline)
         if: steps.published.outputs.found != 'true'
         run: echo "mossaic is not on crates.io yet; skipping semver checks gracefully."

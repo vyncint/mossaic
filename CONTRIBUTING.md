@@ -22,7 +22,10 @@ cargo run           # the chart, for whoever `gh` is logged in as
 
 You need [the GitHub CLI](https://cli.github.com) authenticated (`gh auth
 login`) to run the chart against a real account, but **not** to run the tests:
-the two that call the API are `#[ignore]`d.
+the two that call the API are `#[ignore]`d. So are the four in `tests/cli.rs`,
+which `cargo install termlens-cli` into `target/` on first use (CI runs them).
+`cargo test -- --ignored` runs all six: it needs `gh` logged in, the network,
+and a minute for the install.
 
 The toolchain is pinned to stable in `rust-toolchain.toml`, so `cargo fmt` and
 `cargo clippy` give the same answers here as in CI. That file is not the MSRV —
@@ -306,10 +309,10 @@ The file is a header and seven rows:
 ```
 # name: Dragon
 # author: @vyncint
-# description: A serpentine dragon coiling across the whole year, in all five shades
+# description: A serpentine dragon coiling across the whole year, in the three shades that read clearly
 
-00000000000000000000033333333333333000003300000000000
-00000000000000000333344444444444444333344400000000000
+00000000000000000000022222222222222000002200000000000
+00000000000000000222244444444444444222244400000000000
 ...
 ```
 
@@ -320,10 +323,14 @@ The file is a header and seven rows:
   picture whose last column is dark.
 - **Shades are `0` to `4`**, or the blocks ` ░▒▓█` if you would rather read the
   file as a picture. The two may be mixed; they mean the same thing.
-- **Lines starting with `#` are comments.** `name`, `author` and `description`
-  are read; anything else is ignored, so a `# note:` line is fine.
+- **`#` starts a comment**, on a line of its own or after a row. `name`,
+  `author` and `description` are read from header lines; anything else is
+  ignored, so a `# note:` line is fine.
 - **A line of length zero is skipped**, so the header can breathe. A row of
-  *spaces* is not empty — it is seven dark days, and it is kept.
+  *spaces* is not empty — it is seven dark days, and it is kept. If an editor
+  strips one down to an empty line, an empty line after the first row is read
+  as an all-dark row when that makes the count exactly seven; write dark rows
+  as `0`s and the question never comes up.
 
 The file name is what people type after `--template`, so it must be lowercase
 letters, digits and dashes.

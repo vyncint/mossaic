@@ -692,10 +692,22 @@ impl Canvas {
     /// A short row is padded with level 0 on the right, because an editor that
     /// strips trailing whitespace will do exactly that to a picture whose last
     /// column is dark, and a format that cannot survive being saved is not a
-    /// format contributors can use.
+    /// format contributors can use. The same editor empties a row written
+    /// entirely in spaces, so an empty line *after the first row* stands for
+    /// an all-dark row when the rows are otherwise one short of seven per
+    /// empty line. A file with seven rows already reads its empty lines as
+    /// breathing room, exactly as before.
+    ///
+    /// A shade row may end in a `# comment`, as the header lines are: the
+    /// `#` and everything after it, and the spaces before it, are not part of
+    /// the row. A leading byte-order mark is dropped, because some editors on
+    /// Windows write one and it is not a shade anybody drew.
     pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut meta = Meta::default();
-        let mut rows: Vec<Vec<u8>> = Vec::new();
+        // `None` is an empty line after the first row: a candidate all-dark
+        // row, decided once the whole file has been counted.
+        let mut lines: Vec<(usize, Option<Vec<u8>>)> = Vec::new();
 
         for (number, line) in text.lines().enumerate() {
             let line = line.strip_suffix('\r').unwrap_or(line);
@@ -704,18 +716,17 @@ impl Canvas {
                 continue;
             }
             if line.is_empty() {
+                if !lines.is_empty() {
+                    lines.push((number + 1, None));
+                }
                 continue;
             }
-            if rows.len() == CANVAS_ROWS {
-                return Err(format!(
-                    "line {}: {} rows already, and a canvas is exactly {}",
-                    number + 1,
-                    CANVAS_ROWS,
-                    CANVAS_ROWS
-                ));
-            }
-            let mut row = Vec::with_capacity(line.chars().count());
-            for (column, character) in line.chars().enumerate() {
+            let shades = match line.split_once('#') {
+                Some((row, _comment)) => row.trim_end_matches([' ', '\t']),
+                None => line,
+            };
+            let mut row = Vec::with_capacity(shades.chars().count());
+            for (column, character) in shades.chars().enumerate() {
                 let Some(level) = shade_of(character) else {
                     return Err(format!(
                         "line {}, column {}: {character:?} is not a shade — use {}",
@@ -726,15 +737,54 @@ impl Canvas {
                 };
                 row.push(level);
             }
-            rows.push(row);
+            lines.push((number + 1, Some(row)));
         }
 
-        if rows.len() != CANVAS_ROWS {
+        let written = lines.iter().filter(|(_, row)| row.is_some()).count();
+        // Empty lines that sit before the last shade row, or after it: the
+        // trailing ones count too, because the stripped row can be Saturday.
+        let empty: Vec<usize> = lines
+            .iter()
+            .filter(|(_, row)| row.is_none())
+            .map(|(number, _)| *number)
+            .collect();
+        if written > CANVAS_ROWS {
+            let (number, _) = lines
+                .iter()
+                .filter(|(_, row)| row.is_some())
+                .nth(CANVAS_ROWS)
+                .expect("counted above");
             return Err(format!(
-                "a canvas is exactly {CANVAS_ROWS} rows, one per weekday; this has {}",
-                rows.len()
+                "line {number}: {CANVAS_ROWS} rows already, and a canvas is exactly {CANVAS_ROWS}"
             ));
         }
+        let rows: Vec<Vec<u8>> = if written == CANVAS_ROWS {
+            lines.into_iter().filter_map(|(_, row)| row).collect()
+        } else if written + empty.len() == CANVAS_ROWS && written > 0 {
+            lines
+                .into_iter()
+                .map(|(_, row)| row.unwrap_or_default())
+                .collect()
+        } else {
+            let hint = match empty.as_slice() {
+                [] => String::new(),
+                lines => format!(
+                    ". An all-dark row with its spaces stripped reads as an empty \
+                     line, and this file has {} after its first row ({} {}) — write \
+                     dark rows as 0s so the count is unambiguous",
+                    lines.len(),
+                    crate::plural(lines.len(), "line", "lines"),
+                    lines
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            return Err(format!(
+                "a canvas is exactly {CANVAS_ROWS} rows, one per weekday; this has {written}{hint}"
+            ));
+        };
         let width = rows.iter().map(Vec::len).max().unwrap_or(0);
         if !(1..=CANVAS_COLS).contains(&width) {
             return Err(format!(
@@ -1395,6 +1445,109 @@ pub fn commits_to_reach(level: u8, peak: u32) -> u32 {
     wanted.clamp(1, u64::from(u32::MAX)) as u32
 }
 
+/// What drawing a picture costs, over whatever the year already holds.
+///
+/// See [`price_picture`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Priced {
+    /// The busiest day the year will have once the picture is drawn, which is
+    /// what every shade in it is a fraction of.
+    pub peak: u32,
+    /// What a day at each level has to hold, indexed by level. Zero for level 0.
+    pub each: [u32; 5],
+    /// The commits to make on each day: what it holds subtracted from what it
+    /// needs. Without `existing` that is simply `each` for its level.
+    pub add: BTreeMap<NaiveDate, u32>,
+    /// Days the picture wants dark that already have contributions.
+    pub lit_dark: Vec<NaiveDate>,
+    /// Shaded days already past the top of the shade the picture wants.
+    pub too_bright: Vec<NaiveDate>,
+}
+
+impl Priced {
+    /// Every commit the picture would make.
+    #[must_use]
+    pub fn total(&self) -> u32 {
+        self.add
+            .values()
+            .fold(0u32, |sum, count| sum.saturating_add(*count))
+    }
+}
+
+/// What a day at `level` has to hold in a picture whose year peaks at `peak`,
+/// with `brightest` as the count asked for on the brightest days.
+///
+/// `--commits` prices the brightest day, and saying so has to be true: the
+/// level-4 days get `brightest` itself, not the three quarters of it that
+/// [`commits_to_reach`] would settle for. Settling made the busiest day the
+/// year actually held `⌊3N/4⌋ + 1`, so every darker shade was priced against
+/// a peak that never existed (#126). At the default of 4 the two agree.
+///
+/// When the year is already busier than `brightest`, the year's peak is what
+/// sets the price, and the level-4 days need its three quarters like any other.
+#[must_use]
+pub fn picture_commits(level: u8, peak: u32, brightest: u32) -> u32 {
+    match level.min(4) {
+        0 => 0,
+        4 => commits_to_reach(4, peak).max(brightest.min(peak)),
+        level => commits_to_reach(level, peak),
+    }
+}
+
+/// Price a placed picture over the contributions `existing` already holds.
+///
+/// Every shaded day is topped up to what its level needs at the year's peak —
+/// the one the drawing will really have, which is the busier of `existing`'s
+/// and `brightest` (and never under 4 for a picture with middle shades, the
+/// rule [`Canvas::min_peak`] states). A top-up never exceeds that peak, and a
+/// level-4 day is topped up to it whenever `brightest` set it, so the peak
+/// priced against is the peak that results.
+///
+/// What a top-up cannot fix is reported rather than hidden: a day the picture
+/// wants dark that already has contributions, and a shaded day already past
+/// the top of its band. Nothing takes a contribution away.
+#[must_use]
+pub fn price_picture(
+    levels: &BTreeMap<NaiveDate, u8>,
+    existing: &BTreeMap<NaiveDate, u32>,
+    brightest: u32,
+) -> Priced {
+    let middle = levels.values().any(|level| (1..4).contains(level));
+    let peak = existing
+        .values()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .max(brightest)
+        .max(if middle { 4 } else { 1 });
+    let mut each = [0u32; 5];
+    for (level, price) in each.iter_mut().enumerate() {
+        *price = picture_commits(level as u8, peak, brightest);
+    }
+
+    let mut priced = Priced {
+        peak,
+        each,
+        ..Priced::default()
+    };
+    for (date, level) in levels {
+        let have = existing.get(date).copied().unwrap_or(0);
+        if *level == 0 {
+            if have > 0 {
+                priced.lit_dark.push(*date);
+            }
+            continue;
+        }
+        let need = each[usize::from((*level).min(4))];
+        if have < need {
+            priced.add.insert(*date, need - have);
+        } else if band(*level, peak).1.is_some_and(|most| have > most) {
+            priced.too_bright.push(*date);
+        }
+    }
+    priced
+}
+
 /// The smallest uniform number of *extra* commits per lit day that puts the art
 /// at `target`, given what those days already hold.
 ///
@@ -1576,11 +1729,26 @@ pub fn identity() -> (String, String) {
     )
 }
 
+/// Where the commits are staged before `main` is moved to them.
+///
+/// A ref of this tool's own rather than `refs/heads/main` itself: fast-import
+/// moving `main` under a checked-out work tree leaves the index describing the
+/// old commit, and the only way back from there is a reset — which is exactly
+/// what used to throw away an existing repository's files (#124).
+const STAGING: &str = "refs/mossaic/art";
+
 /// Create the commits locally with `git fast-import`. Never pushes.
 ///
 /// fast-import because the counts get large: shading is relative to the year's
 /// peak, so standing out in an active year can need thousands of commits, and a
 /// `git commit` process each would take minutes.
+///
+/// The commits go on `main`, **after** whatever it already holds. A directory
+/// that is not a repository yet is made into one. An existing repository has
+/// to have `main` checked out and no uncommitted changes to tracked files,
+/// and is refused otherwise with what to run; its work tree is then moved
+/// forward the way `git merge --ff-only` moves it, which never discards
+/// anything — git itself refuses if it would.
 pub fn write_commits(
     lit: &BTreeMap<NaiveDate, u32>,
     repo: &Path,
@@ -1600,11 +1768,112 @@ pub fn write_commits(
         }
     }
 
-    if !repo.join(".git").is_dir() {
+    // Nothing to write is not a reason to make a repository.
+    if lit.values().all(|count| *count == 0) {
+        return Ok(0);
+    }
+
+    if repo.join(".git").exists() {
+        writable(repo)?;
+    } else {
         std::fs::create_dir_all(repo).map_err(|e| format!("could not create {repo:?}: {e}"))?;
         run(repo, &["init", "-q", "-b", "main"])?;
     }
+    // The commit the art goes on top of, if `main` has one. Resolved to an id
+    // once, so the stream names a fixed parent rather than a ref that could
+    // move while it is being written.
+    let parent = git(
+        repo,
+        &["rev-parse", "-q", "--verify", "refs/heads/main^{commit}"],
+    )
+    .ok()
+    .filter(|id| !id.is_empty());
+    // Left behind by a run that died part-way: without this, fast-import
+    // would take its tip as the first commit's parent.
+    let _ = git(repo, &["update-ref", "-d", STAGING]);
 
+    let made = fast_import(lit, repo, label, name, email, parent.as_deref());
+    let made = match made {
+        Ok(made) => made,
+        Err(error) => {
+            let _ = git(repo, &["update-ref", "-d", STAGING]);
+            return Err(error);
+        }
+    };
+    // A fast-forward, which is the one way of moving a checked-out branch that
+    // updates the index and the files with it *and* refuses rather than
+    // overwrites: an untracked `count.txt` in the way stops it, by name.
+    let moved = run(repo, &["merge", "--ff-only", "-q", STAGING]);
+    let _ = git(repo, &["update-ref", "-d", STAGING]);
+    moved.map_err(|error| format!("{error}\n  main is where it was; nothing was changed."))?;
+    Ok(made)
+}
+
+/// Whether [`write_commits`] can write into `repo` without losing anything.
+///
+/// A directory that is not a repository yet always can; it will be made one.
+/// An existing one has two refusals, each with what to run. `--write` used to
+/// start a new root and `git reset --hard main` on whatever was checked out,
+/// which put an unrelated branch onto the art and deleted uncommitted work
+/// with it (#124).
+///
+/// [`write_commits`] asks this itself; it is public so a caller can ask
+/// before announcing the write.
+pub fn writable(repo: &Path) -> Result<(), String> {
+    // `exists`, not `is_dir`: a linked worktree or a submodule has a `.git`
+    // *file*, and treating that as "no repository here" ran `git init` over it.
+    if !repo.join(".git").exists() {
+        return Ok(());
+    }
+    let shown = repo.display();
+    match git(repo, &["symbolic-ref", "-q", "HEAD"]) {
+        Ok(head) if head == "refs/heads/main" => {}
+        Ok(head) => {
+            let branch = head.strip_prefix("refs/heads/").unwrap_or(&head);
+            let has_main = git(repo, &["rev-parse", "-q", "--verify", "refs/heads/main"]).is_ok();
+            return Err(format!(
+                "{shown} has {branch} checked out, and --write commits to main. {}",
+                if has_main {
+                    format!("Switch to it first:\n  git -C {shown} switch main")
+                } else {
+                    format!(
+                        "It has no main yet; start one from {branch} with\n  \
+                         git -C {shown} switch -c main"
+                    )
+                }
+            ));
+        }
+        Err(_) => {
+            return Err(format!(
+                "{shown} is not on a branch (HEAD is detached), and --write commits \
+                 to main. Switch to it first:\n  git -C {shown} switch main"
+            ))
+        }
+    }
+    // Tracked files only. An untracked file is never touched by the
+    // fast-forward unless it is in the way, and then git refuses by name.
+    let changed = git(repo, &["status", "--porcelain", "--untracked-files=no"])?;
+    if !changed.is_empty() {
+        let count = changed.lines().count();
+        return Err(format!(
+            "{shown} has uncommitted changes to {count} tracked {}, and --write \
+             will not move main under them. Commit or stash them first:\n  \
+             git -C {shown} stash",
+            if count == 1 { "file" } else { "files" }
+        ));
+    }
+    Ok(())
+}
+
+/// Stream the commits into [`STAGING`], on top of `parent` when there is one.
+fn fast_import(
+    lit: &BTreeMap<NaiveDate, u32>,
+    repo: &Path,
+    label: &str,
+    name: &str,
+    email: &str,
+    parent: Option<&str>,
+) -> Result<usize, String> {
     let mut child = Command::new("git")
         .args(["fast-import", "--quiet"])
         .current_dir(repo)
@@ -1636,15 +1905,20 @@ pub fn write_commits(
             let body = format!("{index}\n");
             write!(
                 stdin,
-                "commit refs/heads/main\nmark :{index}\n\
+                "commit {STAGING}\nmark :{index}\n\
                  author {name} <{email}> {stamp} +0000\n\
                  committer {name} <{email}> {stamp} +0000\n\
                  data {}\n{message}",
                 message.len()
             )
             .map_err(feed)?;
-            if index > 1 {
-                writeln!(stdin, "from :{}", index - 1).map_err(feed)?;
+            // The first commit's parent is what `main` already holds. Leaving
+            // it out made every write a new root, so a second `--write` into
+            // the same repository could not fast-forward and failed.
+            match (index, parent) {
+                (1, Some(parent)) => writeln!(stdin, "from {parent}").map_err(feed)?,
+                (1, None) => {}
+                _ => writeln!(stdin, "from :{}", index - 1).map_err(feed)?,
             }
             write!(
                 stdin,
@@ -1664,22 +1938,26 @@ pub fn write_commits(
     if !status.success() {
         return Err(format!("git fast-import exited with {status}"));
     }
-    run(repo, &["reset", "--hard", "main"])?;
     Ok(index)
 }
 
-fn run(repo: &Path, args: &[&str]) -> Result<(), String> {
+/// Run git and hand back its trimmed stdout, or its stderr as the error.
+fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .args(args)
         .current_dir(repo)
         .output()
         .map_err(|e| format!("could not run git {}: {e}", args[0]))?;
     if out.status.success() {
-        return Ok(());
+        return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
     }
     Err(format!(
         "git {} failed: {}",
         args[0],
         String::from_utf8_lossy(&out.stderr).trim()
     ))
+}
+
+fn run(repo: &Path, args: &[&str]) -> Result<(), String> {
+    git(repo, args).map(|_| ())
 }

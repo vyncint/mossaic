@@ -955,3 +955,163 @@ fn the_cell_style_can_be_named_on_the_command_line() -> termlens::Result<()> {
     }
     Ok(())
 }
+
+/// A fresh, empty directory of this test's own.
+#[cfg(unix)]
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("mossaic-smoke-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    dir
+}
+
+/// `kill -QUIT` left the shell on the alternate screen with mouse reporting
+/// on (#138): the restore covered INT, TERM and HUP and nothing else. It must
+/// still die *of* the quit, so `$?` says what happened.
+///
+/// Run from a scratch directory, because a quit may leave a core file behind
+/// where the system is set up to keep one.
+#[cfg(unix)]
+#[test]
+fn sigquit_gives_the_terminal_back() -> termlens::Result<()> {
+    let dir = scratch("sigquit");
+    let mut t = spawn(&["--demo"], SIZE, |builder| builder.current_dir(&dir))?;
+    t.wait_frame(|s| loaded(s) && s.mouse_mode() != termlens::MouseMode::None)?;
+
+    t.signal(termlens::Signal::Quit)?;
+    let status = t.wait_exit()?;
+    let named = status
+        .signal()
+        .unwrap_or_else(|| panic!("must still die of the signal, got {status}"));
+    assert!(named.contains("Quit"), "expected a quit, got {status}");
+
+    let screen = t.screen();
+    assert!(
+        !screen.alternate_screen(),
+        "SIGQUIT left the shell inside the alternate screen"
+    );
+    assert!(
+        screen.mouse_modes().is_empty(),
+        "SIGQUIT left mouse reporting on: {:?}",
+        screen.mouse_modes()
+    );
+    let (_, _, visible) = screen.cursor();
+    assert!(visible, "SIGQUIT left the cursor hidden");
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+/// `mossaic --demo > out.bin`, typed into a real terminal (#138). crossterm
+/// opens `/dev/tty` behind the redirect, so the chart started anyway: a blank
+/// screen in front of the user and escape codes in the file. It has to say
+/// so instead, on the terminal, and leave the file empty.
+#[cfg(unix)]
+#[test]
+fn a_redirected_stdout_is_refused_in_a_real_terminal() -> termlens::Result<()> {
+    let dir = scratch("redirect");
+    let out = dir.join("out.bin");
+    let mut t = Terminal::builder()
+        .size(SIZE.0, SIZE.1)
+        .env_clear()
+        .current_dir(&dir)
+        .timeout(Duration::from_secs(20))
+        .args(["-c", "exec \"$0\" --demo > \"$1\""])
+        .arg(env!("CARGO_BIN_EXE_mossaic"))
+        .arg(&out)
+        .spawn("/bin/sh")?;
+    let status = t.wait_exit()?;
+    let screen = t.screen();
+    assert_eq!(status.code(), Some(1), "{status}:\n{screen}");
+    assert!(
+        screen.contains("stdout is not a terminal") && screen.contains("--png FILE"),
+        "{screen}"
+    );
+    assert!(
+        !screen.alternate_screen(),
+        "the chart never took the screen"
+    );
+    assert_eq!(
+        std::fs::metadata(&out).map(|meta| meta.len()).unwrap_or(0),
+        0,
+        "nothing went into the file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+/// A `gh` that answers with a one-day calendar for whichever year it is asked
+/// about, and writes each year it was asked for to `log`. Written by `sh`, not
+/// `std::fs::write`: a sibling test's fork can still hold a file this process
+/// wrote open for writing when it is executed, and that is `ETXTBSY`.
+#[cfg(unix)]
+fn calendar_gh(dir: &std::path::Path, log: &std::path::Path) {
+    let script = format!(
+        r#"#!/bin/sh
+case "$2" in user) echo alice; exit 0;; esac
+year=
+for arg in "$@"; do
+  case "$arg" in from=*) year=${{arg#from=}}; year=${{year%%-*}};; esac
+done
+echo "$year" >> '{}'
+printf '{{"data":{{"user":{{"login":"alice","contributionsCollection":{{"contributionYears":[2027,2026,2025,2024,2023,2022,2021],"contributionCalendar":{{"totalContributions":2,"weeks":[{{"contributionDays":[{{"date":"%s-03-04","contributionCount":2,"contributionLevel":"FIRST_QUARTILE"}}]}}]}}}}}}}}}}\n' "$year"
+"#,
+        log.display()
+    );
+    let mut sh = std::process::Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1/gh\" && chmod +x \"$1/gh\"", "sh"])
+        .arg(dir)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("sh runs");
+    std::io::Write::write_all(sh.stdin.as_mut().expect("piped"), script.as_bytes())
+        .expect("write the script");
+    drop(sh.stdin.take());
+    assert!(sh.wait().expect("sh exits").success());
+}
+
+/// One trackpad flick is six wheel steps inside a few milliseconds, and each
+/// ran `gh` (#137): six GraphQL requests to land six years away. The wheel now
+/// settles before it fetches, and a year already seen this session is not
+/// asked for again.
+#[cfg(unix)]
+#[test]
+fn the_wheel_fetches_where_it_lands_and_only_once() -> termlens::Result<()> {
+    let dir = scratch("wheel");
+    let log = dir.join("asked");
+    calendar_gh(&dir, &log);
+    let asked = || -> Vec<String> {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    };
+
+    let args = ["alice", "--year", "2027", "--today", "2027-06-30"];
+    let mut t = spawn(&args, SIZE, |builder| builder.env("PATH", &dir))?;
+    let ready = t.wait_frame(|s| loaded(s) && s.mouse_mode() != termlens::MouseMode::None)?;
+    assert_eq!(chrono_year(&ready), 2027, "{ready}");
+    let row = monday(&ready);
+
+    for _ in 0..6 {
+        t.scroll(GRID_X, row, Scroll::Up)?;
+    }
+    t.wait_frame(|s| chrono_year(s) == 2021 && loaded(s))?;
+    assert_eq!(asked(), ["2027", "2021"], "one fetch, for where it landed");
+
+    // Back where it started: a year already fetched is not fetched again.
+    for _ in 0..6 {
+        t.scroll(GRID_X, row, Scroll::Down)?;
+    }
+    t.wait_frame(|s| chrono_year(s) == 2027 && loaded(s))?;
+    assert_eq!(asked(), ["2027", "2021"], "2027 came from memory");
+
+    // `r` is the way to ask again.
+    t.send(Key::Char('r'))?;
+    t.wait_frame(loaded)?;
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success());
+    assert_eq!(asked(), ["2027", "2021", "2027"], "reload goes to GitHub");
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}

@@ -701,7 +701,7 @@ fn stats_match_the_underlying_days() {
 fn live() {
     let year = chrono::Local::now().year();
     let today = chrono::Local::now().date_naive();
-    let login = crate::github::whoami().expect("gh is not authenticated");
+    let login = crate::github::whoami().expect("gh knows who is signed in");
     let calendar = crate::github::fetch(&login, year, today).expect("fetch failed");
 
     let days: Vec<_> = calendar.days().collect();
@@ -2769,6 +2769,11 @@ fn control_characters_never_leave_the_parser() {
 
     assert_eq!(crate::printable("a\u{1b}[31mb\u{7}c"), "a[31mbc");
     assert_eq!(crate::printable("héllo ✓"), "héllo ✓", "text is left alone");
+    // A line break is a space, not nothing: gh's two-line errors ran together.
+    assert_eq!(
+        crate::printable("please run:  gh auth login\nAlternatively,\tthis\r"),
+        "please run:  gh auth login Alternatively, this"
+    );
 }
 
 /// The header counts what happened, not what the year will hold.
@@ -2882,6 +2887,222 @@ fn control_characters_never_leave_an_art_header() {
         canvas.meta().name.as_deref().unwrap().chars().count() <= 200,
         "a header field must be bounded"
     );
+}
+
+/// #131: the `.art` trips a hand-edited file runs into.
+#[test]
+fn an_art_file_survives_what_editors_do_to_it() {
+    use crate::art::Canvas;
+    let plain = "# name: Eye\n0000\n0440\n4004\n4004\n0440\n0000\n0000\n";
+    let reference = Canvas::parse(plain).expect("the plain file");
+
+    // `#` starts a comment at the end of a shade row too, as `--help` says.
+    let commented = "# name: Eye\n0000\n0440   # brow\n4004 # eyes\n4004\n0440\n0000\n0000#\n";
+    assert_eq!(
+        Canvas::parse(commented).expect("a trailing comment"),
+        reference
+    );
+
+    // A byte-order mark is not a shade anyone drew.
+    let marked = format!("\u{feff}{plain}");
+    assert_eq!(Canvas::parse(&marked).expect("a leading BOM"), reference);
+
+    // All-dark rows with their spaces stripped by an editor: empty lines after
+    // the first row stand for them when that makes seven.
+    let spaces = "# name: Eye\n    \n ██ \n█  █\n█  █\n ██ \n    \n    \n";
+    let stripped = "# name: Eye\n\n ██\n█  █\n█  █\n ██\n\n\n";
+    let from_spaces = Canvas::parse(spaces).expect("rows of spaces");
+    // The first row is before any shade row, so it cannot be told from the
+    // gap after the header — the error has to say so rather than guess.
+    let error = Canvas::parse(stripped).unwrap_err();
+    assert!(error.contains("this has 4"), "{error}");
+    assert!(error.contains("lines 7, 8"), "{error}");
+    let from_stripped =
+        Canvas::parse("# name: Eye\n0000\n ██\n█  █\n█  █\n ██\n\n\n").expect("stripped");
+    assert_eq!(from_stripped.width(), 4);
+    for week in 0..4 {
+        for row in 0..7 {
+            assert_eq!(from_stripped.at(week, row), from_spaces.at(week, row));
+        }
+    }
+    // A stripped row in the middle reads as one too.
+    let middle = Canvas::parse("4444\n4444\n\n4444\n4444\n4444\n4444\n").expect("middle");
+    assert_eq!(middle.at(0, 2), 0);
+    assert_eq!(middle.at(0, 3), 4);
+
+    // A file with seven rows already keeps reading its empty lines as room
+    // to breathe, as it always has.
+    let airy = "# name: Eye\n\n0000\n0440\n\n4004\n4004\n0440\n0000\n0000\n\n";
+    assert_eq!(Canvas::parse(airy).expect("breathing room"), reference);
+
+    // And when the count does not come out, the error names the empty lines.
+    let error = Canvas::parse("4444\n4444\n\n4444\n\n").unwrap_err();
+    assert!(error.contains("this has 3"), "{error}");
+    assert!(error.contains("lines 3, 5"), "{error}");
+    assert!(error.contains("as 0s"), "{error}");
+}
+
+/// #126: `--commits` prices the brightest day of a picture at exactly that.
+///
+/// The level-4 days used to get `⌊3N/4⌋ + 1`, so the year's real peak was
+/// lower than the one every darker shade was priced against.
+#[test]
+fn a_picture_prices_its_brightest_day_at_the_count_asked_for() {
+    use crate::art::{level, price_picture};
+    use std::collections::BTreeMap;
+    let day = |n: u32| NaiveDate::from_ymd_opt(2027, 3, n).unwrap();
+    let levels: BTreeMap<NaiveDate, u8> = [
+        (day(1), 4),
+        (day(2), 3),
+        (day(3), 2),
+        (day(4), 1),
+        (day(5), 0),
+    ]
+    .into_iter()
+    .collect();
+
+    for brightest in [4u32, 5, 8, 100, 1_000_000] {
+        let priced = price_picture(&levels, &BTreeMap::new(), brightest);
+        assert_eq!(priced.add[&day(1)], brightest, "--commits {brightest}");
+        let peak = priced.add.values().copied().max().unwrap();
+        assert_eq!(
+            peak, priced.peak,
+            "the peak priced against is the one drawn"
+        );
+        for (date, wanted) in &levels {
+            let count = priced.add.get(date).copied().unwrap_or(0);
+            assert_eq!(level(count, peak), *wanted, "--commits {brightest}, {date}");
+        }
+    }
+    // The default is unchanged: 1, 2, 3, 4.
+    let four = price_picture(&levels, &BTreeMap::new(), 4);
+    assert_eq!(four.each, [0, 1, 2, 3, 4]);
+}
+
+/// #129: over a calendar, a picture is topped up rather than stacked, and
+/// what cannot be put right is counted.
+#[test]
+fn a_picture_over_a_calendar_is_priced_against_it() {
+    use crate::art::{level, price_picture};
+    use std::collections::BTreeMap;
+    let day = |n: u32| NaiveDate::from_ymd_opt(2027, 3, n).unwrap();
+    let levels: BTreeMap<NaiveDate, u8> = [
+        (day(1), 4),
+        (day(2), 2),
+        (day(3), 2),
+        (day(4), 0),
+        (day(5), 4),
+    ]
+    .into_iter()
+    .collect();
+    // Already bright, already too bright for level 2, lit where it must be
+    // dark, and a busier day elsewhere.
+    let existing: BTreeMap<NaiveDate, u32> = [(day(1), 7), (day(3), 8), (day(4), 1), (day(20), 8)]
+        .into_iter()
+        .collect();
+    let priced = price_picture(&levels, &existing, 4);
+    assert_eq!(priced.peak, 8);
+    assert!(
+        !priced.add.contains_key(&day(1)),
+        "a level-4 day already there"
+    );
+    assert_eq!(priced.lit_dark, vec![day(4)]);
+    assert_eq!(priced.too_bright, vec![day(3)]);
+    // Everything that can be drawn lands on its shade at the peak it makes.
+    let mut combined = existing.clone();
+    for (date, count) in &priced.add {
+        *combined.entry(*date).or_default() += count;
+    }
+    let peak = combined.values().copied().max().unwrap();
+    assert_eq!(peak, priced.peak);
+    for date in [day(1), day(2), day(5)] {
+        assert_eq!(level(combined[&date], peak), levels[&date], "{date}");
+    }
+}
+
+/// #128: the header is not trusted to size an allocation.
+#[test]
+fn a_png_header_cannot_ask_for_gigabytes() {
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        // The decoder does not check CRCs.
+        out.extend_from_slice(&[0; 4]);
+    }
+    let png = |width: u32, height: u32, data: &[u8]| {
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut header = Vec::new();
+        header.extend_from_slice(&width.to_be_bytes());
+        header.extend_from_slice(&height.to_be_bytes());
+        header.extend_from_slice(&[8, 6, 0, 0, 0]);
+        chunk(&mut out, b"IHDR", &header);
+        chunk(
+            &mut out,
+            b"IDAT",
+            &miniz_oxide::deflate::compress_to_vec_zlib(data, 6),
+        );
+        chunk(&mut out, b"IEND", &[]);
+        out
+    };
+
+    let bomb = png(60_000, 60_000, &[0; 4]);
+    assert!(bomb.len() < 80, "{} bytes", bomb.len());
+    let error = crate::image::decode_png(&bomb).unwrap_err();
+    assert!(error.contains("60000x60000"), "{error}");
+
+    // Within the bound, the data still has to be there before it is sized.
+    let short = crate::image::decode_png(&png(4_000, 4_000, &[0; 64])).unwrap_err();
+    assert!(short.contains("short"), "{short}");
+
+    // And a stream that inflates past what the header allows is refused
+    // rather than inflated without limit.
+    let long = crate::image::decode_png(&png(1, 1, &[0; 4096])).unwrap_err();
+    assert!(long.contains("longer"), "{long}");
+
+    // A real one still decodes.
+    let one = crate::image::decode_png(&png(1, 1, &[0, 10, 20, 30, 255])).unwrap();
+    assert_eq!(one.pixels, vec![10, 20, 30, 255]);
+}
+
+/// #128: a transparent pixel is no ink, whichever way the picture is read.
+#[test]
+fn transparency_is_no_ink_either_way() {
+    use crate::image::{to_canvas, Bitmap, Options};
+    // A white plus on a fully transparent field, 14 by 7 so nothing shrinks.
+    let (width, height) = (14, 7);
+    let mut pixels = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            let logo = x == 3 || y == 3;
+            pixels.extend_from_slice(if logo {
+                &[255, 255, 255, 255]
+            } else {
+                &[0, 0, 0, 0]
+            });
+        }
+    }
+    let bitmap = Bitmap {
+        width,
+        height,
+        pixels,
+    };
+    let inverted = to_canvas(
+        &bitmap,
+        Options {
+            invert: true,
+            dither: false,
+        },
+    )
+    .unwrap();
+    let lit = inverted.levels().filter(|level| *level > 0).count();
+    assert_eq!(lit, 7 + 14 - 1, "the plus, not a solid block");
+    assert_eq!(inverted.at(3, 0), 4);
+    assert_eq!(inverted.at(0, 0), 0);
+
+    // Read the other way, white is no ink and neither is clear: nothing.
+    let plain = to_canvas(&bitmap, Options::default()).unwrap();
+    assert!(plain.levels().all(|level| level == 0));
 }
 
 #[test]
@@ -4691,7 +4912,7 @@ mod editor {
         let peak = editor.peak();
         let expected: u32 = [4u8, 3, 2, 1]
             .iter()
-            .map(|level| crate::art::commits_to_reach(*level, peak))
+            .map(|level| crate::art::picture_commits(*level, peak, editor.commits))
             .sum();
         assert_eq!(editor.estimate(), expected);
         // At the default of four, the five shades cost 1, 2, 3, 4.
@@ -5003,4 +5224,81 @@ fn a_cleaner_placement_beats_a_later_one() {
         "even though that means a column that has already begun — \
          fewer holes beats sooner, got week {week}"
     );
+}
+
+/// `gh`'s errors are long, and the failure was one line: the cause was cut at
+/// the border, mid-address (#133). Every word of it has to be on screen.
+#[test]
+fn a_long_failure_wraps_instead_of_running_off_the_edge() {
+    let mut app = App::new("octocat".into(), 2025, crate::app::Source::GitHub);
+    let message = "Post \"https://api.github.com/graphql\": proxyconnect tcp: dial tcp \
+                   127.0.0.1:3128: connect: connection refused";
+    app.load = Load::Failed(message.into());
+    let screen = render(&mut app, 60, 14);
+    let text: String = screen
+        .lines()
+        .map(|line| line.trim_matches(|c: char| c == '"' || c == '│' || c == ' '))
+        .collect::<Vec<_>>()
+        .join(" ");
+    for word in message.split(' ') {
+        assert!(text.contains(word), "{word:?} is missing:\n{screen}");
+    }
+    assert!(
+        screen.contains("r retry"),
+        "and the way out is still there:\n{screen}"
+    );
+}
+
+/// `--demo --today 2025-06-01` drew and counted every day after June 1st
+/// (#136). The days before are the same days, shaded the same way: moving
+/// `--today` uncovers the sample year rather than inventing another.
+#[test]
+fn the_demo_read_as_of_a_day_leaves_the_rest_to_come() {
+    let today = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+    let whole = crate::calendar::demo(2025);
+    let part = crate::calendar::demo_as_of(2025, Some(today));
+
+    for (all, some) in whole.days().zip(part.days()) {
+        assert_eq!(all.date, some.date);
+        if all.date <= today {
+            assert_eq!((all.count, all.level), (some.count, some.level));
+            assert!(!some.future, "{} has happened", some.date);
+        } else {
+            assert!(some.future, "{} is still to come", some.date);
+            assert_eq!((some.count, some.level), (0, 0));
+        }
+    }
+    assert_eq!(
+        part.total,
+        part.days().map(|day| day.count).sum::<u32>(),
+        "the total counts only what has happened"
+    );
+    assert!(part.total < whole.total);
+    let stats = part.stats(today);
+    assert!(stats.best.is_some_and(|(date, _)| date <= today));
+}
+
+/// `--today` decides the season as well as the year (#136). The palette came
+/// from the wall clock, so a chart read as of June came out orange whenever it
+/// was run in the last week of October.
+#[test]
+fn the_season_follows_today_not_the_clock() {
+    use crate::app::Options;
+    use crate::primer::Season;
+
+    for (today, season) in [
+        ((2026, 6, 1), Season::Default),
+        ((2026, 10, 28), Season::Halloween),
+        ((2026, 12, 21), Season::Winter),
+    ] {
+        let mut app = App::new("octocat".into(), 2026, crate::app::Source::Demo);
+        app.configure(
+            crate::term::Caps::default(),
+            Options {
+                today: NaiveDate::from_ymd_opt(today.0, today.1, today.2),
+                ..Options::default()
+            },
+        );
+        assert_eq!(app.palette.season, season, "as of {today:?}");
+    }
 }

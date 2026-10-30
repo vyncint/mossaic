@@ -17,10 +17,27 @@ command for you to run.
 ```sh
 mossaic-art VYNCINT --year 2027                   # preview only
 mossaic-art VYNCINT --year 2027 \
-    --snapshot art/vyncint-2027.json                          # then: mossaic --file …
-mossaic-art VYNCINT --year 2027 \
-    --repo ../vyncint-art --write                             # local commits
+    --snapshot art/vyncint-2027.json              # then: mossaic --file …
+mossaic-art VYNCINT --year 2027 --save            # remember the plan
+mossaic-art --track                               # every day: what today owes
+mossaic-art --backfill --repo ../vyncint-art --write   # commit the days already past
 ```
+
+A year still to come is drawn by **planning** it rather than by writing it
+all at once: `--save` the plan, contribute on each day as `--track` asks, and
+`--backfill` whatever the days behind you are still short of. A plain
+`--write` puts the whole drawing in at once, and for 2027 that means hundreds
+of commits dated after today — so it refuses, saying why, unless you add
+`--future`. [Whether GitHub counts a future-dated
+commit](#how-github-shades-a-day-and-why-it-decides-the-cost) is unverified.
+
+`--write` commits onto `main`, **after** whatever it already holds, so the same
+repository can be written to again and again — that is what `--backfill`
+does as the year runs on. A directory that is not a repository yet is made
+into one. An existing one has to have `main` checked out and no uncommitted
+changes, and is refused otherwise with the command that gets it there; its
+files are moved forward the way `git merge --ff-only` moves them, which never
+throws anything away.
 
 Glyphs are a 5×5 font — letters, digits, punctuation and shapes — one blank
 column between them, placed on rows Mon–Fri so Sunday and Saturday stay clear.
@@ -48,7 +65,7 @@ mossaic-art "I :heart: RUST" --year 2027
 mossaic-art ":star::star::star:" --year 2027
 ```
 
-The symbol itself works where you can type one — `mossaic-art "I \u{2665} RUST"` — and so
+The symbol itself works where you can paste one — `mossaic-art "I ♥ RUST"` — and so
 does a pasted emoji, variation selector and all: ⭐ draws `:star:`, 😢 draws
 `:cry:`. All three spellings become the same character before anything else
 sees them, which is what lets a shape survive being written to a plan,
@@ -63,12 +80,12 @@ mossaic-art: no shape called "wombat" — the font has the shapes :star: :heart:
 mossaic-art: unclosed ':' — a shape is written :name:, and the font has …
 ```
 
-**Eight characters is the limit**, whatever the year. Nine fit on paper — five
-columns a letter plus one between is `6N − 1`, and nine of those is 53, exactly a
-year — but the first and last calendar columns are *partial weeks*. A year begins
-and ends mid-column, so text that fills it loses the part of its leading letter that
-falls in December of the year before. `mossaic-art` says so rather than drawing a broken
-letter:
+**Eight characters is the limit** for a word that reads whole, whatever the
+year. Nine fit on paper — five columns a letter plus one between is `6N − 1`, and
+nine of those is 53, exactly a year — but the first and last calendar columns are
+*partial weeks*. A year begins and ends mid-column, so text that fills it loses
+the part of its leading letter that falls in December of the year before.
+`mossaic-art` still draws it, and says what was lost:
 
 ```
 note: 3 lit pixels fell outside 2027 and were dropped — the first and last calendar
@@ -153,18 +170,26 @@ mossaic-art VYNCINT --background 4              # the background is the letters
 # mossaic-art: the background (level 4) must be darker than the letters
 #              (level 4), or there is nothing to see
 
-mossaic-art VYNCINT --background 1 --commits 1  # too few commits to hold two shades
-# mossaic-art: --commits 1 puts the letters at level 1 and the background at
-#              level 1, so the letters would not show.
-#   In this year a letter day needs at least 2 commits to sit above a level-1
-#   background.
+mossaic-art VYNCINT --background 1 --commits 2  # too few commits to hold five shades
+# mossaic-art: --background needs --commits 4 or more. A year whose busiest day
+#   is under 4 has fewer than five shades, so --commits 2 would put the
+#   background at a brighter level than 1 — at a peak of 4 the counts 1, 2, 3, 4
+#   land on levels 1 to 4 exactly.
 ```
 
 That second one is worth understanding, because it is the one that surprises
 people. A shade is a *fraction of the year's busiest day*, so a year whose peak
 is 1 has exactly two shades in it — empty and full — and cannot hold a
-background at all. At a peak of 4 the counts 1, 2, 3, 4 land on levels 1, 2, 3,
-4 exactly, which is as small as a five-shade year gets.
+background at all. At a peak of 2 a one-commit background is level 2, not 1,
+and at 3 a two-commit one is level 3. At a peak of 4 the counts 1, 2, 3, 4 land
+on levels 1, 2, 3, 4 exactly, which is as small as a five-shade year gets — so
+4 is the least `--commits` a background is drawn with.
+
+Over `--merge`, letters landing on a day that already has contributions sum
+with it and raise the year's peak, and the background is priced against that
+peak rather than the one the inputs suggest. When the letters would end up no
+brighter than the background, the refusal names the count that clears it in
+that year.
 
 ### What tracking does with it
 
@@ -241,8 +266,23 @@ That is what it looks like on the graph itself:
 serpentine body sweeping up from the lower left to a head at the right, drawn
 in two greens on an empty field](../art/dragon.png)
 
-`--commits N` prices the **brightest** day, and every darker shade is priced
-against it by the same formula GitHub shades with.
+`--commits N` prices the **brightest** day — a level-4 day gets exactly `N` —
+and every darker shade is priced against it by the same formula GitHub shades
+with. `--template dragon --commits 100` is 100 a day on the brightest days and
+26 on the level-2 ones.
+
+`--merge` draws a picture over a year that already has contributions in it, and
+prices it against them. Each day is topped up to what its shade needs at the
+year's peak rather than given a flat count on top of what it holds, so the
+header counts what you would actually commit. Days the picture wants dark that
+are already lit, and days already brighter than their shade, are counted —
+nothing takes a contribution away, so those will read wrong however many
+commits are made:
+
+```
+drawing over 75 days already active (busiest 4)
+peak after merge 4  ·  33 days the picture wants dark already lit  ·  14 days already brighter than their shade
+```
 
 ### Three shades, and which three
 
@@ -301,10 +341,33 @@ mossaic-art --image logo.png --year 2027 --dither
 ```
 
 A `.art` file is seven rows of `0`–`4`, or of the blocks ` ░▒▓█`, with `#`
-comments. `--image` reads a PNG, fits it to the calendar keeping its aspect
-ratio, and quantises it: a **dark pixel becomes a busy day**, the way ink reads
-on paper. `--invert` turns that over, and `--dither` spreads the rounding error
-into neighbouring days so a gradient reads as one rather than as four bands.
+comments — on a line of their own, or after a row (`0440  # eyes`). A row
+shorter than the widest is padded with dark days, and a row of nothing but
+spaces that an editor stripped down to an empty line is read as an all-dark
+row, as long as the empty lines after the first row make the count up to
+seven exactly; otherwise the error names them. A byte-order mark at the start
+is ignored.
+
+`--image` reads a PNG, fits it to the calendar keeping its aspect ratio, and
+quantises it: a **dark pixel becomes a busy day**, the way ink reads on paper.
+`--invert` turns that over, and `--dither` spreads the rounding error into
+neighbouring days so a gradient reads as one rather than as four bands. A
+transparent pixel is an empty day either way, so a white logo on transparency
+wants `--invert`; an image that comes out with nothing in it is refused with
+that hint rather than drawn as an empty year.
+
+### Templates of your own
+
+`--template NAME` looks in two places besides the ones built in, and a file
+there shadows a built-in of the same name:
+
+- `./templates/NAME.art`, beside whatever you are working on;
+- `$XDG_CONFIG_HOME/mossaic/templates/NAME.art` — `~/.config/mossaic/templates/`
+  when `XDG_CONFIG_HOME` is unset — for the ones you keep.
+
+`--list-templates` shows all of them with where each came from, and names any
+file it could not read. The name matches without regard to case, and the
+title `--list-templates` prints works too: `--template Dragon` is `dragon`.
 
 ### Tracking a picture
 
@@ -328,9 +391,9 @@ mossaic-art --track
   tomorrow     must stay dark
 ```
 
-The prices are 4, 3, 2, 1 because that year's busiest day is quiet. Track the
-same picture against a year whose peak is 110 and a level-4 day costs 110, a
-level-3 day 74 — the shade is a *fraction of the busiest day*, so the cost of
+The prices are 4 and 2 because that year's busiest day is quiet. Track the
+same picture against a year whose peak is 146 and a level-4 day costs 110, a
+level-2 day 37 — the shade is a *fraction of the busiest day*, so the cost of
 art is set by how active the year already is. That is the whole subject of
 [How GitHub shades a day](#how-github-shades-a-day-and-why-it-decides-the-cost)
 below, and it applies to a picture exactly as it does to text.
@@ -400,7 +463,7 @@ mossaic-art VYNCINT --year 2026 --track
 ```
 
 ```
-VYNCINT  ·  2026  ·  tracking art/vyncint-2026.json
+VYNCINT  ·  2026  ·  week 6, 41 columns  ·  tracking art/vyncint-2026.json
 
   the plan    41 of 53 columns from week 6, on rows 1-5
   the year    9,527 contributions  ·  busiest Aug 11 (146)
@@ -442,7 +505,11 @@ VYNCINT  ·  2026  ·  tracking art/vyncint-2026.json
 Four kinds of answer, and only two of them are work:
 
 - **A letter day that is short.** Contribute more, today or by back-dating.
-  Fixable whenever.
+  Fixable whenever — but not past the year's busiest day. A day that goes past
+  it *becomes* the busiest, and every other letter day costs more, finished
+  ones included; so the `today` line gives the ceiling with the floor: `110 to
+  go, and no more than 146, or every other letter day costs more`. A day
+  outside the text says the same when no background is drawn.
 - **A day inside the letters that must stay dark.** The gaps inside and between
   the letters are part of the picture, and a contribution landing on one punches
   a hole that nothing takes back. This is the only kind of day where the
@@ -596,10 +663,38 @@ peak, and so the cost. Sweeping `--start-week` over one real year moved the bill
 25,275 commits to 12,900 for the same text — and `--track` does that sweep for you.
 
 ```sh
-gh api graphql -f query='...' > real.json    # your actual year
 mossaic-art VYNCINT --year 2026 --start-week 1 \
     --commits 113 --merge real.json --snapshot art/vyncint-2026.json
 ```
+
+`real.json` is your year as GitHub serves it — the response to the query
+these tools ask `gh` themselves, saved to a file. This is that query, verbatim
+(a test holds it to the one in `src/github.rs`):
+
+```sh
+gh api graphql -f login=YOUR-LOGIN \
+    -f from=2026-01-01T00:00:00Z -f to=2026-12-31T23:59:59Z \
+    -f query='
+query($login: String!, $from: DateTime!, $to: DateTime!) {
+  user(login: $login) {
+    login
+    contributionsCollection(from: $from, to: $to) {
+      contributionYears
+      contributionCalendar {
+        totalContributions
+        weeks { contributionDays { date contributionCount contributionLevel } }
+      }
+    }
+  }
+}' > real.json
+```
+
+Every field in it is read. A hand-written query that leaves one out is refused
+with `missing field` and the field's name: `login`, `contributionYears`,
+`totalContributions`, and for each day `date`, `contributionCount` and
+`contributionLevel`. The same file is what `mossaic --file` draws and what
+`--track --merge` tracks against, and `--snapshot` writes one in the same
+shape.
 
 Commits are written with `git fast-import`, so tens of thousands take under a second
 rather than the minutes a `git commit` per commit would cost.
@@ -610,7 +705,9 @@ account** — `git config user.email` must be one GitHub knows.
 
 **Whether a future-dated commit counts is unverified.** Git will happily date one
 ahead of today, but GitHub may not count it; no account has a future year in
-`contributionYears`, so there is nothing to check against. Push a single future-dated
+`contributionYears`, so there is nothing to check against. That is why `--write`
+refuses to date a commit after today unless `--future` is given, and points at
+`--save` and `--track` instead. If you do want them, push a single future-dated
 commit and look before generating thousands. Dates inside the current year are the
 safer bet either way: they become ordinary past dates as the year runs on.
 

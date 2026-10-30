@@ -38,7 +38,8 @@ examples:
 WHAT TO DRAW
   TEXT                letters, digits, punctuation and shapes: `I :heart: RUST`.
                       Drawn Mon-Fri through a 5x5 font; --font lists every glyph
-  --template NAME     a picture from the catalogue
+  --template NAME     a picture from the catalogue: the built-in ones, and any
+                      NAME.art in ./templates/ or ~/.config/mossaic/templates/
   --list-templates    list the templates, with a thumbnail of each, and exit
   --matrix FILE       (--file) a .art file: 7 rows of the shades 0-4, or of the
                       blocks ░ ▒ ▓ █ with a space for 0. `#` starts a comment
@@ -59,7 +60,7 @@ WHERE IT GOES
   --year YEAR         which year's calendar (default: this one)
   --start-week N      left edge, in weeks (default: centred)
   --commits N         commits for the brightest day; darker shades are priced
-                      against it (default 4)
+                      against it (default 4, and at least 4 with --background)
   --top ROW           first calendar row, 0 = Sunday (default 1, so Mon-Fri).
                       Text only; a picture uses all seven rows
   --background LEVEL  (--bg) draw the background as a shade 0-3 rather than
@@ -74,13 +75,16 @@ TRACKING
   --today DATE        what counts as today, as YYYY-MM-DD (default: the clock),
                       so a report is repeatable and a future day can be asked
   --merge PATH        a saved calendar to draw on top of, so the preview accounts
-                      for contributions already there
+                      for contributions already there. docs/ART.md has the
+                      `gh api graphql` command that saves one
   --plan PATH         where the plan lives (default: mossaic-plan.json)
   --save              write the plan, so later runs need no flags at all
 
 MAKING THE COMMITS
   --repo DIR          the repository --write commits into (local only)
-  --write             actually create the commits
+  --write             actually create the commits, on main, after what it holds
+  --future            let --write date commits after today. Whether GitHub
+                      counts those is unverified; --save and --track instead
   --backfill          commit only what each past day is still short of the plan,
                       never adding to a day that is already bright, and leaving
                       days still to come alone. Needs --repo, and --write to commit
@@ -143,7 +147,11 @@ fn main() {
         fail("--draw draws a picture; it has nothing to do with TEXT");
     }
 
-    let columns = art::bitmap(&options.text).unwrap_or_else(|error| fail(&error));
+    // Drawn from the text the plan will save, which is uppercased. Drawing
+    // the text as typed let `STRAßE` draw `ß` as one glyph across 35 columns
+    // while the plan saved `STRASSE`, 41 columns, so `--track` followed a
+    // different drawing from the one previewed (#131).
+    let columns = art::bitmap(&options.text.to_uppercase()).unwrap_or_else(|error| fail(&error));
 
     // The letters are always the brightest shade; --background picks what they
     // are drawn *on*. Rejected here rather than rendered, because a background
@@ -153,6 +161,21 @@ fn main() {
         field: options.background,
     };
     shades.check().unwrap_or_else(|error| fail(&error));
+    // Below a busiest day of 4 the year has fewer than five shades, so a
+    // background cannot land on the level it was asked for: `--commits 2
+    // --background 1` drew the background at level 2 under letters at 4,
+    // while the preview priced both against a peak of 4 nobody would have
+    // (#126). Only for a run that draws a flat count; tracking and
+    // backfilling price from the year's real peak and never read it.
+    if shades.field > 0 && options.commits < 4 && !options.track && !options.backfill {
+        fail(&format!(
+            "--background needs --commits 4 or more. A year whose busiest day is \
+             under 4 has fewer than five shades,\n  so --commits {} would put the \
+             background at a brighter level than {} — at a peak of 4 the counts \
+             1, 2, 3, 4\n  land on levels 1 to 4 exactly.",
+            options.commits, shades.field
+        ));
+    }
 
     // Loaded before placing, because the background's price is quoted against
     // the year's busiest day and --merge can raise it. Only a run that draws
@@ -163,25 +186,20 @@ fn main() {
         (Some(path), false) => load(path, &grid),
         _ => BTreeMap::new(),
     };
-    let peak = existing
-        .values()
-        .copied()
-        .max()
-        .unwrap_or(0)
-        .max(options.commits)
-        .max(shades.min_peak());
-    let ink = art::Ink {
-        lit: options.commits,
-        field: shades.commits(peak).field,
+    let price = |commits: u32| {
+        price_text(&columns, &grid, &options, shades, &existing, commits)
+            .unwrap_or_else(|error| fail(&error))
     };
+    let (peak, ink, placed) = price(options.commits);
 
     // What the shades actually come out as, which is not always what was asked
     // for: a busy year can push the letters below level 4, and a --commits too
     // small to outrun the background makes the whole thing invisible.
-    let drawn = art::Shades {
+    let landed = |peak: u32, ink: art::Ink| art::Shades {
         ink: art::level(ink.lit, peak),
         field: art::level(ink.field, peak),
     };
+    let drawn = landed(peak, ink);
     // Only for a run that would draw *a flat count*. `--commits` is what a
     // plain `--write` puts on a lit day; neither tracking nor backfilling uses
     // it — both work out what a day needs from the year's real peak. Refusing
@@ -189,21 +207,49 @@ fn main() {
     // was impossible when the only thing wrong was a flag that run does not
     // use, and `--backfill` ignores it for exactly the same reason.
     if !options.track && !options.backfill && shades.field > 0 && drawn.field >= drawn.ink {
+        // Searched for rather than read off this year's peak: over `--merge`
+        // a letter landing on a busy day raises the peak with every commit
+        // added, so the count that clears the background at today's peak does
+        // not clear it at the peak it makes. More commits only ever lift the
+        // letters, so the first count that works is found by halving.
+        let clears = |commits: u32| {
+            let (peak, ink, _) = price(commits);
+            let shades = landed(peak, ink);
+            shades.ink > shades.field
+        };
+        let (mut low, mut high) = (options.commits, 1_000_000u32);
+        let advice = clears(high).then(|| {
+            while high - low > 1 {
+                let middle = low + (high - low) / 2;
+                if clears(middle) {
+                    high = middle;
+                } else {
+                    low = middle;
+                }
+            }
+            high
+        });
         fail(&format!(
             "--commits {} puts the letters at level {} and the background at level {}, \
-             so the letters would not show.\n  \
-             In this year a letter day needs at least {} commits to sit above a \
-             level-{} background.",
+             so the letters would not show.\n  {}",
             options.commits,
             drawn.ink,
             drawn.field,
-            thousands(art::commits_to_reach(shades.field + 1, peak)),
-            shades.field,
+            match advice {
+                Some(need) => format!(
+                    "In this year a letter day needs at least {} commits to sit above a \
+                     level-{} background.",
+                    thousands(need),
+                    shades.field
+                ),
+                None => format!(
+                    "No count lifts the letters above a level-{} background in this year.",
+                    shades.field
+                ),
+            }
         ));
     }
 
-    let placed = art::place(&columns, &grid, options.top, options.start_week, ink)
-        .unwrap_or_else(|error| fail(&error));
     if placed.skipped > 0 {
         eprintln!(
             "note: {} lit {} fell outside {} and {} dropped — the first and \
@@ -252,20 +298,19 @@ fn main() {
         return;
     }
     if options.backfill {
-        backfill(&options, &grid, &columns, &placed, shades);
+        backfill(
+            &options,
+            &grid,
+            Drawing::Text {
+                columns: &columns,
+                placed: &placed,
+                shades,
+            },
+        );
         return;
     }
 
-    let mut combined = existing.clone();
-    for (day, count) in &placed.all() {
-        // Saturating: the peak the whole costing model rests on is computed from
-        // this map, and a `--merge` calendar is a file. Wrapping here reported a
-        // peak of 8 for a year whose busiest day held four billion, and then
-        // quoted a price to match it.
-        let total = combined.entry(*day).or_insert(0);
-        *total = total.saturating_add(*count);
-    }
-
+    let combined = merged(&existing, &placed.all());
     let peak = combined.values().copied().max().unwrap_or(1);
     let art_level = art::level(options.commits, peak);
     let total = placed.total();
@@ -371,9 +416,11 @@ fn main() {
 
     match (&options.repo, options.write) {
         (Some(repo), true) => {
+            refuse_future(&options, &placed.all());
+            art::writable(repo).unwrap_or_else(|error| fail(&error));
             let (name, email) = art::identity();
-            let name = options.name.unwrap_or(name);
-            let email = options.email.unwrap_or(email);
+            let name = options.name.clone().unwrap_or(name);
+            let email = options.email.clone().unwrap_or(email);
             println!(
                 "\ncommitting {} commits into {} as {name} <{email}>",
                 thousands(total),
@@ -678,35 +725,32 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         track_canvas(options, grid, name, canvas, &levels, start);
         return;
     }
+    if options.backfill {
+        backfill(
+            options,
+            grid,
+            Drawing::Picture {
+                name,
+                levels: &levels,
+                start,
+                width: canvas.width(),
+            },
+        );
+        return;
+    }
 
     let existing = match &options.merge {
         Some(path) => load(path, grid),
         None => BTreeMap::new(),
     };
-    // `--commits` prices the *brightest* day, and every darker level is priced
-    // against it by the same formula GitHub shades with. At the default of 4
-    // that is 1, 2, 3, 4 commits for levels 1 to 4 — the smallest year in which
-    // all five shades are distinct.
-    let peak = existing
-        .values()
-        .copied()
-        .max()
-        .unwrap_or(0)
-        .max(options.commits)
-        .max(canvas.min_peak());
-    let commits: BTreeMap<NaiveDate, u32> = levels
-        .iter()
-        .filter(|(_, level)| **level > 0)
-        .map(|(date, level)| (*date, art::commits_to_reach(*level, peak)))
-        .collect();
-    let total = commits
-        .values()
-        .fold(0u32, |sum, count| sum.saturating_add(*count));
-
-    if options.backfill {
-        backfill_canvas(options, grid, &levels);
-        return;
-    }
+    // Priced against the year as it will stand, contributions already there
+    // included: each day is topped up to its shade rather than given a flat
+    // count on top of what it holds. A flat count over `--merge` doubled the
+    // peak and redrew every shade, while the preview went on describing the
+    // picture as if the year were empty (#129).
+    let priced = art::price_picture(&levels, &existing, options.commits);
+    let commits = &priced.add;
+    let total = priced.total();
 
     // The days the *calendar* holds, not the cells the canvas has. A
     // full-width picture is 7 x 53 = 371 cells against a year of 365, and the
@@ -731,7 +775,16 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         .then(|| Palette::new(Appearance::Dark, Season::Default, true));
     println!("{}\n", art::preview(&levels, grid, palette.as_ref()));
 
-    println!("  level  days   commits each");
+    // With a calendar underneath, a day is topped up rather than given this
+    // count, so the column says what a day has to hold rather than what it
+    // costs.
+    println!(
+        "  level  days   {}",
+        match existing.is_empty() {
+            true => "commits each",
+            false => "each must hold",
+        }
+    );
     for level in (1..=4u8).rev() {
         if histogram[usize::from(level)] == 0 {
             continue;
@@ -739,7 +792,7 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
         println!(
             "  {level:>5}  {:>4}   {}",
             histogram[usize::from(level)],
-            thousands(art::commits_to_reach(level, peak)),
+            thousands(priced.each[usize::from(level)]),
         );
     }
     println!("  {:>5}  {:>4}   must stay dark", 0, histogram[0]);
@@ -773,12 +826,45 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
     }
     println!();
 
-    if let Some(path) = &options.snapshot {
-        let mut combined = existing.clone();
-        for (day, count) in &commits {
-            let total = combined.entry(*day).or_insert(0);
-            *total = total.saturating_add(*count);
+    // What the text path says over `--merge`, in a picture's terms: what is
+    // there already, the peak the year ends at, and the days no number of
+    // commits can put right.
+    if !existing.is_empty() {
+        let peak = merged(&existing, commits)
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        println!(
+            "drawing over {} {} already active (busiest {})",
+            existing.len(),
+            plural(existing.len(), "day", "days"),
+            existing.values().copied().max().unwrap_or(0)
+        );
+        println!(
+            "peak after merge {peak}  ·  {} {} the picture wants dark already lit  ·  \
+             {} {} already brighter than their shade",
+            priced.lit_dark.len(),
+            plural(priced.lit_dark.len(), "day", "days"),
+            priced.too_bright.len(),
+            plural(priced.too_bright.len(), "day", "days"),
+        );
+        let damaged = priced.lit_dark.len() + priced.too_bright.len();
+        if damaged > 0 {
+            println!(
+                "  -> nothing takes a contribution away, so {} {} will read wrong \
+                 however many commits are made.\n     \
+                 `--track` with the same --merge sweeps --start-week for a placement \
+                 with fewer.",
+                damaged,
+                plural(damaged, "day", "days")
+            );
         }
+        println!();
+    }
+
+    if let Some(path) = &options.snapshot {
+        let combined = merged(&existing, commits);
         let body = art::snapshot(&combined, grid, &options.login);
         std::fs::write(path, body)
             .unwrap_or_else(|error| fail(&format!("could not write {path:?}: {error}")));
@@ -791,6 +877,8 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
 
     match (&options.repo, options.write) {
         (Some(repo), true) => {
+            refuse_future(options, commits);
+            art::writable(repo).unwrap_or_else(|error| fail(&error));
             let (default_name, default_email) = art::identity();
             let who = options.name.clone().unwrap_or(default_name);
             let email = options.email.clone().unwrap_or(default_email);
@@ -800,7 +888,7 @@ fn run_canvas(options: &Options, grid: &Grid, name: &str, canvas: &art::Canvas) 
                 repo.display()
             );
             let label = format!("art: {name}");
-            let made = art::write_commits(&commits, repo, &label, &who, &email)
+            let made = art::write_commits(commits, repo, &label, &who, &email)
                 .unwrap_or_else(|error| fail(&error));
             println!(
                 "made {} commits — nothing has been pushed.\n\n\
@@ -1020,49 +1108,6 @@ fn track_canvas(
     println!();
 }
 
-/// `--backfill` for a picture: commit what each day already past still owes.
-fn backfill_canvas(options: &Options, grid: &Grid, levels: &BTreeMap<NaiveDate, u8>) {
-    let (_, actual) = observed(options, grid);
-    let plan = plan::Plan::from_levels("picture", grid, levels, 0, 0, &actual);
-    let today = options.now();
-    let owed: BTreeMap<NaiveDate, u32> = plan
-        .days
-        .iter()
-        .filter(|day| day.date <= today && day.short() > 0)
-        .map(|day| (day.date, day.short()))
-        .collect();
-    let total = owed
-        .values()
-        .fold(0u32, |sum, count| sum.saturating_add(*count));
-
-    if owed.is_empty() {
-        println!("nothing to catch up on — every day up to {today} is already right.");
-        return;
-    }
-    println!(
-        "{} {} short up to {today}, {} contributions in total",
-        owed.len(),
-        plural(owed.len(), "day is", "days are"),
-        thousands(total)
-    );
-    match (&options.repo, options.write) {
-        (Some(repo), true) => {
-            let (default_name, default_email) = art::identity();
-            let who = options.name.clone().unwrap_or(default_name);
-            let email = options.email.clone().unwrap_or(default_email);
-            let made = art::write_commits(&owed, repo, "art: catch up", &who, &email)
-                .unwrap_or_else(|error| fail(&error));
-            println!(
-                "made {} commits — nothing has been pushed.",
-                thousands(made as u32)
-            );
-        }
-        (Some(_), false) => println!("(add --write to create them; this was a dry run)"),
-        (None, true) => fail("--write needs --repo DIR"),
-        (None, false) => println!("(--repo DIR --write would create them)"),
-    }
-}
-
 /// The year as it actually stands: a saved response if one was given, otherwise
 /// whatever `gh` reports. Shared by `--track` and `--backfill`, which ask the
 /// same question of the same year and must never get different answers.
@@ -1078,7 +1123,7 @@ fn observed(options: &Options, grid: &Grid) -> (String, BTreeMap<NaiveDate, u32>
             let who = options
                 .tracking
                 .clone()
-                .or_else(github::whoami)
+                .or_else(|| github::whoami().ok())
                 .map(|who| mossaic::printable(&who))
                 .unwrap_or_else(|| {
                     fail("could not tell whose contributions to track — pass `--track USER`, or run `gh auth login`")
@@ -1097,6 +1142,26 @@ fn observed(options: &Options, grid: &Grid) -> (String, BTreeMap<NaiveDate, u32>
     }
 }
 
+/// What a backfill is drawing, which decides how its plan is built and what
+/// its report calls things. Everything else — the date bound, the warning,
+/// the refusal without `--repo` — is one path for both, so a picture cannot
+/// drift from text again (#130).
+enum Drawing<'a> {
+    /// Letters through the font.
+    Text {
+        columns: &'a [[bool; art::GLYPH_ROWS]],
+        placed: &'a art::Placed,
+        shades: art::Shades,
+    },
+    /// A canvas, already laid on the year.
+    Picture {
+        name: &'a str,
+        levels: &'a BTreeMap<NaiveDate, u8>,
+        start: usize,
+        width: usize,
+    },
+}
+
 /// Commit what the plan is short, and nothing else.
 ///
 /// A plain `--write` puts the same count on every lit day, which over an active
@@ -1106,26 +1171,39 @@ fn observed(options: &Options, grid: &Grid) -> (String, BTreeMap<NaiveDate, u32>
 /// brightest shade is three quarters of it — so topping a day up to `need`
 /// never exceeds the busiest day and never moves the target. One pass, with no
 /// fixed point to chase.
-fn backfill(
-    options: &Options,
-    grid: &Grid,
-    columns: &[[bool; art::GLYPH_ROWS]],
-    placed: &art::Placed,
-    shades: art::Shades,
-) {
+fn backfill(options: &Options, grid: &Grid, drawing: Drawing<'_>) {
     let repo = options.repo.clone().unwrap_or_else(|| {
         fail("--backfill needs --repo DIR — the directory to make the commits in")
     });
     let (who, actual) = observed(options, grid);
-    let plan = plan::Plan::build(
-        &options.text,
-        grid,
-        placed,
-        columns.len(),
-        options.top,
-        &actual,
-        shades,
-    );
+    let (plan, field) = match &drawing {
+        Drawing::Text {
+            columns,
+            placed,
+            shades,
+        } => (
+            plan::Plan::build(
+                &options.text,
+                grid,
+                placed,
+                columns.len(),
+                options.top,
+                &actual,
+                *shades,
+            ),
+            shades.field,
+        ),
+        Drawing::Picture {
+            name,
+            levels,
+            start,
+            width,
+        } => (
+            plan::Plan::from_levels(name, grid, levels, *start, *width, &actual),
+            0,
+        ),
+    };
+    let picture = matches!(drawing, Drawing::Picture { .. });
 
     // Days already past, and only those. A day at or past what it needs
     // contributes nothing here, and neither does one whose job is to stay dark —
@@ -1156,11 +1234,12 @@ fn backfill(
     );
     let (letter_days, letter_commits) = plan.owing();
     println!(
-        "  letters     {letter_days} {} short, {} commits",
+        "  {}     {letter_days} {} short, {} commits",
+        if picture { "picture" } else { "letters" },
         plural(letter_days, "day", "days"),
         thousands(letter_commits)
     );
-    if shades.field > 0 {
+    if field > 0 {
         let (field_days, field_commits) = plan.field_owing();
         println!(
             "  background  {field_days} {} short, {} commits",
@@ -1168,10 +1247,15 @@ fn backfill(
             thousands(field_commits)
         );
     }
-    println!(
-        "  a day gets  what it is short of {}, never a flat count",
-        thousands(plan.need)
-    );
+    // A picture's days are priced by their shade, so there is no one figure
+    // to quote.
+    match picture {
+        true => println!("  a day gets  what it is short of its shade, never a flat count"),
+        false => println!(
+            "  a day gets  what it is short of {}, never a flat count",
+            thousands(plan.need)
+        ),
+    }
     // Only when there is something past to reach: before the year starts, "days
     // before 2026-08-19" for a 2027 plan names a date the plan has never heard
     // of, and the line below says the useful thing anyway.
@@ -1190,18 +1274,31 @@ fn backfill(
     // can be finished and still read with holes in them, and no number of
     // commits changes that.
     if let plan::Verdict::Holed { holes } = plan.verdict() {
-        println!(
-            // "are" — 0.6.3's plural pass dropped the verb here, so the
-            // sentence read "61 days inside the letters already lit".
-            "\n  warning: {} cannot be drawn cleanly in {} — {holes} {} inside the\n  \
-             letters {} already lit, and nothing takes those away. Backfilling will\n  \
-             brighten the letters, and the text will still read with holes in it.\n  \
-             `mossaic-art --track` sweeps --start-week for a placement with fewer.",
-            plan.text,
-            plan.year,
-            plural(holes, "day", "days"),
-            plural(holes, "is", "are")
-        );
+        match picture {
+            true => println!(
+                "\n  warning: {} cannot be drawn cleanly in {} — {holes} {} in the\n  \
+                 picture {} already brighter than it wants, and nothing takes those\n  \
+                 away. Backfilling will shade the rest, and the picture will still read\n  \
+                 with holes in it. `mossaic-art --track` sweeps --start-week for a\n  \
+                 placement with fewer.",
+                plan.text,
+                plan.year,
+                plural(holes, "day", "days"),
+                plural(holes, "is", "are")
+            ),
+            false => println!(
+                // "are" — 0.6.3's plural pass dropped the verb here, so the
+                // sentence read "61 days inside the letters already lit".
+                "\n  warning: {} cannot be drawn cleanly in {} — {holes} {} inside the\n  \
+                 letters {} already lit, and nothing takes those away. Backfilling will\n  \
+                 brighten the letters, and the text will still read with holes in it.\n  \
+                 `mossaic-art --track` sweeps --start-week for a placement with fewer.",
+                plan.text,
+                plan.year,
+                plural(holes, "day", "days"),
+                plural(holes, "is", "are")
+            ),
+        }
     }
 
     if owed.is_empty() {
@@ -1228,6 +1325,7 @@ fn backfill(
         return;
     }
 
+    art::writable(&repo).unwrap_or_else(|error| fail(&error));
     let (name, email) = art::identity();
     let name = options.name.clone().unwrap_or(name);
     let email = options.email.clone().unwrap_or(email);
@@ -1526,6 +1624,15 @@ fn track_progress(
         return;
     }
     println!();
+    // The ceiling a day has without a band of its own: past the peak every
+    // letter day is measured against, it *becomes* the peak, and every other
+    // letter day costs more. The floor alone told people to contribute four on
+    // a letter day; twelve finished it and undid five others (#127).
+    let most = plan.peak.max(shades.min_peak());
+    let ceiling = format!(
+        "no more than {}, or every other letter day costs more",
+        thousands(most)
+    );
     for (label, date) in [
         ("today", today),
         ("tomorrow", today.succ_opt().unwrap_or(today)),
@@ -1535,13 +1642,13 @@ fn track_progress(
         }
         let line = match plan.on(date) {
             Some(day) if day.want == plan::Want::Lit && day.short() > 0 => format!(
-                "a letter day — {} needed, {} there, {} to go",
+                "a letter day — {} needed, {} there, {} to go, and {ceiling}",
                 thousands(day.need),
                 thousands(day.have),
                 thousands(day.short())
             ),
             Some(day) if day.want == plan::Want::Lit => {
-                "a letter day — already bright enough".to_string()
+                format!("a letter day — already bright enough; {ceiling}")
             }
             // Over its ceiling, and nothing undoes it. Which loss it is
             // depends on where the day sits: inside the letters it is a hole,
@@ -1576,8 +1683,12 @@ fn track_progress(
             Some(day) if day.want == plan::Want::Hole => {
                 "inside the letters — keep it dark, or it becomes a permanent hole".to_string()
             }
-            Some(day) if day.have > 0 => "not part of the text, and already lit".to_string(),
-            _ => "not part of the text — anything committed on it shows".to_string(),
+            // Outside the text with no background: nothing here can damage
+            // the letters, but a day past the peak still reprices them all.
+            Some(day) if day.have > 0 => {
+                format!("not part of the text, and already lit; {ceiling}")
+            }
+            _ => format!("not part of the text — anything committed on it shows; {ceiling}"),
         };
         println!(
             "  {label:<11} {} {}  ·  {line}",
@@ -1774,6 +1885,104 @@ fn write_font_sheet(path: &Path) {
     );
 }
 
+/// Place the text at a flat `commits` a letter day, and price its background
+/// against the peak the drawing will really have.
+///
+/// Returns that peak, the counts, and the placement. With `--merge`, art
+/// landing on a busy day sums with it and raises the peak; the background's
+/// price is a fraction of the peak, so it is solved for rather than read off
+/// the inputs (#126). It only climbs, and it settles in a few rounds.
+fn price_text(
+    columns: &[[bool; art::GLYPH_ROWS]],
+    grid: &Grid,
+    options: &Options,
+    shades: art::Shades,
+    existing: &BTreeMap<NaiveDate, u32>,
+    commits: u32,
+) -> Result<(u32, art::Ink, art::Placed), String> {
+    let place = |peak: u32| {
+        let ink = art::Ink {
+            lit: commits,
+            field: shades.commits(peak).field,
+        };
+        art::place(columns, grid, options.top, options.start_week, ink).map(|placed| (ink, placed))
+    };
+    let mut peak = existing
+        .values()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .max(commits)
+        .max(shades.min_peak());
+    let (mut ink, mut placed) = place(peak)?;
+    for _ in 0..64 {
+        let real = merged(existing, &placed.all())
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        if real <= peak {
+            break;
+        }
+        peak = real;
+        (ink, placed) = place(peak)?;
+    }
+    Ok((peak, ink, placed))
+}
+
+/// `existing` with `added` summed onto it, day by day.
+///
+/// Saturating: the peak the whole costing model rests on is computed from this
+/// map, and a `--merge` calendar is a file. Wrapping here reported a peak of 8
+/// for a year whose busiest day held four billion, and then quoted a price to
+/// match it.
+fn merged(
+    existing: &BTreeMap<NaiveDate, u32>,
+    added: &BTreeMap<NaiveDate, u32>,
+) -> BTreeMap<NaiveDate, u32> {
+    let mut combined = existing.clone();
+    for (day, count) in added {
+        let total = combined.entry(*day).or_insert(0);
+        *total = total.saturating_add(*count);
+    }
+    combined
+}
+
+/// Stop a `--write` that would date commits after today, unless `--future`
+/// says that is meant.
+///
+/// The documented first example wrote a whole 2027 in 2026 without a word,
+/// while the same page called a future-dated commit's counting unverified and
+/// advised pushing one and looking before generating thousands (#125). A
+/// pushed commit cannot be taken back, so this is the place to ask.
+fn refuse_future(options: &Options, days: &BTreeMap<NaiveDate, u32>) {
+    let today = options.now();
+    let ahead: Vec<NaiveDate> = days
+        .iter()
+        .filter(|(date, count)| **date > today && **count > 0)
+        .map(|(date, _)| *date)
+        .collect();
+    let Some(last) = ahead.last() else {
+        return;
+    };
+    if options.future {
+        return;
+    }
+    fail(&format!(
+        "{} of the {} days this would write {} after {today}, the last on {last}.\n  \
+         Whether GitHub counts a future-dated commit is unverified, and a pushed \
+         commit cannot be undated.\n  \
+         To plan ahead instead, run this command again with --save in place of \
+         --repo and --write, then:\n\n    \
+         mossaic-art --track                         # what each day needs, as it comes\n    \
+         mossaic-art --backfill --repo DIR --write   # only days already past\n\n  \
+         --future writes them anyway.",
+        ahead.len(),
+        days.values().filter(|count| **count > 0).count(),
+        plural(ahead.len(), "is", "are"),
+    ));
+}
+
 /// Existing contributions from a saved `gh api graphql` response.
 fn load(path: &Path, grid: &Grid) -> BTreeMap<NaiveDate, u32> {
     // `from_file` names the path itself now, so re-prefixing would print it
@@ -1849,6 +2058,8 @@ struct Options {
     snapshot: Option<PathBuf>,
     repo: Option<PathBuf>,
     write: bool,
+    /// Let `--write` date commits after today.
+    future: bool,
     login: String,
     name: Option<String>,
     email: Option<String>,
@@ -1886,6 +2097,7 @@ fn parse_args() -> Option<Options> {
         snapshot: None,
         repo: None,
         write: false,
+        future: false,
         login: "preview".to_string(),
         name: None,
         email: None,
@@ -1981,6 +2193,7 @@ fn parse_args() -> Option<Options> {
             "--snapshot" => options.snapshot = Some(args.value("--snapshot").into()),
             "--repo" => options.repo = Some(args.value("--repo").into()),
             "--write" => options.write = true,
+            "--future" => options.future = true,
             "--login" => options.login = args.value("--login"),
             "--name" => options.name = Some(args.value("--name")),
             "--email" => options.email = Some(args.value("--email")),
@@ -2079,6 +2292,12 @@ fn parse_args() -> Option<Options> {
             "--track",
             "chooses how the tracking report is written",
         ),
+        (
+            "--future",
+            options.future && !options.write,
+            "--write",
+            "lets --write date commits after today",
+        ),
     ] {
         if ignored {
             fail(&format!("{flag} {what} — it needs {needs}"));
@@ -2108,31 +2327,6 @@ fn parse_args() -> Option<Options> {
             "{} both draw the picture — pick one",
             given.join(" and ")
         ));
-    }
-
-    // A picture uses the whole week and carries its own shades, so neither of
-    // these means anything to one. Refused rather than ignored, and only when
-    // actually typed: `--top` has a default, and failing on a default nobody
-    // chose would make every picture command need a flag to unset it.
-    if template.is_some() || matrix.is_some() || picture.is_some() {
-        for (flag, why) in [
-            (
-                "top",
-                "chooses which rows the letters sit on; a picture uses the whole week",
-            ),
-            (
-                "background",
-                "shades the field behind the letters; a picture names its own shade for every day",
-            ),
-            (
-                "bg",
-                "shades the field behind the letters; a picture names its own shade for every day",
-            ),
-        ] {
-            if args.was_typed(flag) {
-                fail(&format!("--{flag} {why}"));
-            }
-        }
     }
 
     if let Some(name) = &template {
@@ -2235,6 +2429,17 @@ fn parse_args() -> Option<Options> {
                 options.text = String::new();
             }
         }
+        // `--track` takes the next word as the user, so `--track VYNCINT`
+        // asked GitHub about a user called VYNCINT and then said only that
+        // there was nothing to draw (#131). Say what it took.
+        (true, false) if options.tracking.is_some() => fail(&format!(
+            "nothing to draw — --track took {:?} as the GitHub user to track, so \
+             there is no text.\n  If that was the text, put it first:  mossaic-art \
+             {} --track\n  (no plan at {})",
+            options.tracking.as_deref().unwrap_or_default(),
+            options.tracking.as_deref().unwrap_or_default(),
+            options.plan_path.display()
+        )),
         (true, false) => fail(&format!(
             "nothing to draw.\n\n  \
              mossaic-art VYNCINT --year 2027        draw something\n  \
@@ -2246,10 +2451,41 @@ fn parse_args() -> Option<Options> {
         )),
         _ => {}
     }
+    // A picture uses the whole week and carries its own shades, so neither of
+    // these means anything to one. Refused rather than ignored, and only when
+    // actually typed: `--top` has a default, and failing on a default nobody
+    // chose would make every picture command need a flag to unset it.
+    //
+    // After the plan is read, so a picture that came from a saved plan is
+    // held to the same rule as one named on the command line. `--top 3` over
+    // a saved dragon was dropped without a word (#131).
+    if options.canvas.is_some() {
+        for (flag, why) in [
+            (
+                "top",
+                "chooses which rows the letters sit on; a picture uses the whole week",
+            ),
+            (
+                "background",
+                "shades the field behind the letters; a picture names its own shade for every day",
+            ),
+            (
+                "bg",
+                "shades the field behind the letters; a picture names its own shade for every day",
+            ),
+        ] {
+            if args.was_typed(flag) {
+                fail(&format!("--{flag} {why}"));
+            }
+        }
+    }
     // One reports and the other writes; running both from one command line
     // would mean guessing which was meant.
     if options.track && options.backfill {
         fail("--track reports on the plan and --backfill commits to it — pick one");
+    }
+    if options.future && options.backfill {
+        fail("--future lets --write date commits after today, and --backfill only ever writes days already past — drop --future");
     }
     // Tracking writes nothing, so a flag asking it to was doing nothing at all —
     // silently, which is worse than refusing. Distinct from `--commits`, a tuning

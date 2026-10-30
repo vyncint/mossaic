@@ -5,3 +5,5 @@
 /chart.png
 # A saved plan belongs to whoever is drawing, not to this repository.
 /mossaic-plan.json
+# `--png -` is stdout; a file by that name is always a mistake (#134).
+/-

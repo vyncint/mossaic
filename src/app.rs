@@ -1,8 +1,10 @@
 //! Application state, key and mouse handling, and the background fetch plumbing.
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::Instant;
 
 use chrono::{Duration, Local, NaiveDate};
 use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -180,8 +182,17 @@ pub enum Mode {
 /// user flips through years faster than the requests come back.
 struct Fetched {
     seq: u64,
+    /// The (login, year) asked for, when the answer is worth keeping.
+    key: Option<(String, i32)>,
     result: Result<Calendar, String>,
 }
+
+/// How long the wheel has to rest before the year it landed on is fetched.
+///
+/// One trackpad flick is six wheel steps inside 8 ms, and each one ran `gh`:
+/// six GraphQL requests for five years nobody looked at. Long enough to cover
+/// a flick, short enough that a single notch still feels immediate.
+pub const WHEEL_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// The whole application state: what is being shown, what the terminal can do,
 /// and where the last frame put things.
@@ -250,6 +261,13 @@ pub struct App {
     seq: u64,
     tx: Sender<Fetched>,
     rx: Receiver<Fetched>,
+    /// When the wheel's year should be fetched, if it has moved and not yet
+    /// come to rest.
+    settle: Option<Instant>,
+    /// Every calendar fetched from GitHub this session, by (login, year), so
+    /// going back to a year already seen does not ask for it again. `r`
+    /// bypasses it.
+    fetched: HashMap<(String, i32), Calendar>,
 }
 
 impl App {
@@ -289,6 +307,8 @@ impl App {
             seq: 0,
             tx,
             rx,
+            settle: None,
+            fetched: HashMap::new(),
         }
     }
 
@@ -309,9 +329,9 @@ impl App {
         // Dark for the cells, which carry their own colours and read on either
         // background. The chrome does not: see `appearance_known`.
         let appearance = known.unwrap_or(Appearance::Dark);
-        let season = options
-            .season
-            .unwrap_or_else(|| Season::on(Local::now().date_naive()));
+        // `--today`'s season, not the clock's: a chart read as of a day in
+        // June came out orange whenever it was run in the last week of October.
+        let season = options.season.unwrap_or_else(|| Season::on(self.today()));
         self.palette = Palette::new(appearance, season, Palette::truecolor_env());
         self.gfx = painter(&caps, &options, &self.palette);
     }
@@ -398,36 +418,74 @@ impl App {
     }
 
     /// Kick off a fetch for the current login and year, superseding any in flight.
+    /// A year already fetched this session is answered from memory.
     pub fn request(&mut self) {
-        self.seq += 1;
+        self.blank();
         let (seq, tx) = (self.seq, self.tx.clone());
         let (login, year) = (self.login.clone(), self.year);
         let source = self.source.clone();
         let (today, file_now) = (self.today(), self.file_now());
+        // Only the network is worth remembering: a file may be rewritten
+        // between two looks at it, and the demo costs nothing to make again.
+        let key = matches!(source, Source::GitHub).then(|| (login.clone(), year));
+        if let Some(calendar) = key.as_ref().and_then(|key| self.fetched.get(key)) {
+            let _ = tx.send(Fetched {
+                seq,
+                key: None,
+                result: Ok(calendar.clone()),
+            });
+            return;
+        }
+        thread::spawn(move || {
+            let result = match source {
+                Source::GitHub => github::fetch(&login, year, today),
+                Source::File(path) => github::from_file(&path, file_now),
+                Source::Demo => Ok(crate::calendar::demo_as_of(year, file_now)),
+            };
+            let _ = tx.send(Fetched { seq, key, result });
+        });
+    }
+
+    /// `r`: fetch the current year again, whatever was kept of it.
+    pub fn reload(&mut self) {
+        self.fetched.remove(&(self.login.clone(), self.year));
+        self.request();
+    }
+
+    /// Show the spinner and drop whatever is in flight, for a fetch that is
+    /// about to start — now, or once the wheel settles.
+    fn blank(&mut self) {
+        self.seq += 1;
+        self.settle = None;
         self.load = Load::Loading;
         self.hover = None;
         // The chart is about to be replaced by a spinner, and the rows it occupied
         // are blank as far as the text layer is concerned — so nothing would write
         // over the pixels still sitting in them.
         self.redraw = true;
-        thread::spawn(move || {
-            let result = match source {
-                Source::GitHub => github::fetch(&login, year, today),
-                Source::File(path) => github::from_file(&path, file_now),
-                Source::Demo => Ok(crate::calendar::demo(year)),
-            };
-            let _ = tx.send(Fetched { seq, result });
-        });
     }
 
-    /// Apply any completed fetches. Non-blocking; call once per frame.
+    /// When the event loop next has to look in, if the wheel is waiting to
+    /// settle: sooner than its own tick, so the fetch starts on time.
+    pub fn deadline(&self) -> Option<Instant> {
+        self.settle
+    }
+
+    /// Apply any completed fetches, and start the wheel's once it has come to
+    /// rest. Non-blocking; call once per frame.
     pub fn drain(&mut self) {
+        if self.settle.is_some_and(|at| Instant::now() >= at) {
+            self.request();
+        }
         while let Ok(fetched) = self.rx.try_recv() {
             if fetched.seq != self.seq {
                 continue;
             }
             match fetched.result {
                 Ok(calendar) => {
+                    if let Some(key) = fetched.key {
+                        self.fetched.insert(key, calendar.clone());
+                    }
                     if !calendar.years.is_empty() {
                         self.years = calendar.years.clone();
                     }
@@ -505,8 +563,16 @@ impl App {
             // *yank* — and having it silently change the year was the one
             // binding here with a real chance of surprising someone. `PageUp`
             // and `PageDown` say what they do and are documented instead.
-            KeyCode::Char('[') | KeyCode::PageUp => self.change_year(-1),
-            KeyCode::Char(']') | KeyCode::PageDown => self.change_year(1),
+            KeyCode::Char('[') | KeyCode::PageUp => {
+                if self.change_year(-1) {
+                    self.request();
+                }
+            }
+            KeyCode::Char(']') | KeyCode::PageDown => {
+                if self.change_year(1) {
+                    self.request();
+                }
+            }
             KeyCode::Home => self.jump(Edge::First),
             KeyCode::End => self.jump(Edge::Last),
             KeyCode::Char('t') => self.jump(Edge::Today),
@@ -524,7 +590,7 @@ impl App {
                 self.mouse = !self.mouse;
                 self.hover = None;
             }
-            KeyCode::Char('r') => self.request(),
+            KeyCode::Char('r') => self.reload(),
             KeyCode::Char('u') if !self.previewing() => {
                 self.mode = Mode::Input(self.login.clone());
                 self.hover = None;
@@ -616,8 +682,8 @@ impl App {
                 // exists for — no later event corrects it.
                 None => self.hover = None,
             },
-            MouseEventKind::ScrollUp => self.change_year(-1),
-            MouseEventKind::ScrollDown => self.change_year(1),
+            MouseEventKind::ScrollUp => self.wheel_year(-1),
+            MouseEventKind::ScrollDown => self.wheel_year(1),
             _ => {}
         }
     }
@@ -670,16 +736,26 @@ impl App {
         }
     }
 
-    /// Step through the years GitHub reports contributions for, so empty years are skipped.
-    fn change_year(&mut self, delta: i32) {
+    /// A wheel step: move the year now, fetch it once the wheel has rested
+    /// for [`WHEEL_SETTLE`]. Each further step pushes the fetch back.
+    fn wheel_year(&mut self, delta: i32) {
+        if self.change_year(delta) {
+            self.blank();
+            self.settle = Some(Instant::now() + WHEEL_SETTLE);
+        }
+    }
+
+    /// Step through the years GitHub reports contributions for, so empty years
+    /// are skipped. Whether the year moved; the caller decides when to fetch it.
+    fn change_year(&mut self, delta: i32) -> bool {
         if self.previewing() {
-            return;
+            return false;
         }
         let target = match self.years.binary_search(&self.year) {
             Ok(index) => {
                 let next = index as i32 + delta;
                 if next < 0 || next as usize >= self.years.len() {
-                    return;
+                    return false;
                 }
                 self.years[next as usize]
             }
@@ -689,13 +765,12 @@ impl App {
             // `gh` subprocess per keypress for a year the CLI refuses to be given.
             Err(_) => match self.year.checked_add(delta) {
                 Some(year) if crate::cli::YEARS.contains(&year) => year,
-                _ => return,
+                _ => return false,
             },
         };
-        if target != self.year {
-            self.year = target;
-            self.request();
-        }
+        let moved = target != self.year;
+        self.year = target;
+        moved
     }
 
     /// Put the pixels on the screen, after the text has been drawn. Nothing here

@@ -213,12 +213,49 @@ jobs:
           pipx run zizmor==1.29.0 --persona=pedantic
           .github/workflows/ action/action.yml action/track.example.yml
 
+  # zizmor audits what a workflow is allowed to do; it never asks whether
+  # GitHub will accept the file at all. `track.example.yml` put `permissions:`
+  # on a step — a key GitHub refuses the whole workflow over — and passed every
+  # zizmor run above, in the one file action/README.md tells people to copy
+  # (#145). actionlint checks the schema and the expressions.
+  #
+  # `action.yml` is not on the list: it is action metadata, not a workflow,
+  # and actionlint would read it as a broken one.
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # The release archive, checked against a hash written here rather than
+      # against the checksums file beside it — a hash fetched from the same
+      # place as the archive proves only that the download finished.
+      #
+      # `-shellcheck=` and `-pyflakes=` switch off the integrations actionlint
+      # turns on when it finds those tools on PATH, so what this gate checks
+      # is the version pinned here and not whatever the runner image ships.
+      - name: Lint the workflows and the Action's example
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          archive="actionlint_${VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/${archive}"
+          echo "${SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -version
+          "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes= \
+            .github/workflows/*.yml action/track.example.yml
+
   # Single stable job name for branch protection: require this one check and
   # matrix/job changes never break the required-checks configuration.
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor, release-scripts, skill-version]
+    needs: [fmt, clippy, test, windows, msrv, docs, deny, zizmor, actionlint, release-scripts, skill-version]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every needed job succeeded

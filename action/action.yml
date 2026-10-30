@@ -21,9 +21,12 @@ branding:
 inputs:
   text:
     description: >-
-      The text being drawn, e.g. VYNCINT (A-Z, 0-9, space, - and .). One of
-      `text`, `template`, `matrix` or `image` says what is being drawn; give
-      exactly one.
+      The text being drawn, e.g. VYNCINT. The font has A-Z (lowercase draws
+      the same glyph), 0-9, space, the punctuation - . ! ? , ' " + = < > ( ) /
+      \ * _ @ & # %, and nineteen shapes written between colons, such as
+      :heart: — `mossaic-art --font` draws every one. One of `text`,
+      `template`, `matrix` or `image` says what is being drawn; give exactly
+      one.
     required: false
     default: ""
   template:
@@ -118,7 +121,8 @@ inputs:
     default: "true"
   version:
     description: >-
-      Which mossaic release runs the tracking, e.g. "0.8.1". The default,
+      Which mossaic release runs the tracking, e.g. "0.8.1" — a leading `v`,
+      as in the `uses:` ref, is accepted. The default,
       `latest`, installs the newest release on crates.io each run — fine for
       tracking, since the report format is versioned with the crate. Pin a
       number if you want the tracker to change only when you say so.
@@ -247,8 +251,11 @@ runs:
         # a fresh install per run costs a minute or two and can never be
         # stale, poisoned, or the wrong version.
         args=(mossaic --locked --bin mossaic-art --root "$ROOT")
-        if [ -n "${INPUT_VERSION}" ] && [ "${INPUT_VERSION}" != "latest" ]; then
-          args+=(--version "${INPUT_VERSION}")
+        # `v0.8.1` is what sits beside this input in `uses: …/action@v0.8.1`,
+        # and cargo rejects it as "not a valid SemVer requirement".
+        version="${INPUT_VERSION#v}"
+        if [ -n "${version}" ] && [ "${version}" != "latest" ]; then
+          args+=(--version "${version}")
         fi
         if ! cargo install "${args[@]}"; then
           echo "::error::Could not install mossaic ${INPUT_VERSION} from crates.io. \

@@ -218,7 +218,7 @@ impl Editor {
             .map(|(week, row)| self.canvas.at(week, row))
             .filter(|level| *level > 0)
             .fold(0u32, |sum, level| {
-                sum.saturating_add(art::commits_to_reach(level, peak))
+                sum.saturating_add(art::picture_commits(level, peak, self.commits))
             })
     }
 
@@ -553,7 +553,7 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
                 "  (must stay dark)".to_string()
             } else {
                 {
-                    let each = art::commits_to_reach(level, peak);
+                    let each = art::picture_commits(level, peak, editor.commits);
                     format!(
                         "  {} {} each",
                         thousands(each),
