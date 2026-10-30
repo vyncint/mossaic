@@ -73,8 +73,8 @@ pub fn on_panic() {
     }));
 }
 
-/// Restore the terminal on `SIGINT`, `SIGTERM` and `SIGHUP`, then die of the
-/// signal.
+/// Restore the terminal on `SIGINT`, `SIGTERM`, `SIGHUP` and `SIGQUIT`, then
+/// die of the signal.
 ///
 /// Re-raising with the default disposition matters: a process killed by a
 /// signal must still *report* as killed by that signal, or a shell's `$?`, a
@@ -84,13 +84,19 @@ pub fn on_panic() {
 /// Ctrl-C *typed into* a TUI is a key, handled by the event loop, and does
 /// not come through here — the damage always needed an actual signal.
 ///
+/// `SIGQUIT` was missing until 0.9.0, and `kill -QUIT` left the alternate
+/// screen and mouse reporting behind exactly as `SIGINT` once did. It still
+/// dies as a quit — core dump and all, where the system keeps one — because
+/// that is what whoever sent it asked for.
+///
 /// Failing to register is not worth failing the run over: the terminal is
 /// no worse off than it was before 0.7.0, and the user asked to draw a
 /// chart, not to install a signal handler.
 #[cfg(unix)]
 pub fn on_signal() {
-    use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
-    let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGINT, SIGTERM, SIGHUP]) else {
+    use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+    let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGINT, SIGTERM, SIGHUP, SIGQUIT])
+    else {
         return;
     };
     std::thread::spawn(move || {

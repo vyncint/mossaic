@@ -440,7 +440,7 @@ fn body(app: &App, inner: Rect) -> (Vec<Line<'static>>, Option<Layout>) {
     let mut layout = None;
     match &app.load {
         Load::Loading => lines.push(loading(app)),
-        Load::Failed(message) => lines.extend(failure(app, message)),
+        Load::Failed(message) => lines.extend(failure(app, message, inner.width)),
         Load::Ready(calendar) => {
             // The chart starts two lines down, which is what turns a line index into
             // a screen row.
@@ -1002,22 +1002,58 @@ fn loading(app: &App) -> Line<'static> {
     ])
 }
 
-fn failure(app: &App, message: &str) -> Vec<Line<'static>> {
+/// The failure, wrapped to the width it has. It was one line, and `gh`'s
+/// errors are long: the cause was cut off at the border, mid-address —
+/// `… proxyconnect tcp: dial tcp 127.0.0.1:`.
+fn failure(app: &App, message: &str, width: u16) -> Vec<Line<'static>> {
     let palette = &app.palette;
-    vec![
-        Line::from(vec![
-            Span::styled("!", Style::new().fg(ratatui::style::Color::Red).bold()),
-            Span::styled(
-                format!(" {message}"),
-                Style::new().fg(palette.ansi(palette.fg)),
-            ),
-        ]),
-        Line::raw(""),
-        Line::styled(
-            "r retry  ·  u change user",
-            Style::new().fg(palette.ansi(palette.muted)),
-        ),
-    ]
+    let text = Style::new().fg(palette.ansi(palette.fg));
+    // Two columns for the `! ` the first line opens with, which the rest are
+    // indented to match.
+    let mut lines: Vec<Line<'static>> = wrap(message, usize::from(width.saturating_sub(2)).max(1))
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let lead = if index == 0 {
+                Span::styled("! ", Style::new().fg(ratatui::style::Color::Red).bold())
+            } else {
+                Span::raw("  ")
+            };
+            Line::from(vec![lead, Span::styled(row, text)])
+        })
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "r retry  ·  u change user",
+        Style::new().fg(palette.ansi(palette.muted)),
+    ));
+    lines
+}
+
+/// `text` broken at spaces into rows at most `width` columns wide; a word
+/// longer than that is split, since a path or a URL has nowhere else to break.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let columns = |text: &str| Span::raw(text).width();
+    let mut rows = vec![String::new()];
+    for word in text.split(' ').filter(|word| !word.is_empty()) {
+        let row = rows.last_mut().expect("never empty");
+        if row.is_empty() || columns(row) + 1 + columns(word) > width {
+            if !row.is_empty() {
+                rows.push(String::new());
+            }
+        } else {
+            row.push(' ');
+        }
+        for c in word.chars() {
+            let row = rows.last_mut().expect("never empty");
+            let mut buf = [0; 4];
+            if !row.is_empty() && columns(row) + columns(c.encode_utf8(&mut buf)) > width {
+                rows.push(String::new());
+            }
+            rows.last_mut().expect("never empty").push(c);
+        }
+    }
+    rows
 }
 
 fn footer(app: &App) -> Line<'static> {
