@@ -20,6 +20,17 @@ listed under a **Changed** or **Removed** heading.
   second window to finish; anything later still is recognised as a reply and
   swallowed up to its terminator, and keys carrying Alt no longer act as
   their plain letter.
+- **A terminal that did not report its background got white text on white**
+  (#141). The appearance fell back to dark, so on a light terminal that did
+  not answer `OSC 11` — every native Windows run, mosh, multiplexers that do
+  not forward it — the header, the month labels and the footer were `#f0f6fc`
+  at about 1.07:1. Text is now drawn in the terminal's own colour (dimmed for
+  the quieter lines) and only the cells keep GitHub's; the help overlay says
+  the background was not reported and offers `--theme light`. Sixel edges are
+  no longer blended into a dark canvas that was only a guess: they are cut
+  hard instead. The README no longer lists Windows Terminal among the
+  terminals found automatically — on Windows nothing is asked, so it needs
+  `--graphics sixel --cell WxH`.
 
 ### Changed
 

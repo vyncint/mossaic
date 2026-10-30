@@ -117,10 +117,14 @@ cells      kitty
 ```
 
 - **`cells text`** means the terminal draws neither protocol. kitty, Ghostty,
-  WezTerm, foot, Konsole, iTerm2, mlterm, Windows Terminal and
-  `xterm -ti vt340` all draw one of them; GNOME Terminal and Ptyxis draw
-  neither, because VTE ships sixel switched off. Nothing is lost but the
-  pixels — the chart still draws in block sextants.
+  WezTerm, foot, Konsole, iTerm2, mlterm and `xterm -ti vt340` all draw one
+  of them; GNOME Terminal and Ptyxis draw neither, because VTE ships sixel
+  switched off. Nothing is lost but the pixels — the chart still draws in
+  block sextants.
+- **On native Windows nothing is asked at all** — the probe reads the
+  terminal's replies in a way only unix offers — so the answers are all `no`.
+  Windows Terminal draws sixel when told to: `mossaic --graphics sixel --cell
+  WxH`, measuring the cell yourself, and `--theme light` on a light background.
 - **A window under 112 columns** falls back too, and the chart says so under the
   legend, naming the number it wants.
 - Either way, `mossaic --png chart.png` renders the same image to a file from
@@ -435,7 +439,8 @@ act on:
 - **Which colours.** Every value is a Primer token read out of the stylesheets
   github.com serves, not transcribed. Light or dark follows the terminal's own
   background over `OSC 11`, the way a browser follows the OS; `--theme`
-  overrides it. GitHub swaps the greens for a few days a year and so does
+  overrides it. A terminal that does not say gets its own colour for the text
+  and GitHub's only for the cells, which read on either background. GitHub swaps the greens for a few days a year and so does
   mossaic, on the same dates — `--palette` asks for them out of season.
 - **How a day is sized.** A day is two character columns wide and one row tall,
   and the square inside it keeps github.com's ratios — an 11px cell on a 14px
@@ -459,8 +464,9 @@ palette is degraded on purpose, and what the capability probe actually sends.
 - **Motion reporting is not universal.** Terminals that report clicks but not motion
   (Terminal.app among them) get click-to-select-a-day and no hover.
 - **Sixel has no alpha.** Anti-aliased edges are composited against the background
-  colour the terminal reported; where it reports none, GitHub's own canvas colour
-  stands in, and on a terminal with a background image the corners will show a faint
+  colour the terminal reported; where it reports none, the canvas of the `--theme`
+  asked for stands in, and with neither the edges are cut rather than blended into
+  a guess. On a terminal with a background image the corners will show a faint
   halo. Kitty, which takes an alpha channel, does not have the problem.
 - **The tooltip sits above the grid, not over the day** — the one placement both
   protocols can live with.

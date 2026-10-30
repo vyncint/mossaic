@@ -209,6 +209,9 @@ pub struct App {
     /// `--cell`, which outranks anything the terminal reports and survives a
     /// re-measure.
     cell_override: Option<(u16, u16)>,
+    /// Whether the theme is known — asked for with `--theme`, or read off the
+    /// background the terminal reported — rather than assumed.
+    appearance_known: bool,
     /// When a late terminal reply began arriving as keys, and how many of its
     /// keys have been swallowed since. See [`App::on_key`].
     reply: Option<(Instant, usize)>,
@@ -248,6 +251,7 @@ impl App {
             today: None,
             wanted: Graphics::Auto,
             cell_override: None,
+            appearance_known: false,
             reply: None,
             seq: 0,
             tx,
@@ -264,10 +268,13 @@ impl App {
         self.today = options.today;
         self.wanted = options.graphics;
         self.cell_override = options.cell;
-        let appearance = options
+        let known = options
             .appearance
-            .or_else(|| caps.background.map(Appearance::from_background))
-            .unwrap_or(Appearance::Dark);
+            .or_else(|| caps.background.map(Appearance::from_background));
+        self.appearance_known = known.is_some();
+        // Dark for the cells, which carry their own colours and read on either
+        // background. The chrome does not: see `appearance_known`.
+        let appearance = known.unwrap_or(Appearance::Dark);
         let season = options
             .season
             .unwrap_or_else(|| Season::on(Local::now().date_naive()));
@@ -287,6 +294,16 @@ impl App {
     /// and it only works while every day in it counts as elapsed.
     fn file_now(&self) -> Option<NaiveDate> {
         self.today
+    }
+
+    /// Whether the theme was asked for or read off the terminal, rather than
+    /// assumed. When it was assumed, the renderer draws its text in the
+    /// terminal's own foreground: the dark theme's `#f0f6fc` on a white
+    /// terminal is 1.07:1, and the header and month labels vanished — on every
+    /// native Windows run, under mosh, and behind multiplexers that do not
+    /// forward `OSC 11` (#141).
+    pub fn appearance_known(&self) -> bool {
+        self.appearance_known
     }
 
     /// Whether this terminal can draw pixel cells.
@@ -679,11 +696,15 @@ fn painter(caps: &Caps, options: &Options, palette: &Palette) -> Option<Painter>
         .cell
         .or_else(|| term::cell_size(caps))
         .filter(|(w, h)| *w >= 2 && *h >= 2)?;
-    Some(Painter::new(
-        protocol,
-        cell,
-        caps.background.unwrap_or(palette.canvas),
-    ))
+    // `--theme` names a palette, not the terminal's background, so it is only a
+    // stand-in for one: the canvas of the theme asked for is the best guess
+    // there is. With neither, a guess is what put dark halos round every sixel
+    // cell on a light terminal (#141), so the edges are cut instead.
+    Some(match (caps.background, options.appearance) {
+        (Some(background), _) => Painter::new(protocol, cell, background),
+        (None, Some(_)) => Painter::new(protocol, cell, palette.canvas),
+        (None, None) => Painter::over_unknown(protocol, cell),
+    })
 }
 
 /// What the painter should be showing, given what the renderer laid out.

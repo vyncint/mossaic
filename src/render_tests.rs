@@ -1042,6 +1042,163 @@ fn a_sixel_is_the_image_the_rasteriser_drew() {
 }
 
 #[test]
+fn a_sixel_over_an_unknown_background_is_cut_not_blended() {
+    use crate::graphics;
+    use crate::primer::{Appearance, Palette, Season};
+
+    // Blending the edges into GitHub's dark canvas, when the terminal had not
+    // said it was dark, put a dark halo round every cell on a light one (#141).
+    // With nothing to blend into, a pixel is its own colour or it is left alone.
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    let image = graphics::grid(&levels_of(&synthetic(2025, "octocat")), &palette, (9, 19));
+    let (width, height, pixels) = decode_sixel(&graphics::sixel_hard_edged(&image));
+    assert_eq!((width, height), (image.width, image.height));
+    let mut edges = 0;
+    for y in 0..height {
+        for x in 0..width {
+            let [r, g, b, a] = image.rgba_at(x, y);
+            match pixels[y * width + x] {
+                None => assert!(a < 128, "a mostly covered pixel at {x},{y} went unpainted"),
+                Some(got) => {
+                    assert!(a >= 128, "a mostly empty pixel at {x},{y} was painted");
+                    edges += usize::from(a < 255);
+                    for (got, want) in got.iter().zip([r, g, b]) {
+                        assert!(got.abs_diff(want) <= 2, "at {x},{y}: {got} vs {want}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        edges > 0,
+        "no edge pixels were drawn, so the cut was not tested"
+    );
+
+    // And the painter takes that path only when the terminal did not say.
+    use crate::app::Options;
+    use crate::primer::Rgb;
+    use crate::term::Caps;
+    let caps = Caps {
+        sixel: true,
+        cell: Some((9, 19)),
+        answered: true,
+        ..Caps::default()
+    };
+    // What the painter put on the wire, and the year as each encoding writes it.
+    let sent = |caps: Caps| {
+        let mut app = ready(synthetic(2025, "octocat"));
+        app.configure(caps, Options::default());
+        let _ = render(&mut app, 176, 34);
+        let mut out = Vec::new();
+        app.paint(&mut out).unwrap();
+        let year = graphics::grid(
+            &levels_of(&synthetic(2025, "octocat")),
+            &app.palette,
+            (9, 19),
+        );
+        (String::from_utf8(out).unwrap(), year, app.palette.canvas)
+    };
+    let (wire, year, _) = sent(caps);
+    assert!(
+        wire.contains(&graphics::sixel_hard_edged(&year)),
+        "an unknown background should get hard edges"
+    );
+    let reported = Rgb::hex(0xffffff);
+    let (wire, year, _) = sent(Caps {
+        background: Some(reported),
+        ..caps
+    });
+    assert!(
+        wire.contains(&graphics::sixel(&year, reported)),
+        "a reported background is still blended into"
+    );
+}
+
+#[test]
+fn an_unknown_background_leaves_the_text_to_the_terminal() {
+    use crate::app::Options;
+    use crate::primer::{Appearance, Rgb};
+    use crate::term::Caps;
+    use ratatui::buffer::Buffer;
+    use ratatui::style::{Color, Modifier, Style};
+
+    let draw = |background: Option<Rgb>, theme: Option<Appearance>, help: bool| -> Buffer {
+        let mut app = ready(synthetic(2025, "octocat"));
+        app.configure(
+            Caps {
+                background,
+                ..Caps::default()
+            },
+            Options {
+                appearance: theme,
+                ..Options::default()
+            },
+        );
+        app.help = help;
+        let mut terminal = Terminal::new(TestBackend::new(176, 34)).unwrap();
+        terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        terminal.backend().buffer().clone()
+    };
+    // The style of the first cell of the first occurrence of `needle`.
+    let style_of = |buffer: &Buffer, needle: &str| -> Style {
+        let area = buffer.area;
+        for y in 0..area.height {
+            let row: String = (0..area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if let Some(at) = row.find(needle) {
+                let x = row[..at].chars().count() as u16;
+                return buffer[(x, y)].style();
+            }
+        }
+        panic!("{needle:?} is not on screen");
+    };
+
+    // Nothing reported and nothing asked for: the dark theme's #f0f6fc on a
+    // white terminal is 1.07:1, so the text goes to the terminal's own colour.
+    let unknown = draw(None, None, false);
+    for text in ["octocat", "Jan", "Mon"] {
+        assert_eq!(style_of(&unknown, text).fg, Some(Color::Reset), "{text}");
+    }
+    let less = style_of(&unknown, "Less");
+    assert_eq!(less.fg, Some(Color::Reset));
+    assert!(
+        less.add_modifier.contains(Modifier::DIM),
+        "muted text stays a step down"
+    );
+    // The cells keep their colours: they carry them on either background.
+    assert!(matches!(
+        style_of(&unknown, "\u{1FB2B}").fg,
+        Some(Color::Rgb(..))
+    ));
+    // And the overlay says what to do about it.
+    let help = draw(None, None, true);
+    let text: String = help.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(
+        text.contains("--theme light"),
+        "the overlay should offer --theme light"
+    );
+
+    // Reported, or asked for, and the theme's own colours are back.
+    let light = draw(Some(Rgb::hex(0xffffff)), None, false);
+    assert_eq!(
+        style_of(&light, "octocat").fg,
+        Some(Color::Rgb(0x1f, 0x23, 0x28))
+    );
+    let dark = draw(None, Some(Appearance::Dark), false);
+    assert_eq!(
+        style_of(&dark, "octocat").fg,
+        Some(Color::Rgb(0xf0, 0xf6, 0xfc))
+    );
+    let help = draw(Some(Rgb::hex(0xffffff)), None, true);
+    let text: String = help.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(
+        !text.contains("--theme light"),
+        "nothing to suggest when it is known"
+    );
+}
+
+#[test]
 fn a_kitty_transmission_carries_the_image_back() {
     use crate::graphics;
     use crate::primer::{Appearance, Palette, Season};

@@ -6,7 +6,7 @@
 
 use chrono::{Datelike, Local, NaiveDate};
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
@@ -14,7 +14,6 @@ use ratatui::Frame;
 use crate::app::{App, CellStyle, Load, Mode};
 use crate::calendar::{Calendar, Day};
 use crate::graphics::COLUMNS_PER_DAY;
-use crate::primer::Palette;
 use crate::thousands;
 
 /// Width of the weekday label column, e.g. "Mon ".
@@ -306,9 +305,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
 /// program can answer: what this terminal turned out to be able to draw.
 fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
     let palette = &app.palette;
-    let key = Style::new().fg(palette.ansi(palette.fg)).bold();
-    let text = Style::new().fg(palette.ansi(palette.fg));
-    let muted = Style::new().fg(palette.ansi(palette.muted));
+    let key = text(app).bold();
+    let (text, muted) = (text(app), muted(app));
 
     let cells = app.layout.map_or("—", |layout| layout.cells.name());
     let yes_no = |flag: bool| if flag { "yes" } else { "no" };
@@ -383,6 +381,14 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
             },
         ),
     ];
+    if !app.appearance_known() {
+        // The one guess left on screen, and the one a light terminal pays for.
+        lines.push(fact(
+            FACT,
+            "background",
+            "not reported — try --theme light".to_string(),
+        ));
+    }
     if !app.pixels_available() && app.caps.answered {
         lines.push(blank());
         lines.push((
@@ -429,7 +435,13 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
     let block = Block::bordered()
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::new().fg(palette.ansi(palette.rule)))
-        .style(Style::new().bg(palette.ansi(palette.canvas)))
+        .style(match app.appearance_known() {
+            true => Style::new().bg(palette.ansi(palette.canvas)),
+            // The terminal's own background under the terminal's own text: the
+            // dark canvas under default text was the one pairing guaranteed
+            // unreadable on a light terminal.
+            false => Style::new().bg(Color::Reset),
+        })
         .title(Line::styled(" help ", key));
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(lines).block(block), area);
@@ -456,20 +468,13 @@ fn body(app: &App, inner: Rect) -> (Vec<Line<'static>>, Option<Layout>) {
 }
 
 fn header(app: &App) -> Line<'static> {
-    let palette = &app.palette;
     let mut spans = vec![
-        Span::styled(
-            app.login.clone(),
-            Style::new().fg(palette.ansi(palette.fg)).bold(),
-        ),
-        separator(palette),
-        Span::styled(
-            app.year.to_string(),
-            Style::new().fg(palette.ansi(palette.fg)),
-        ),
+        Span::styled(app.login.clone(), text(app).bold()),
+        separator(app),
+        Span::styled(app.year.to_string(), text(app)),
     ];
     if let Load::Ready(calendar) = &app.load {
-        spans.push(separator(palette));
+        spans.push(separator(app));
         // github.com's own wording, under its own chart — and github.com
         // counts what has *happened*, because it has no future data to count.
         //
@@ -499,14 +504,33 @@ fn header(app: &App) -> Line<'static> {
         };
         spans.push(Span::styled(
             format!("{} contributions in {}", thousands(counted), app.year),
-            Style::new().fg(palette.ansi(palette.fg)),
+            text(app),
         ));
     }
     Line::from(spans)
 }
 
-fn separator(palette: &Palette) -> Span<'static> {
-    Span::styled("  ·  ", Style::new().fg(palette.ansi(palette.muted)))
+fn separator(app: &App) -> Span<'static> {
+    Span::styled("  ·  ", muted(app))
+}
+
+/// Chrome text — labels, the header, the footer — in the theme's foreground, or
+/// in the terminal's own when the theme is a guess (#141). Only the cells keep
+/// their colours then: they carry them on any background, and text does not.
+fn text(app: &App) -> Style {
+    match app.appearance_known() {
+        true => Style::new().fg(app.palette.ansi(app.palette.fg)),
+        false => Style::new().fg(Color::Reset),
+    }
+}
+
+/// The quieter chrome: the theme's muted grey, or the terminal's own foreground
+/// dimmed, which stays a step below [`text`] on a light terminal and a dark one.
+fn muted(app: &App) -> Style {
+    match app.appearance_known() {
+        true => Style::new().fg(app.palette.ansi(app.palette.muted)),
+        false => Style::new().fg(Color::Reset).add_modifier(Modifier::DIM),
+    }
 }
 
 fn chart(
@@ -566,7 +590,7 @@ fn note(
     width: usize,
     height: usize,
 ) -> Option<Line<'static>> {
-    let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
+    let muted = muted(app);
     // Asking for a protocol and getting characters is the one outcome
     // `--capabilities` explained and the chart did not.
     if let Some(protocol) = app.graphics_refused() {
@@ -625,7 +649,7 @@ fn note(
 /// a real year always yields its days, future ones included.
 fn empty(app: &App, calendar: &Calendar) -> Vec<Line<'static>> {
     let year = calendar.year;
-    let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
+    let muted = muted(app);
     let reason = if calendar.starts_after(Local::now().date_naive()) {
         format!("{year} hasn't started yet — nothing to draw until Jan 1 {year}")
     } else {
@@ -650,7 +674,7 @@ fn months(app: &App, calendar: &Calendar, cells: &Cells) -> Line<'static> {
         label.push_str(&" ".repeat(column - label.len()));
         label.push_str(name);
     }
-    Line::styled(label, Style::new().fg(app.palette.ansi(app.palette.fg)))
+    Line::styled(label, text(app))
 }
 
 /// Box-bordered cells. Neighbours share a border, so each week costs two columns
@@ -765,7 +789,7 @@ fn solid_rows(app: &App, calendar: &Calendar, fill: usize, gap: usize) -> Vec<Li
 fn weekday(app: &App, row: usize) -> Span<'static> {
     Span::styled(
         format!("{:<width$}", WEEKDAYS[row], width = GUTTER),
-        Style::new().fg(app.palette.ansi(app.palette.fg)),
+        text(app),
     )
 }
 
@@ -775,7 +799,7 @@ fn mark(app: &App, date: NaiveDate) -> Option<ratatui::style::Color> {
     if app.hover == Some(date) {
         return Some(app.palette.ansi(app.palette.accent));
     }
-    (app.cursor == date).then(|| app.palette.ansi(app.palette.fg))
+    (app.cursor == date).then(|| text(app).fg.unwrap_or(Color::Reset))
 }
 
 /// One day. Days outside the year and days still to come both draw blank, so the
@@ -804,28 +828,24 @@ fn cell(app: &App, day: Option<Day>, fill: usize) -> Span<'static> {
 }
 
 fn detail(app: &App, calendar: &Calendar) -> Line<'static> {
-    let palette = &app.palette;
     let Some(day) = calendar.day(app.cursor) else {
         return Line::raw("");
     };
     let date = Span::styled(
         app.cursor.format("%a, %b %-d %Y").to_string(),
-        Style::new().fg(palette.ansi(palette.fg)).bold(),
+        text(app).bold(),
     );
     if day.future {
         return Line::from(vec![
             date,
-            separator(palette),
-            Span::styled(
-                "still to come",
-                Style::new().fg(palette.ansi(palette.muted)),
-            ),
+            separator(app),
+            Span::styled("still to come", muted(app)),
         ]);
     }
     Line::from(vec![
         date,
-        separator(palette),
-        Span::styled(count(day.count), Style::new().fg(palette.ansi(palette.fg))),
+        separator(app),
+        Span::styled(count(day.count), text(app)),
     ])
 }
 
@@ -838,7 +858,7 @@ fn legend(
     row: u16,
 ) -> (Line<'static>, Option<(u16, u16)>) {
     let palette = &app.palette;
-    let muted = Style::new().fg(palette.ansi(palette.muted));
+    let muted = muted(app);
     let lead = "Less ";
     let mut spans = vec![Span::styled(lead, muted)];
     for level in 0..5u8 {
@@ -884,7 +904,7 @@ fn legend(
 }
 
 fn summary(app: &App, calendar: &Calendar) -> Line<'static> {
-    let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
+    let muted = muted(app);
     if !calendar.has_elapsed_days() {
         return Line::styled(format!("{} hasn't started yet", calendar.year), muted);
     }
@@ -995,42 +1015,28 @@ fn loading(app: &App) -> Line<'static> {
     let frame = SPINNER[(app.tick / 2) as usize % SPINNER.len()];
     Line::from(vec![
         Span::styled(frame, Style::new().fg(app.palette.level(4))),
-        Span::styled(
-            format!(" loading {} {}…", app.login, app.year),
-            Style::new().fg(app.palette.ansi(app.palette.muted)),
-        ),
+        Span::styled(format!(" loading {} {}…", app.login, app.year), muted(app)),
     ])
 }
 
 fn failure(app: &App, message: &str) -> Vec<Line<'static>> {
-    let palette = &app.palette;
     vec![
         Line::from(vec![
             Span::styled("!", Style::new().fg(ratatui::style::Color::Red).bold()),
-            Span::styled(
-                format!(" {message}"),
-                Style::new().fg(palette.ansi(palette.fg)),
-            ),
+            Span::styled(format!(" {message}"), text(app)),
         ]),
         Line::raw(""),
-        Line::styled(
-            "r retry  ·  u change user",
-            Style::new().fg(palette.ansi(palette.muted)),
-        ),
+        Line::styled("r retry  ·  u change user", muted(app)),
     ]
 }
 
 fn footer(app: &App) -> Line<'static> {
-    let palette = &app.palette;
-    let muted = Style::new().fg(palette.ansi(palette.muted));
+    let muted = muted(app);
     match &app.mode {
         Mode::Input(buffer) => Line::from(vec![
             Span::styled("user ", muted),
-            Span::styled(
-                buffer.clone(),
-                Style::new().fg(palette.ansi(palette.fg)).bold(),
-            ),
-            Span::styled("▏", Style::new().fg(palette.ansi(palette.fg))),
+            Span::styled(buffer.clone(), text(app).bold()),
+            Span::styled("▏", text(app)),
             Span::styled("   enter load  ·  esc cancel", muted),
         ]),
         Mode::Normal => {

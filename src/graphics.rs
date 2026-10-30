@@ -460,7 +460,13 @@ fn base64(data: &[u8]) -> String {
 /// year of cells produces far more shades than that, so the blends are snapped to a
 /// coarser grid until they fit — starting at full precision, which is usually
 /// enough, and only losing accuracy on a palette that would not have fit anyway.
-fn indexed(image: &Image, background: Rgb) -> (Vec<[u8; 3]>, Vec<Option<u8>>) {
+///
+/// With no `background` to composite against, an edge is not blended at all: a
+/// pixel at least half covered is drawn in its own colour and the rest is left
+/// alone. Guessing one instead put a dark halo round every cell on a light
+/// terminal that had not said what it was (#141); a hard edge looks right on
+/// either.
+fn indexed(image: &Image, background: Option<Rgb>) -> (Vec<[u8; 3]>, Vec<Option<u8>>) {
     /// Registers `#0`-`#255`, so all 256 are addressable. Checked *before* an
     /// index is handed out: `seen.len() as u8` silently wraps to 0 on the
     /// 257th colour, and an index that aliases another colour must never be
@@ -474,12 +480,17 @@ fn indexed(image: &Image, background: Rgb) -> (Vec<[u8; 3]>, Vec<Option<u8>>) {
         let mut overflowed = false;
 
         for pixel in &image.pixels {
-            if pixel[3] == 0 {
+            let alpha = f32::from(pixel[3]) / 255.0;
+            let colour = Rgb(pixel[0], pixel[1], pixel[2]);
+            let solid = match background {
+                _ if pixel[3] == 0 => None,
+                Some(background) => Some(colour.over(background, alpha)),
+                None => (alpha >= 0.5).then_some(colour),
+            };
+            let Some(solid) = solid else {
                 map.push(None);
                 continue;
-            }
-            let alpha = f32::from(pixel[3]) / 255.0;
-            let solid = Rgb(pixel[0], pixel[1], pixel[2]).over(background, alpha);
+            };
             let snap = |value: u8| {
                 let percent = (u16::from(value) * 100 + 127) / 255;
                 ((percent + step / 2) / step * step).min(100) as u8
@@ -510,6 +521,16 @@ fn indexed(image: &Image, background: Rgb) -> (Vec<[u8; 3]>, Vec<Option<u8>>) {
 /// `P2 = 1`: a pixel nobody paints is left as it was, which is how a rounded corner
 /// stays rounded over a terminal background sixel cannot see.
 pub fn sixel(image: &Image, background: Rgb) -> String {
+    encode_sixel(image, Some(background))
+}
+
+/// A sixel for a terminal whose background is not known: edges are cut at half
+/// coverage rather than blended into a colour that may be wrong.
+pub fn sixel_hard_edged(image: &Image) -> String {
+    encode_sixel(image, None)
+}
+
+fn encode_sixel(image: &Image, background: Option<Rgb>) -> String {
     let (palette, map) = indexed(image, background);
     let mut out = String::from("\x1bP0;1;0q");
     out.push_str(&format!("\"1;1;{};{}", image.width, image.height));
@@ -627,7 +648,8 @@ pub struct Painter {
     /// Columns the terminal has, so clearing cells for a sixel cannot write past
     /// the last one and wrap over the rows below.
     pub width: u16,
-    background: Rgb,
+    /// What sixel edges are blended into, when the terminal said.
+    background: Option<Rgb>,
     base: Option<Painted>,
     marks: [Option<Mark>; 2],
 }
@@ -637,10 +659,19 @@ impl Painter {
     /// pixels over `background`.
     pub fn new(protocol: Protocol, cell: (u16, u16), background: Rgb) -> Self {
         Self {
+            background: Some(background),
+            ..Self::over_unknown(protocol, cell)
+        }
+    }
+
+    /// A painter for a terminal that did not say what its background is. Kitty
+    /// does not care; sixel edges are cut hard rather than blended into a guess.
+    pub fn over_unknown(protocol: Protocol, cell: (u16, u16)) -> Self {
+        Self {
             protocol,
             cell,
             width: u16::MAX,
-            background,
+            background: None,
             base: None,
             marks: [None; 2],
         }
@@ -809,7 +840,7 @@ impl Painter {
                 let rows = image.height.div_ceil(usize::from(self.cell.1)) as u16;
                 kitty(image, id, columns, rows, z)
             }
-            Protocol::Sixel => sixel(image, self.background),
+            Protocol::Sixel => encode_sixel(image, self.background),
         };
         // Absolute placement every time: the cursor is wherever the last frame's
         // text left it, and both protocols draw from wherever it is.
