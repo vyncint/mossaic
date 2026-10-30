@@ -716,3 +716,64 @@ fn a_year_that_has_not_happened_can_be_asked_what_it_will_look_like() -> termlen
     );
     Ok(())
 }
+
+#[test]
+fn pixel_cells_forced_into_a_narrow_window_draw_the_weeks_that_fit() -> termlens::Result<()> {
+    // At 80 columns Auto takes compact cells and says pixel cells need 112;
+    // `d` forces them. The image would not fit, so none was sent at all: the
+    // grid and the legend were blank, and their days still answered the mouse
+    // (#142). Text clips at the edge, and so do they now: 37 weeks fit beside
+    // the gutter in 78 columns.
+    for (graphics, label) in [(Graphics::Kitty, "kitty"), (Graphics::Sixel, "sixel")] {
+        let mut terminal = chart(graphics, Some(CELL), (80, 34), &PREVIEW)?;
+        let screen = terminal.wait_frame(loaded)?;
+        assert_eq!(style(&screen), "compact cells", "{screen}");
+        assert!(screen.graphics().is_empty());
+
+        terminal.send(Key::Char('d'))?;
+        let forced = terminal.wait_frame(|s| style(s).starts_with("pixel"))?;
+        let seen = forced.graphics();
+        assert_eq!(
+            year(&seen).size(),
+            Some((37 * 2 * u32::from(CELL.0), 7 * u32::from(CELL.1))),
+            "{label}: the weeks that fit should go out: {seen:?}"
+        );
+
+        // And `d` from a style that overflows goes to the best one that fits,
+        // not on round the cycle to rounded, which is wider still.
+        terminal.send(Key::Char('d'))?;
+        let next = terminal.wait_frame(|s| !style(s).starts_with("pixel"))?;
+        assert_eq!(style(&next), "compact cells", "{label}:\n{next}");
+        assert!(
+            !is_auto(&next),
+            "{label}: chosen, not left to Auto:\n{next}"
+        );
+        terminal.send(Key::Char('q'))?;
+        let _ = terminal.wait_exit()?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_terminal_that_draws_but_will_not_say_its_cell_size_is_told_the_flag() -> termlens::Result<()> {
+    // The kitty query answered OK and the size went unreported: text cells,
+    // silently, and an overlay suggesting another terminal. The `--cell WxH`
+    // hint was there only when `--graphics` had been forced (#142).
+    for (graphics, protocol) in [(Graphics::Kitty, "kitty"), (Graphics::Sixel, "sixel")] {
+        let mut terminal = chart(graphics, None, SIZE, &PREVIEW)?;
+        let screen = terminal.wait_frame(loaded)?;
+        assert!(
+            screen.contains(&format!("this terminal speaks {protocol}"))
+                && screen.contains("pass --cell WxH"),
+            "{screen}"
+        );
+        terminal.send(Key::Char('?'))?;
+        let help = terminal.wait_frame(|s| s.contains("drawing with"))?;
+        assert!(help.contains("pass --cell WxH"), "{help}");
+        assert!(
+            !help.contains("draw one protocol or the other"),
+            "this terminal does draw one:\n{help}"
+        );
+    }
+    Ok(())
+}

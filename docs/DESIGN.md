@@ -183,8 +183,9 @@ cannot draw.
 
 **Without a cell size there are no pixels.** An image that cannot be lined up
 with the labels around it is worse than no image, so a terminal that will not say
-gets text cells — and the chart says so under the legend rather than leaving a
-`--graphics kitty` looking ignored. There are three places the size can come
+gets text cells — and the chart says so under the legend, naming `--cell WxH`,
+whether the protocol was forced with `--graphics` or only answered for: text
+cells from a terminal that said yes to kitty look like a terminal that said no. There are three places the size can come
 from, in order: `TIOCGWINSZ`, the `CSI 16 t` reply, and the window size from
 `CSI 14 t` divided by the grid. Or you measure it yourself and pass
 `--cell 10x20`, which outranks all three. A resize re-asks, because that is also

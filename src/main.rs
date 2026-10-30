@@ -15,7 +15,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use ratatui::DefaultTerminal;
 
-use mossaic::app::{App, Graphics, Load, Options, Source};
+use mossaic::app::{App, CellStyle, Graphics, Load, Options, Source};
 use mossaic::cli::Args;
 use mossaic::primer::{Appearance, Palette, Season};
 use mossaic::{github, graphics, png, term, ui};
@@ -43,6 +43,9 @@ options:
   -g, --graphics M  auto | kitty | sixel | text  (default: ask the terminal)
       --cell WxH    size of one character cell in pixels, when the terminal
                     will not say (e.g. --cell 10x20)
+      --cells STYLE the cell style to start in: auto | pixel | rounded | snug |
+                    squares | grid | spaced | blocks | slim | compact
+                    (default: auto, the most faithful that fits; d cycles)
       --today DATE  what \"today\" means, as YYYY-MM-DD (default: the clock). It
                     decides which days count as still to come — and, with --file,
                     makes a saved year show them at all
@@ -388,6 +391,16 @@ fn parse_args() -> Option<Invocation> {
             }
             "--no-mouse" => options.mouse = false,
             "--cell" => options.cell = Some(parse_cell(&args.value("--cell"))),
+            "--cells" => {
+                let raw = args.value("--cells");
+                options.cells = CellStyle::parse(&raw).unwrap_or_else(|| {
+                    let names: Vec<&str> = CellStyle::NAMES.iter().map(|(name, _)| *name).collect();
+                    fail(&format!(
+                        "unknown cell style {raw:?} — {}",
+                        names.join(", ")
+                    ))
+                });
+            }
             "--png" => png = Some(args.value("--png")),
             "--capabilities" => capabilities = true,
             // The same hole, in the same shared parser: `mossaic -- -weirdlogin`

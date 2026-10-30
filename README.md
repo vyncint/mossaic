@@ -126,7 +126,11 @@ cells      kitty
   Windows Terminal draws sixel when told to: `mossaic --graphics sixel --cell
   WxH`, measuring the cell yourself, and `--theme light` on a light background.
 - **A window under 112 columns** falls back too, and the chart says so under the
-  legend, naming the number it wants.
+  legend, naming the number it wants. Forced with `d`, pixel cells draw the weeks
+  that fit.
+- **`cell unknown`** with `kitty yes` or `sixel yes` means the terminal can draw
+  but did not say how big a character cell is, and an image cannot be lined up
+  without it. The chart says so too; measure it and pass `--cell WxH`.
 - Either way, `mossaic --png chart.png` renders the same image to a file from
   any terminal at all.
 
@@ -198,6 +202,7 @@ mossaic --capabilities           # what your terminal can draw
 mossaic --png chart.png          # the chart as an image, from any terminal
 mossaic --graphics sixel         # force a protocol, or `text` for no pixels
 mossaic --cell 10x20             # when the terminal will not say how big a cell is
+mossaic --cells squares          # start in a cell style, instead of the best that fits
 mossaic --today 2027-06-30       # read the year as of a day, not the clock
 mossaic --theme light            # instead of following the terminal's background
 mossaic --palette winter         # GitHub's own seasonal colours
@@ -392,7 +397,7 @@ kitty protocol.
 | `Home` / `End` | first / last day in range |
 | `?` | keys, mouse, and what this terminal can draw |
 | `u` | type a different username (`Enter` load, `Esc` cancel) |
-| `d` | cycle cell style — auto / pixel / rounded / snug / squares / grid / spaced / blocks / slim / compact. The legend names it, and says `auto:` while the chart is still choosing |
+| `d` | cycle cell style — auto / pixel / rounded / snug / squares / grid / spaced / blocks / slim / compact. The legend names it, and says `auto:` while the chart is still choosing. From a style that does not fit, it goes to the best one that does. `--cells NAME` starts in one |
 | `m` | mouse reporting on or off — off gives the terminal its own selection back |
 | `r` | reload |
 | `q` | quit — `Esc` cancels the username prompt and closes the help overlay, and does nothing else |

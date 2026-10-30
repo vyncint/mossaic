@@ -185,7 +185,8 @@ impl Cells {
         }
     }
 
-    const fn fits(&self, weeks: usize, width: usize, height: usize) -> bool {
+    /// Whether the whole chart fits `width` by `height` in these cells.
+    pub(crate) const fn fits(&self, weeks: usize, width: usize, height: usize) -> bool {
         self.width(weeks) <= width && self.height() + CHROME_ROWS <= height
     }
 }
@@ -198,7 +199,8 @@ pub struct Layout {
     pub x: u16,
     /// Row of the first cell row.
     pub y: u16,
-    /// Columns in the grid.
+    /// Columns in the grid that are on screen: all of them, except where pixel
+    /// cells were asked for in a window too narrow for the year.
     pub weeks: u16,
     /// The style the chart resolved to.
     pub cells: Cells,
@@ -305,6 +307,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     frame.render_widget(block, area);
 
     app.footer_width = inner.width;
+    app.area = (inner.width, inner.height);
     let (lines, layout, wrap) = body(app, inner);
     let paragraph = Paragraph::new(lines);
     frame.render_widget(
@@ -412,7 +415,21 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
             "not reported — try --theme light".to_string(),
         ));
     }
-    if !app.pixels_available() && app.caps.answered {
+    if let Some(protocol) = app.cell_size_missing() {
+        // Not "try another terminal": this one can draw, and one flag says how.
+        lines.push(blank());
+        lines.push((
+            DECISION,
+            Line::styled(
+                format!("  {protocol} is here, but the cell size is not reported:"),
+                muted,
+            ),
+        ));
+        lines.push((
+            DECISION,
+            Line::styled("  pass --cell WxH, measured in pixels.", muted),
+        ));
+    } else if !app.pixels_available() && app.caps.answered {
         lines.push(blank());
         lines.push((
             HINT,
@@ -641,14 +658,26 @@ fn chart(
     }
 
     let grid_row = origin.1 + 1;
+    let x = origin.0 + (GUTTER + cells.offset()) as u16;
+    // Pixel cells forced into a window too narrow for them drew nothing at all:
+    // the image would not fit, so none was sent, and the reserved rows stayed
+    // blank while their days still answered the mouse (#142). Text clips at the
+    // right edge, and so do they now — the weeks that fit are drawn, and only
+    // those are days to the mouse and the painter.
+    let shown = match cells {
+        Cells::Pixels => weeks.min(usize::from(
+            inner.right().saturating_sub(x) / COLUMNS_PER_DAY,
+        )),
+        _ => weeks,
+    };
     let legend_at = under
         .iter()
         .position(|(rank, _)| *rank == 5)
         .and_then(|index| Some((legend_x?, grid_row + (grid.len() + index) as u16)));
     let layout = Layout {
-        x: origin.0 + (GUTTER + cells.offset()) as u16,
+        x,
         y: grid_row,
-        weeks: weeks as u16,
+        weeks: shown as u16,
         cells,
         legend: legend_at,
         bottom: match cut {
@@ -679,6 +708,14 @@ fn note(
     if let Some(protocol) = app.graphics_refused() {
         return Some(Line::styled(
             format!("({protocol} was asked for, but no cell size is known — pass --cell WxH)"),
+            muted,
+        ));
+    }
+    // And the same when nobody asked: a terminal that speaks a protocol but
+    // will not say how big a cell is got text, silently (#142).
+    if let Some(protocol) = app.cell_size_missing() {
+        return Some(Line::styled(
+            format!("(this terminal speaks {protocol}, but not its cell size — pass --cell WxH)"),
             muted,
         ));
     }

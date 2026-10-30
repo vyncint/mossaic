@@ -7,8 +7,8 @@
 //! The `rounded` style needs block sextants (the U+1FB00 block, Unicode 13).
 //! Terminals that draw box characters themselves — VTE 0.66+, kitty, foot,
 //! WezTerm — render them whatever the font holds. If the rounded row below shows
-//! boxes, question marks or blanks instead of small squares, press `d` in
-//! mossaic to fall back to `squares`, which needs nothing beyond U+2580.
+//! boxes, question marks or blanks instead of small squares, start mossaic with
+//! `--cells squares`, which needs nothing beyond U+2580.
 //!
 //! None of this applies when the terminal draws pixels: `mossaic
 //! --capabilities` says whether yours does.
@@ -101,6 +101,9 @@ fn main() {
     println!("  Each row should read as separated small squares, dark to bright green.");
     println!("  The rounded row should have visibly softened corners.");
     println!();
+    // Named, rather than "press d": the chart picks rounded again on every
+    // launch, so a font without sextants meant pressing it every time (#142).
     println!("  If rounded looks wrong, everything else still works:");
-    println!("    mossaic            then press d to cycle styles");
+    println!("    mossaic --cells squares    start in squares, or any row above");
+    println!("    mossaic                    then press d to cycle styles");
 }

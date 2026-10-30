@@ -939,3 +939,19 @@ fn a_short_window_gives_up_the_statistics_before_the_way_out() -> termlens::Resu
     assert!(t.wait_exit()?.success(), "and q is still the way out");
     Ok(())
 }
+
+/// `--cells` names the style to start in. Auto takes rounded at this width, and
+/// a font with no block sextants meant pressing `d` on every launch (#142).
+#[test]
+fn the_cell_style_can_be_named_on_the_command_line() -> termlens::Result<()> {
+    for (name, shown) in [("squares", "squares cells"), ("compact", "compact cells")] {
+        let args = [&PREVIEW[..], &["--cells", name]].concat();
+        let mut t = chart(&args)?;
+        let screen = t.wait_frame(loaded)?;
+        assert_eq!(style(&screen), shown, "{screen}");
+        assert!(!is_auto(&screen), "named, so not Auto's:\n{screen}");
+        t.send(Key::Char('q'))?;
+        let _ = t.wait_exit()?;
+    }
+    Ok(())
+}

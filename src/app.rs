@@ -13,7 +13,7 @@ use crate::github;
 use crate::graphics::{Mark, Painter, Protocol, Ring, Scene, COLUMNS_PER_DAY};
 use crate::primer::{Appearance, Palette, Season};
 use crate::term::{self, Caps};
-use crate::ui::{Cells, Layout};
+use crate::ui::{self, Cells, Layout};
 
 /// Where the calendar comes from.
 #[derive(Debug, Clone)]
@@ -69,6 +69,9 @@ pub struct Options {
     /// Which day to read the year as of. `None` is the clock — and, for a saved
     /// calendar, means every day in it counts as elapsed.
     pub today: Option<NaiveDate>,
+    /// The cell style to start in, which `--cells` names. A font with no block
+    /// sextants meant pressing `d` on every launch to get away from them.
+    pub cells: CellStyle,
 }
 
 impl Default for Options {
@@ -80,6 +83,7 @@ impl Default for Options {
             mouse: true,
             cell: None,
             today: None,
+            cells: CellStyle::Auto,
         }
     }
 }
@@ -115,6 +119,32 @@ pub enum CellStyle {
 }
 
 impl CellStyle {
+    /// Every style by the name the legend gives it, in the order `d` visits
+    /// them — which is what `--cells` accepts and `--help` lists.
+    pub const NAMES: [(&'static str, CellStyle); 10] = [
+        ("auto", Self::Auto),
+        ("pixel", Self::Pixels),
+        ("rounded", Self::Rounded),
+        ("snug", Self::Snug),
+        ("squares", Self::Squares),
+        ("grid", Self::Grid),
+        ("spaced", Self::Spaced),
+        ("blocks", Self::Blocks),
+        ("slim", Self::Slim),
+        ("compact", Self::Compact),
+    ];
+
+    /// The style a name means, as the legend writes it. `pixels` is accepted
+    /// too, being what the README calls them.
+    pub fn parse(name: &str) -> Option<Self> {
+        let name = name.trim().to_ascii_lowercase();
+        let name = if name == "pixels" { "pixel" } else { &name };
+        Self::NAMES
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, style)| *style)
+    }
+
     /// The next style in the cycle. Pixels are skipped where the terminal cannot
     /// draw them, since asking for them there resolves to rounded and pressing `d`
     /// would look like it had done nothing.
@@ -188,6 +218,9 @@ pub struct App {
     /// Columns the footer may use, set by the renderer each frame so it can drop
     /// what will not fit rather than being cut mid-word.
     pub footer_width: u16,
+    /// The area the chart was laid out in last frame, columns by rows, so `d`
+    /// can tell a style that fits from one that does not.
+    pub(crate) area: (u16, u16),
     /// Whether mouse reporting is on; `m` toggles it.
     pub mouse: bool,
     /// Whether the help overlay is up. `?` opens it, any key closes it.
@@ -242,6 +275,7 @@ impl App {
             gfx: None,
             layout: None,
             footer_width: 0,
+            area: (0, 0),
             mouse: false,
             help: false,
             redraw: false,
@@ -268,6 +302,7 @@ impl App {
         self.today = options.today;
         self.wanted = options.graphics;
         self.cell_override = options.cell;
+        self.cells = options.cells;
         let known = options
             .appearance
             .or_else(|| caps.background.map(Appearance::from_background));
@@ -309,6 +344,24 @@ impl App {
     /// Whether this terminal can draw pixel cells.
     pub fn pixels_available(&self) -> bool {
         self.gfx.is_some()
+    }
+
+    /// The protocol the terminal speaks, or was told to, when it could not be
+    /// used because nobody said how big a character cell is — which is the only
+    /// reason a protocol goes unused. A terminal that answered the kitty query
+    /// and not the size got text cells silently, and a help overlay suggesting
+    /// it try another terminal (#142).
+    pub fn cell_size_missing(&self) -> Option<&'static str> {
+        if self.gfx.is_some() {
+            return None;
+        }
+        match self.wanted {
+            Graphics::Kitty => Some("kitty"),
+            Graphics::Sixel => Some("sixel"),
+            Graphics::Auto if self.caps.kitty => Some("kitty"),
+            Graphics::Auto if self.caps.sixel => Some("sixel"),
+            Graphics::Auto | Graphics::Text => None,
+        }
     }
 
     /// Whether a protocol was asked for and could not be used. The chart says so
@@ -492,7 +545,7 @@ impl App {
             // A style change moves or removes the image, so the screen has to go
             // with it: pixels the text layer never wrote are pixels it cannot clear.
             KeyCode::Char('d') => {
-                self.cells = self.cells.next(self.pixels_available());
+                self.cells = self.next_cells();
                 self.redraw = true;
             }
             KeyCode::Char('?') | KeyCode::F(1) => {
@@ -510,6 +563,41 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Where `d` goes from here. Round the cycle — except from a style that
+    /// does not fit, where the next one in the cycle was as likely to be wider
+    /// as narrower and "press d for a smaller style" walked through bigger ones
+    /// (#142). From there it goes to the best style that does fit, in Auto's
+    /// order of preference.
+    fn next_cells(&self) -> CellStyle {
+        let pixels = self.pixels_available();
+        let next = self.cells.next(pixels);
+        let Load::Ready(calendar) = &self.load else {
+            return next;
+        };
+        let weeks = calendar.weeks.len();
+        let (width, height) = (usize::from(self.area.0), usize::from(self.area.1));
+        let fits = |style: CellStyle| {
+            ui::resolve(style, weeks, width, height, pixels).fits(weeks, width, height)
+        };
+        if fits(self.cells) {
+            return next;
+        }
+        [
+            CellStyle::Pixels,
+            CellStyle::Rounded,
+            CellStyle::Squares,
+            CellStyle::Grid,
+            CellStyle::Spaced,
+            CellStyle::Blocks,
+            CellStyle::Slim,
+            CellStyle::Compact,
+        ]
+        .into_iter()
+        .filter(|style| *style != CellStyle::Pixels || pixels)
+        .find(|style| fits(*style))
+        .unwrap_or(next)
     }
 
     fn on_key_input(&mut self, code: KeyCode) {
@@ -726,9 +814,12 @@ fn scene<'a>(
         return None;
     };
 
+    // The weeks the layout found room for, which is the whole year unless the
+    // style was forced into a window too narrow for it.
     let levels: Vec<[Option<u8>; 7]> = calendar
         .weeks
         .iter()
+        .take(usize::from(layout.weeks))
         .map(|week| {
             let mut column = [None; 7];
             for (weekday, day) in week.days.iter().enumerate() {
@@ -743,6 +834,10 @@ fn scene<'a>(
     let mark = |date: Option<NaiveDate>, ring: Ring| -> Option<Mark> {
         let date = date?;
         let (week, weekday) = calendar.position(date)?;
+        // A ring on a week that was not drawn would land past the edge.
+        if week >= usize::from(layout.weeks) {
+            return None;
+        }
         Some(Mark {
             week: week as u16,
             weekday: weekday as u16,

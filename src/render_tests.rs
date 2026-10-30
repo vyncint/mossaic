@@ -215,6 +215,34 @@ fn auto_picks_the_most_faithful_style_that_fits() {
     }
 }
 
+#[test]
+fn a_cell_style_is_named_the_way_the_legend_names_it() {
+    use crate::app::{CellStyle, Options};
+    use crate::ui::resolve;
+    // `--cells` takes the word the legend prints, so what a reader sees is what
+    // they type (#142). Pixels resolve to "pixel" only where they can be drawn.
+    for (name, style) in CellStyle::NAMES {
+        assert_eq!(CellStyle::parse(name), Some(style), "{name}");
+        if style != CellStyle::Auto {
+            assert_eq!(resolve(style, 53, 300, 60, true).name(), name, "{name}");
+        }
+    }
+    assert_eq!(CellStyle::parse("pixels"), Some(CellStyle::Pixels));
+    assert_eq!(CellStyle::parse("Squares"), Some(CellStyle::Squares));
+    assert_eq!(CellStyle::parse("hexagons"), None);
+
+    // And the chart starts in it.
+    let mut app = ready(synthetic(2025, "octocat"));
+    app.configure(
+        crate::term::Caps::default(),
+        Options {
+            cells: CellStyle::Squares,
+            ..Options::default()
+        },
+    );
+    assert!(render(&mut app, 200, 30).contains("   ·   squares cells"));
+}
+
 /// Column of each drawn cell on every weekday row, measured from the frame.
 fn cell_columns(frame: &str, glyph: char) -> Vec<Vec<usize>> {
     frame

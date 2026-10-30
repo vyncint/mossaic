@@ -165,3 +165,15 @@ fn a_written_png_reports_success_even_when_the_reader_has_gone() {
     );
     let _ = std::fs::remove_file(&png);
 }
+
+/// `--cells` takes the names the legend uses, and a name it does not know is
+/// refused with the list rather than ignored (#142).
+#[test]
+fn an_unknown_cell_style_is_refused_with_the_names() {
+    let out = chart(&["--demo", "--cells", "hexagons"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    let text = stderr(&out);
+    for name in ["auto", "pixel", "rounded", "squares", "compact"] {
+        assert!(text.contains(name), "{name} is missing from:\n{text}");
+    }
+}

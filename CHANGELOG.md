@@ -9,6 +9,15 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Added
+
+- **`--cells STYLE`** (#142): start the chart in a cell style — `auto`,
+  `pixel`, `rounded`, `snug`, `squares`, `grid`, `spaced`, `blocks`, `slim` or
+  `compact`, the names the legend prints. A font with no block sextants meant
+  pressing `d` on every launch to get off rounded; `mossaic-glyphs`, the
+  check for exactly that font, now names `--cells squares`. `Options` gains a
+  `cells` field for library users.
+
 ### Fixed
 
 - **A terminal reply that arrived after the start-up probe was read as
@@ -42,6 +51,16 @@ listed under a **Changed** or **Removed** heading.
   its bottom rows instead of the footer. The failure screen offers `u` only
   where it works — not for `--file` or `--demo` — and the tooltip's `▼` no
   longer overwrites a letter of the month label beneath it.
+- **Pixel cells forced into a narrow window drew nothing** (#142). After `d`
+  at under 112 columns the grid and the legend were blank, no image was sent
+  at all, and the undrawn days still answered the mouse. The weeks that fit
+  are drawn now, clipped at the edge as text is, and only those are days to
+  the mouse. `d` from any style that does not fit goes to the best one that
+  does rather than on round the cycle, which could be wider still. A terminal
+  that speaks kitty or sixel but does not report its cell size is told to
+  pass `--cell WxH` — under the legend and in the help overlay — where before
+  the hint appeared only for a forced `--graphics`, and the overlay suggested
+  another terminal.
 
 ### Changed
 
