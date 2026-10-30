@@ -476,7 +476,10 @@ palette is degraded on purpose, and what the capability probe actually sends.
 - **A 53-week year needs a 112×19 window** for pixel or square cells, 165 columns
   for rounded corners, 166×27 for the bordered grid. Below that `Auto` drops to a
   borderless style, where a future day and a day off the end of the year both look
-  blank; `d` still forces the others if you would rather they clipped.
+  blank; `d` still forces the others if you would rather they clipped. A shorter
+  window gives up the statistics line first, then the legend and the spacing,
+  and keeps the keys; below 59×14 there is no room for a chart and the way out
+  together, and the chart says so instead.
 - Private contributions appear only if the authenticated user can see them.
 
 ## Install

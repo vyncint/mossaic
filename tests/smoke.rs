@@ -906,3 +906,36 @@ fn a_reply_that_misses_the_probe_is_not_read_as_keys() -> termlens::Result<()> {
     assert!(t.wait_exit()?.success());
     Ok(())
 }
+
+/// The sizes #139 measured: at 80x18 the note showed and the footer did not, at
+/// 60x14 neither did, and at 40x10 nothing said the window was the problem.
+#[test]
+fn a_short_window_gives_up_the_statistics_before_the_way_out() -> termlens::Result<()> {
+    for size in [(80u16, 18u16), (60, 14)] {
+        let mut t = spawn(&PREVIEW, size, |b| b)?;
+        let screen = t.wait_frame(|s| s.contains("contributions in") && s.contains("needs"))?;
+        assert!(
+            screen.contains("q quit") && screen.contains("the chart needs 19 rows"),
+            "at {size:?} the note or the footer is missing:\n{screen}"
+        );
+        t.send(Key::Char('q'))?;
+        assert!(t.wait_exit()?.success());
+    }
+
+    // The demo's label trimmed `q quit` away before itself at 56 columns.
+    let mut t = spawn(&["--demo"], (56, 24), |b| b)?;
+    let screen = t.wait_frame(|s| s.contains("contributions in") && s.contains("? help"))?;
+    assert!(screen.contains("q quit"), "{screen}");
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success());
+
+    let mut t = spawn(&PREVIEW, (40, 10), |b| b)?;
+    let screen = t.wait_frame(|s| s.contains("terminal too small"))?;
+    assert!(
+        screen.contains("59×14"),
+        "it names the size it needs:\n{screen}"
+    );
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success(), "and q is still the way out");
+    Ok(())
+}

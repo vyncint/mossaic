@@ -31,6 +31,17 @@ listed under a **Changed** or **Removed** heading.
   hard instead. The README no longer lists Windows Terminal among the
   terminals found automatically — on Windows nothing is asked, so it needs
   `--graphics sixel --cell WxH`.
+- **In a small window the way out was the first thing to go** (#139). The
+  demo's and a file's source label trimmed `q quit` off the footer before
+  itself (56×24 showed only `? help · demo — …`); at 80×18 the note pushed
+  the footer off, and at 60×14 and 40×10 there was neither a footer nor any
+  word of why. A short window now gives up the statistics, then the spacing,
+  the detail line and the legend, and keeps the note and the keys; below
+  59×14, where no chart fits beside them, it says `terminal too small (needs
+  59×14) — q quits`. A style asked for that is taller than the window loses
+  its bottom rows instead of the footer. The failure screen offers `u` only
+  where it works — not for `--file` or `--demo` — and the tooltip's `▼` no
+  longer overwrites a letter of the month label beneath it.
 
 ### Changed
 

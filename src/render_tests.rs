@@ -1713,6 +1713,127 @@ fn hovering_a_day_reads_it_out_the_way_github_does() {
 }
 
 #[test]
+fn the_tooltip_marker_keeps_off_the_month_labels() {
+    use crate::app::CellStyle;
+    // `▼` shares its row with the month labels, and drawn over one it read
+    // `J▼n` (#139). Squares put a week every two columns, so "Jan" covers the
+    // whole of week 0 and half of week 1.
+    let mut app = ready(synthetic(2025, "octocat"));
+    app.cells = CellStyle::Squares;
+    render(&mut app, 176, 24);
+    let layout = app.layout.unwrap();
+    let months_row = (layout.y - 1) as usize;
+    let Load::Ready(calendar) = &app.load else {
+        unreachable!()
+    };
+    let (first, later) = (
+        calendar.weeks[0].days[3].unwrap().date,
+        calendar.weeks[10].days[3].unwrap().date,
+    );
+
+    app.hover = Some(first);
+    let lines = rows(&render(&mut app, 176, 24));
+    assert!(
+        lines[months_row].contains("Jan"),
+        "the label was written over: {:?}",
+        lines[months_row]
+    );
+    assert!(
+        lines[months_row - 1].contains("on January"),
+        "the tooltip still names the day"
+    );
+
+    // Clear of a label, the marker points at the week as before.
+    app.hover = Some(later);
+    let lines = rows(&render(&mut app, 176, 24));
+    let marker = lines[months_row].chars().position(|c| c == '▼');
+    let column = (layout.x + 10 * 2) as usize;
+    assert!(
+        marker.is_some_and(|at| (column..column + 2).contains(&at)),
+        "the marker should sit over week 10: {:?}",
+        lines[months_row]
+    );
+}
+
+#[test]
+fn a_small_window_keeps_the_way_out_on_screen() {
+    use crate::app::{CellStyle, Source};
+
+    // The demo's source label sat after `q quit` in the trim order, so at 56
+    // columns the footer read only `? help · demo — …` (#139).
+    let mut demo = ready(synthetic(2025, "demo"));
+    demo.source = Source::Demo;
+    let frame = render(&mut demo, 56, 24);
+    assert!(
+        frame.contains("q quit") && frame.contains("? help"),
+        "{frame}"
+    );
+
+    // At 80x18 the note showed and the footer under it did not; the statistics
+    // are worth less than either.
+    let mut app = ready(synthetic(2025, "octocat"));
+    let frame = render(&mut app, 80, 18);
+    assert!(frame.contains("q quit"), "{frame}");
+    assert!(frame.contains("the chart needs 19 rows"), "{frame}");
+    assert!(
+        !frame.contains("active days"),
+        "the summary goes first:\n{frame}"
+    );
+    assert!(
+        frame.contains("Less"),
+        "the legend need not go yet:\n{frame}"
+    );
+
+    // At 60x14 there was neither the footer nor anything saying why: it is
+    // the smallest window that holds the grid, the note and the way out.
+    let frame = render(&mut app, 60, 14);
+    assert!(frame.contains("q quit") && frame.contains("Mon"), "{frame}");
+    assert!(frame.contains("the chart needs 19 rows"), "{frame}");
+    assert!(app.layout.is_some());
+
+    // One row less, and a chart would have to give up the way out to fit, so it
+    // says how big a window it needs instead — in the units a terminal reports.
+    let frame = render(&mut app, 60, 13);
+    assert!(
+        frame.contains("terminal too small (needs 59×14) — q quits"),
+        "{frame}"
+    );
+    assert!(app.layout.is_none(), "nothing for the mouse or the painter");
+    let frame = render(&mut app, 40, 10);
+    assert!(
+        frame.contains("terminal too small") && frame.contains("quits"),
+        "wrapped, not cut off:\n{frame}"
+    );
+
+    // A style asked for and taller than the window gives up its bottom rows,
+    // not the footer — and the rows it gave up are not days to the mouse.
+    app.cells = CellStyle::Grid;
+    let frame = render(&mut app, 176, 20);
+    assert!(frame.contains("q quit"), "{frame}");
+    let layout = app.layout.unwrap();
+    assert!(layout.bottom < 19, "the grid was not cut: {layout:?}");
+    assert_eq!(layout.hit(layout.x, layout.bottom), None);
+    assert!(layout.hit(layout.x, layout.bottom - 1).is_some());
+}
+
+#[test]
+fn the_failure_screen_offers_only_keys_that_work() {
+    use crate::app::Source;
+    // `u` is ignored for a file and the demo, and a missing file is the
+    // commonest failure there is (#139).
+    let mut file = App::new("preview".into(), 2027, Source::File("nope.json".into()));
+    file.load = Load::Failed("could not read nope.json".into());
+    let frame = render(&mut file, 80, 12);
+    assert!(frame.contains("r retry"), "{frame}");
+    assert!(!frame.contains("u change user"), "{frame}");
+
+    let mut account = App::new("octocat".into(), 2027, Source::GitHub);
+    account.load = Load::Failed("Could not resolve to a User".into());
+    let frame = render(&mut account, 80, 12);
+    assert!(frame.contains("u change user"), "{frame}");
+}
+
+#[test]
 fn a_day_still_to_come_has_no_tooltip() {
     use ratatui::crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 

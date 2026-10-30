@@ -202,7 +202,9 @@ repairing it means re-emitting a slice of the image on a frame boundary that
 does not exist. One placement that works everywhere beat two that did not.
 
 What is kept: the wording is github.com's exactly, ordinals included, and a `▼`
-points at the hovered week's column so the association is unambiguous.
+points at the hovered week's column so the association is unambiguous — from a
+column of that week clear of the month labels it shares a row with, or not at
+all, since a `▼` drawn over one turned `Jan` into `J▼n`.
 
 ## 8. Two pointers, not one
 
