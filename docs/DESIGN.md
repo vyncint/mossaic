@@ -167,6 +167,16 @@ doubles as the "everything that is coming has come" marker. The read is from
 timeout and nothing else — no thread left blocked holding the keyboard, which
 is what a naive blocking read would do to the next keypress.
 
+A reply that misses the deadline is not lost, which is the trouble with it: it
+arrives on the keyboard's input, and crossterm, which has no parser for `OSC` or
+`APC`, reads `ESC ] 11 ; rgb:0d0d/…` as Alt+`]` and then an `r` and two `d`s —
+next year, reload, and a different cell style. So a terminal that has started
+answering by the deadline gets a second window to reach the sentinel; a silent
+one still costs only the first. Whatever arrives later still is swallowed by
+the key handler: an Alt+`]`, Alt+`_` or Alt+`P` opens a reply, the keys after
+it are dropped up to its terminator (bounded in count and in time), and no
+binding in the chart answers to Alt at all.
+
 Only `OK` counts for kitty. A terminal that knows the protocol but not that
 transmission medium answers `ENOTSUPPORTED`, and would then be sent images it
 cannot draw.

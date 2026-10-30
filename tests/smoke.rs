@@ -872,3 +872,37 @@ fn the_advice_line_names_the_window_size_not_the_drawable_area() -> termlens::Re
     let _ = t.wait_exit()?;
     Ok(())
 }
+
+/// A terminal whose answers miss the probe: the ssh link to the other side of
+/// the world. termlens is told not to answer, and then the answers a dark kitty
+/// gives are delivered after the first frame, which is where a late reply lands.
+/// crossterm reads `ESC ]` as Alt+`]` and the colour that follows as keys, so
+/// the `r` and the two `d`s in `rgb:0d0d/…` reloaded and moved the chart from
+/// rounded to snug cells (#140).
+#[test]
+fn a_reply_that_misses_the_probe_is_not_read_as_keys() -> termlens::Result<()> {
+    let mut t = spawn(&PREVIEW, SIZE, |b| b.answer_queries(false))?;
+    let before = t.wait_frame(loaded)?;
+    assert_eq!(style(&before), "rounded cells", "{before}");
+
+    t.send_str(concat!(
+        "\x1b_Gi=7379;OK\x1b\\",
+        "\x1b]11;rgb:0d0d/1111/1717\x1b\\",
+        "\x1b[6;19;9t",
+        "\x1b[4;646;1584t",
+        "\x1b[?62;4;22c",
+    ))?;
+    // A key with something to show for it, after the reply: once the frame
+    // carries it, every key before it has been handled.
+    t.send(Key::Home)?;
+    let after = t.wait_frame(|s| loaded(s) && s.contains("Fri, Jan 1 2027"))?;
+    assert_eq!(
+        style(&after),
+        "rounded cells",
+        "the reply was read as keys:\n{after}"
+    );
+    assert!(is_auto(&after), "the style is still Auto's:\n{after}");
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success());
+    Ok(())
+}

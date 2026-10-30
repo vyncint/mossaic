@@ -18,6 +18,13 @@
 //! The device-attributes reply comes last and every terminal answers it, so it
 //! doubles as the "everything that is coming has come" marker: the usual round trip
 //! is a millisecond or two, not the timeout.
+//!
+//! A reply the probe stops listening for does not go away: it arrives on the
+//! same input as the keyboard, and the event loop reads `ESC ] 11 ; rgb:0d0d/…`
+//! as Alt+`]` followed by an `r` and two `d`s (#140). So a terminal that has
+//! begun answering is given a second window to finish, and
+//! [`crate::app::App::on_key`] swallows the body of anything that still arrives
+//! late.
 
 use std::time::Duration;
 
@@ -61,7 +68,8 @@ pub struct Caps {
 ///
 /// Call this with the terminal already in raw mode, or the replies arrive
 /// line-buffered and echoed. A terminal that never answers costs the timeout
-/// and nothing else.
+/// and nothing else; one that has started answering by then gets up to the
+/// same again to reach the sentinel.
 #[cfg(unix)]
 pub fn probe(timeout: Duration) -> Caps {
     use std::fs::OpenOptions;
@@ -84,7 +92,7 @@ pub fn probe(timeout: Duration) -> Caps {
         return Caps::default();
     }
 
-    let deadline = Instant::now() + timeout;
+    let start = Instant::now();
     let mut reply = Vec::new();
     let mut chunk = [0u8; 1024];
     loop {
@@ -97,7 +105,7 @@ pub fn probe(timeout: Duration) -> Caps {
                 }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
+                if !keep_waiting(start.elapsed(), timeout, !reply.is_empty()) {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(2));
@@ -106,6 +114,20 @@ pub fn probe(timeout: Duration) -> Caps {
         }
     }
     parse(&String::from_utf8_lossy(&reply))
+}
+
+/// Whether the probe should go on reading, `elapsed` into it, having `heard`
+/// something or nothing.
+///
+/// Nothing by the deadline is a mute terminal, and it costs the deadline and no
+/// more. Something but not yet the sentinel is a slow one — a high-latency ssh
+/// link — and stopping there hands the rest of its answers to the event loop,
+/// which read them as keystrokes: a dark kitty's ordinary replies arriving late
+/// pressed `d` twice and left the chart in snug cells (#140). So a terminal
+/// that has begun answering gets a second window of the same length to finish.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn keep_waiting(elapsed: Duration, timeout: Duration, heard: bool) -> bool {
+    elapsed < timeout || (heard && elapsed < timeout.saturating_mul(2))
 }
 
 /// Ask the terminal what it can do — except here, where nothing is asked.

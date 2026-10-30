@@ -3816,6 +3816,88 @@ fn the_probe_reads_a_reply_that_shares_its_buffer() {
 }
 
 #[test]
+fn a_slow_terminal_gets_time_to_finish_and_a_mute_one_does_not() {
+    use crate::term::keep_waiting;
+    use std::time::Duration as Wait;
+    let timeout = Wait::from_millis(500);
+    let at = Wait::from_millis;
+    // Inside the first window, whatever has been heard.
+    assert!(keep_waiting(at(10), timeout, false));
+    assert!(keep_waiting(at(499), timeout, true));
+    // Past it, silence is a terminal that will never answer: the deadline and
+    // nothing more.
+    assert!(!keep_waiting(at(500), timeout, false));
+    // But a terminal that has started answering is slow, not mute, and what it
+    // has not said yet would otherwise arrive as keystrokes (#140).
+    assert!(keep_waiting(at(500), timeout, true));
+    assert!(keep_waiting(at(999), timeout, true));
+    // Bounded all the same.
+    assert!(!keep_waiting(at(1000), timeout, true));
+}
+
+#[test]
+fn a_terminal_reply_that_arrives_late_is_not_read_as_keys() {
+    use crate::app::{CellStyle, Source};
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+    /// What crossterm makes of bytes it has no parser for: `ESC` and a
+    /// character is Alt and that character, BEL is Ctrl+G, and a capital
+    /// carries Shift. The `CSI` replies never get here — crossterm drops a
+    /// sequence it cannot parse — so these are the ones that matter.
+    fn type_out(app: &mut App, bytes: &str) {
+        let mut chars = bytes.chars();
+        while let Some(c) = chars.next() {
+            let (c, mut mods) = match c {
+                '\x1b' => (chars.next().expect("ESC is followed"), KeyModifiers::ALT),
+                '\x07' => ('g', KeyModifiers::CONTROL),
+                c => (c, KeyModifiers::NONE),
+            };
+            if c.is_uppercase() {
+                mods |= KeyModifiers::SHIFT;
+            }
+            app.on_key(KeyCode::Char(c), mods);
+        }
+    }
+    // The demo, so that a reload would be visible and would not touch the network.
+    let fresh = || {
+        let mut app = ready(synthetic(2025, "octocat"));
+        app.source = Source::Demo;
+        app
+    };
+
+    // A dark kitty's ordinary answers, in both terminators. Before #140 the
+    // `r` reloaded and the two `d`s moved the chart to snug cells.
+    let mut app = fresh();
+    let cursor = app.cursor;
+    type_out(
+        &mut app,
+        "\x1b_Gi=7379;OK\x1b\\\x1b]11;rgb:0d0d/1111/1717\x1b\\\x1b]11;rgb:ffff/ffff/ffff\x07",
+    );
+    assert_eq!(
+        app.cells,
+        CellStyle::Auto,
+        "the reply changed the cell style"
+    );
+    assert!(matches!(app.load, Load::Ready(_)), "the reply reloaded");
+    assert_eq!(app.cursor, cursor, "the reply moved the cursor");
+    assert!(!app.quit && !app.help);
+
+    // And the keyboard is back the moment the reply ends.
+    app.on_key(KeyCode::Char('d'), KeyModifiers::NONE);
+    assert_eq!(app.cells, CellStyle::Rounded, "d after the reply");
+
+    // Alt is never a binding: Alt+`d` is not `d`.
+    let mut app = fresh();
+    app.on_key(KeyCode::Char('d'), KeyModifiers::ALT);
+    app.on_key(KeyCode::Char('h'), KeyModifiers::ALT);
+    assert_eq!(app.cells, CellStyle::Auto);
+    assert_eq!(app.cursor, cursor);
+    // Ctrl+C still quits, Alt or not.
+    app.on_key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(app.quit);
+}
+
+#[test]
 fn a_cell_is_the_square_github_draws_and_lands_on_whole_pixels() {
     use crate::graphics;
     use crate::primer::{Appearance, Palette, Season};

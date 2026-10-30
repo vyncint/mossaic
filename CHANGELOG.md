@@ -9,6 +9,18 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A terminal reply that arrived after the start-up probe was read as
+  keystrokes** (#140). On a slow link the answers came in after the 250 ms
+  deadline, and crossterm read the background colour as Alt+`]` (next year)
+  followed by `r` (reload) and two `d`s (cell style): a dark kitty over ssh
+  started in snug cells, with no pixels and a guessed theme. The probe now
+  waits 500 ms, and a terminal that has started answering by then gets a
+  second window to finish; anything later still is recognised as a reply and
+  swallowed up to its terminator, and keys carrying Alt no longer act as
+  their plain letter.
+
 ### Changed
 
 - **termlens 0.11** for the PTY suite, and the vendored skill with it. 0.11

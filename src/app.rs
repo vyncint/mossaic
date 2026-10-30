@@ -3,6 +3,7 @@
 use std::io::{self, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::Instant;
 
 use chrono::{Duration, Local, NaiveDate};
 use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -208,6 +209,9 @@ pub struct App {
     /// `--cell`, which outranks anything the terminal reports and survives a
     /// re-measure.
     cell_override: Option<(u16, u16)>,
+    /// When a late terminal reply began arriving as keys, and how many of its
+    /// keys have been swallowed since. See [`App::on_key`].
+    reply: Option<(Instant, usize)>,
     seq: u64,
     tx: Sender<Fetched>,
     rx: Receiver<Fetched>,
@@ -244,6 +248,7 @@ impl App {
             today: None,
             wanted: Graphics::Auto,
             cell_override: None,
+            reply: None,
             seq: 0,
             tx,
             rx,
@@ -388,16 +393,58 @@ impl App {
     }
 
     /// Handle a key press.
+    ///
+    /// Not every key press is one. A terminal reply that arrives after the
+    /// probe stopped listening comes in on the keyboard's input, and crossterm
+    /// has no parser for `OSC` or `APC`: `ESC ] 11 ; rgb:0d0d/1111/1717 ESC \`
+    /// reaches here as Alt+`]` — "next year" — and then an `r` and two `d`s
+    /// (#140). So an Alt+`]`, Alt+`_` or Alt+`P` opens a reply, and what follows
+    /// it is swallowed up to its terminator, bounded in keys and in time so a
+    /// person who really typed Alt+`]` gets the keyboard back at once.
     pub fn on_key(&mut self, code: KeyCode, mods: KeyModifiers) {
+        if self.late_reply(code, mods) {
+            return;
+        }
         if mods.contains(KeyModifiers::CONTROL) && matches!(code, KeyCode::Char('c' | 'd')) {
             self.quit = true;
             return;
         }
         if matches!(self.mode, Mode::Input(_)) {
             self.on_key_input(code);
-        } else {
+        } else if !mods.contains(KeyModifiers::ALT) {
+            // No binding here uses Alt, and `on_key_normal` reads only the key
+            // code — so Alt+`]` was `]`, and any escape sequence crossterm does
+            // not know arrived as a binding.
             self.on_key_normal(code);
         }
+    }
+
+    /// Whether this key belongs to a terminal reply rather than to a person.
+    fn late_reply(&mut self, code: KeyCode, mods: KeyModifiers) -> bool {
+        /// A reply is one write, so its keys arrive together; this is slack for
+        /// one split across packets on a slow link, and short enough that a
+        /// person never notices the keyboard was not listening.
+        const WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
+        /// The longest reply asked for is a kitty error message, well under this.
+        const KEYS: usize = 128;
+
+        let alt = mods.contains(KeyModifiers::ALT);
+        if let Some((since, keys)) = self.reply {
+            if since.elapsed() < WINDOW && keys < KEYS {
+                // `ESC \` (ST) or BEL, which crossterm reports as Ctrl+G.
+                let end = (alt && code == KeyCode::Char('\\'))
+                    || (mods.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('g'));
+                self.reply = (!end).then_some((since, keys + 1));
+                return true;
+            }
+            self.reply = None;
+        }
+        // `ESC ]` opens an OSC, `ESC _` an APC, `ESC P` a DCS.
+        if alt && matches!(code, KeyCode::Char(']' | '_' | 'P')) {
+            self.reply = Some((Instant::now(), 0));
+            return true;
+        }
+        false
     }
 
     fn on_key_normal(&mut self, code: KeyCode) {

@@ -74,8 +74,11 @@ const VERSION: &str = concat!("mossaic ", env!("CARGO_PKG_VERSION"));
 /// Redraw cadence. Also bounds how long a finished fetch waits to appear.
 const TICK: Duration = Duration::from_millis(80);
 /// How long to wait for a terminal to say what it can do. A terminal that answers
-/// takes a millisecond or two; this is the budget for one that never will.
-const PROBE: Duration = Duration::from_millis(250);
+/// takes a millisecond or two, and its device-attributes reply ends the wait;
+/// this is the budget for one that never will. 250 ms was shorter than an ssh
+/// round trip to the other side of the world, and an answer that misses the
+/// probe is read as keystrokes (#140).
+const PROBE: Duration = Duration::from_millis(500);
 
 /// Everything the command line settles before a terminal is involved.
 struct Invocation {
