@@ -24,6 +24,44 @@ listed under a **Changed** or **Removed** heading.
   `Vec<String>` helper that existed to make the comparison possible is
   gone.
 
+### Fixed
+
+- **The Action's example workflow could not run** (#145).
+  `action/track.example.yml` — the file action/README.md says to copy — put
+  `permissions:` on a step, which GitHub refuses outright. It is on the job
+  now, with the `issues: write` the issue-comment step needs. CI runs
+  actionlint over it and the workflows, since zizmor never checks the schema.
+- **The Action's `version` input takes `v0.8.1`** (#145), the spelling of the
+  `uses:` ref beside it, instead of failing in `cargo install` as "not a
+  valid SemVer requirement".
+- **The Action's email recipe** (#145) converts the Markdown report to HTML
+  rather than sending it as one run-on paragraph, gives `from:` an address,
+  and is pinned by commit in the README as in the example. The README's
+  examples pass outputs through `env:`, as its own advice says to, and the
+  `text` input's description lists the whole font rather than five
+  characters of it.
+- **The release's semver check had never run** (#144). crates.io refuses a
+  request without a User-Agent with 403, and the probe sent none and read
+  every answer but 200 as "not published yet" — so every release from 0.1.1
+  to 0.8.1 skipped it and went green. It sends one now, skips only on a 404,
+  and fails on anything else.
+- **The download instructions work on macOS** (#146). The Quickstart's
+  one-liner used GNU tar's `--wildcards`, which macOS's tar does not have,
+  and left the binaries in the current directory; it now works with both and
+  puts them on `PATH`. The checksum step uses `shasum -a 256 -c`, which
+  macOS has, and the README no longer says Windows ships for arm64.
+- **Docs that had drifted from what they describe** (#147).
+  docs/RELEASING.md covers every job a tag runs, both tokens a release needs
+  to finish (`HOMEBREW_TAP_TOKEN`, `TESTING_REPO_DISPATCH_TOKEN`), recovery
+  by dispatching `binaries.yml`, and a check after the run. The README's
+  `--track` sample is the report the `--background 1` plan above it prints,
+  `--backfill` without `--write` is captioned as the dry run it is, and the
+  sextant fallback's width is three columns a week, not two. The bug
+  template points at `--version` and counts `--capabilities` right;
+  CONTRIBUTING and AGENTS.md say what `-- --ignored` runs; CONTRIBUTING's
+  dragon is quoted from the file. install.yml no longer claims a weekly run
+  its disabled schedule does not make.
+
 ## [0.8.1] - 2026-09-08
 
 A chart that was not moving stopped saying so twelve times a second, and the

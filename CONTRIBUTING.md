@@ -22,7 +22,10 @@ cargo run           # the chart, for whoever `gh` is logged in as
 
 You need [the GitHub CLI](https://cli.github.com) authenticated (`gh auth
 login`) to run the chart against a real account, but **not** to run the tests:
-the two that call the API are `#[ignore]`d.
+the two that call the API are `#[ignore]`d. So are the four in `tests/cli.rs`,
+which `cargo install termlens-cli` into `target/` on first use (CI runs them).
+`cargo test -- --ignored` runs all six: it needs `gh` logged in, the network,
+and a minute for the install.
 
 The toolchain is pinned to stable in `rust-toolchain.toml`, so `cargo fmt` and
 `cargo clippy` give the same answers here as in CI. That file is not the MSRV —
@@ -306,10 +309,10 @@ The file is a header and seven rows:
 ```
 # name: Dragon
 # author: @vyncint
-# description: A serpentine dragon coiling across the whole year, in all five shades
+# description: A serpentine dragon coiling across the whole year, in the three shades that read clearly
 
-00000000000000000000033333333333333000003300000000000
-00000000000000000333344444444444444333344400000000000
+00000000000000000000022222222222222000002200000000000
+00000000000000000222244444444444444222244400000000000
 ...
 ```
 

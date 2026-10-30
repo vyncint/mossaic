@@ -28,7 +28,8 @@ is the full contributor document and wins wherever the two disagree.
 cargo test                     # everything, no network
 cargo test --test smoke        # the real binary, in a real PTY
 cargo test --test pixels       # …in a PTY that says it can draw pixels
-cargo test -- --ignored        # the two that call the GitHub API
+cargo test -- --ignored        # the two that call the GitHub API, and the four
+                               # in tests/cli.rs, which `cargo install termlens-cli`
 ```
 
 Stable toolchain, MSRV 1.88 (set by ratatui 0.30).

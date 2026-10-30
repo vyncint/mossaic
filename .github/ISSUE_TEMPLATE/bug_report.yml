@@ -6,8 +6,8 @@ body:
     attributes:
       value: |
         Most rendering reports come down to what the terminal answered. Please
-        run `mossaic --capabilities` and paste its output below — it is four
-        lines and it usually contains the answer.
+        run `mossaic --capabilities` and paste its output below — it is six or
+        seven lines and it usually contains the answer.
   - type: textarea
     id: capabilities
     attributes:
@@ -34,7 +34,7 @@ body:
     id: version
     attributes:
       label: mossaic version
-      description: "`mossaic --help` prints it, or give the commit."
+      description: "`mossaic --version` prints it, or give the commit."
       placeholder: 0.1.0
     validations:
       required: true
