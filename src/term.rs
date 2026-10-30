@@ -18,10 +18,25 @@
 //! The device-attributes reply comes last and every terminal answers it, so it
 //! doubles as the "everything that is coming has come" marker: the usual round trip
 //! is a millisecond or two, not the timeout.
+//!
+//! A reply the probe stops listening for does not go away: it arrives on the
+//! same input as the keyboard, and the event loop reads `ESC ] 11 ; rgb:0d0d/…`
+//! as Alt+`]` followed by an `r` and two `d`s (#140). So a terminal that has
+//! begun answering is given a second window to finish, and [`LateReplies`]
+//! swallows the body of anything that still arrives late.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::primer::Rgb;
+
+/// How long the binaries wait for a terminal to say what it can do. A terminal
+/// that answers takes a millisecond or two, and its device-attributes reply
+/// ends the wait; this is the budget for one that never will. 250 ms was
+/// shorter than an ssh round trip to the other side of the world, and an answer
+/// that misses the probe is read as keystrokes (#140).
+pub const TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Arbitrary id for the kitty query. `a=q` only asks, so nothing is ever stored.
 const PROBE_ID: u32 = 7379;
@@ -61,7 +76,8 @@ pub struct Caps {
 ///
 /// Call this with the terminal already in raw mode, or the replies arrive
 /// line-buffered and echoed. A terminal that never answers costs the timeout
-/// and nothing else.
+/// and nothing else; one that has started answering by then gets up to the
+/// same again to reach the sentinel.
 #[cfg(unix)]
 pub fn probe(timeout: Duration) -> Caps {
     use std::fs::OpenOptions;
@@ -84,7 +100,7 @@ pub fn probe(timeout: Duration) -> Caps {
         return Caps::default();
     }
 
-    let deadline = Instant::now() + timeout;
+    let start = Instant::now();
     let mut reply = Vec::new();
     let mut chunk = [0u8; 1024];
     loop {
@@ -97,7 +113,7 @@ pub fn probe(timeout: Duration) -> Caps {
                 }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
+                if !keep_waiting(start.elapsed(), timeout, !reply.is_empty()) {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(2));
@@ -106,6 +122,64 @@ pub fn probe(timeout: Duration) -> Caps {
         }
     }
     parse(&String::from_utf8_lossy(&reply))
+}
+
+/// Whether the probe should go on reading, `elapsed` into it, having `heard`
+/// something or nothing.
+///
+/// Nothing by the deadline is a mute terminal, and it costs the deadline and no
+/// more. Something but not yet the sentinel is a slow one — a high-latency ssh
+/// link — and stopping there hands the rest of its answers to the event loop,
+/// which read them as keystrokes: a dark kitty's ordinary replies arriving late
+/// pressed `d` twice and left the chart in snug cells (#140). So a terminal
+/// that has begun answering gets a second window of the same length to finish.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn keep_waiting(elapsed: Duration, timeout: Duration, heard: bool) -> bool {
+    elapsed < timeout || (heard && elapsed < timeout.saturating_mul(2))
+}
+
+/// Tells a terminal reply that arrived as keys from a person typing.
+///
+/// A reply that misses [`probe`] comes in on the keyboard's input, and crossterm
+/// has no parser for `OSC` or `APC`: `ESC ] 11 ; rgb:0d0d/1111/1717 ESC \`
+/// arrives as Alt+`]` and then an `r` and two `d`s (#140). So an Alt+`]`,
+/// Alt+`_` or Alt+`P` opens a reply, and the keys after it are swallowed up to
+/// its terminator — bounded in count and in time, so a person who really typed
+/// Alt+`]` has the keyboard back at once.
+#[derive(Debug, Default)]
+pub struct LateReplies {
+    /// When the reply being swallowed began, and how many keys it has cost.
+    open: Option<(Instant, usize)>,
+}
+
+impl LateReplies {
+    /// A reply is one write, so its keys arrive together; this is slack for one
+    /// split across packets on a slow link, and short enough that a person never
+    /// notices the keyboard was not listening.
+    const WINDOW: Duration = Duration::from_millis(250);
+    /// The longest reply asked for is a kitty error message, well under this.
+    const KEYS: usize = 128;
+
+    /// Whether this key belongs to a terminal reply, and should be dropped.
+    pub fn swallow(&mut self, code: KeyCode, mods: KeyModifiers) -> bool {
+        let alt = mods.contains(KeyModifiers::ALT);
+        if let Some((since, keys)) = self.open {
+            if since.elapsed() < Self::WINDOW && keys < Self::KEYS {
+                // `ESC \` (ST) or BEL, which crossterm reports as Ctrl+G.
+                let end = (alt && code == KeyCode::Char('\\'))
+                    || (mods.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('g'));
+                self.open = (!end).then_some((since, keys + 1));
+                return true;
+            }
+            self.open = None;
+        }
+        // `ESC ]` opens an OSC, `ESC _` an APC, `ESC P` a DCS.
+        if alt && matches!(code, KeyCode::Char(']' | '_' | 'P')) {
+            self.open = Some((Instant::now(), 0));
+            return true;
+        }
+        false
+    }
 }
 
 /// Ask the terminal what it can do — except here, where nothing is asked.

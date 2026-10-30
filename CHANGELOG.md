@@ -11,6 +11,13 @@ listed under a **Changed** or **Removed** heading.
 
 ### Added
 
+- **`--cells STYLE`** (#142): start the chart in a cell style — `auto`,
+  `pixel`, `rounded`, `snug`, `squares`, `grid`, `spaced`, `blocks`, `slim` or
+  `compact`, the names the legend prints. A font with no block sextants meant
+  pressing `d` on every launch to get off rounded; `mossaic-glyphs`, the
+  check for exactly that font, now names `--cells squares`. `Options` gains a
+  `cells` field for library users.
+
 - **`mossaic-art --future`** (#125). `--write` now refuses to date commits
   after today without it, explains why, and points at `--save` and
   `--track`; docs/ART.md's first example takes that route.
@@ -46,6 +53,62 @@ listed under a **Changed** or **Removed** heading.
   gone.
 
 ### Fixed
+
+- **A terminal reply that arrived after the start-up probe was read as
+  keystrokes** (#140). On a slow link the answers came in after the 250 ms
+  deadline, and crossterm read the background colour as Alt+`]` (next year)
+  followed by `r` (reload) and two `d`s (cell style): a dark kitty over ssh
+  started in snug cells, with no pixels and a guessed theme. The probe now
+  waits 500 ms, and a terminal that has started answering by then gets a
+  second window to finish; anything later still is recognised as a reply and
+  swallowed up to its terminator, and keys carrying Alt no longer act as
+  their plain letter.
+
+- **A terminal that did not report its background got white text on white**
+  (#141). The appearance fell back to dark, so on a light terminal that did
+  not answer `OSC 11` — every native Windows run, mosh, multiplexers that do
+  not forward it — the header, the month labels and the footer were `#f0f6fc`
+  at about 1.07:1. Text is now drawn in the terminal's own colour (dimmed for
+  the quieter lines) and only the cells keep GitHub's; the help overlay says
+  the background was not reported and offers `--theme light`. Sixel edges are
+  no longer blended into a dark canvas that was only a guess: they are cut
+  hard instead. The README no longer lists Windows Terminal among the
+  terminals found automatically — on Windows nothing is asked, so it needs
+  `--graphics sixel --cell WxH`.
+
+- **In a small window the way out was the first thing to go** (#139). The
+  demo's and a file's source label trimmed `q quit` off the footer before
+  itself (56×24 showed only `? help · demo — …`); at 80×18 the note pushed
+  the footer off, and at 60×14 and 40×10 there was neither a footer nor any
+  word of why. A short window now gives up the statistics, then the spacing,
+  the detail line and the legend, and keeps the note and the keys; below
+  59×14, where no chart fits beside them, it says `terminal too small (needs
+  59×14) — q quits`. A style asked for that is taller than the window loses
+  its bottom rows instead of the footer. The failure screen offers `u` only
+  where it works — not for `--file` or `--demo` — and the tooltip's `▼` no
+  longer overwrites a letter of the month label beneath it.
+
+- **Pixel cells forced into a narrow window drew nothing** (#142). After `d`
+  at under 112 columns the grid and the legend were blank, no image was sent
+  at all, and the undrawn days still answered the mouse. The weeks that fit
+  are drawn now, clipped at the edge as text is, and only those are days to
+  the mouse. `d` from any style that does not fit goes to the best one that
+  does rather than on round the cycle, which could be wider still. A terminal
+  that speaks kitty or sixel but does not report its cell size is told to
+  pass `--cell WxH` — under the legend and in the help overlay — where before
+  the hint appeared only for a forced `--graphics`, and the overlay suggested
+  another terminal.
+
+- **The art editor and `mossaic-glyphs` always sent truecolour on a dark
+  theme** (#143). `env -u COLORTERM mossaic-glyphs --color always` wrote
+  `\e[38;2;21;27;35m`, so the checker for terminals without truecolour —
+  Terminal.app among them — showed colours the chart never draws there. Both
+  now take the chart's palette: the 256-colour ramp unless `COLORTERM` says
+  otherwise, and the light theme on a terminal that reports a light
+  background. To know that, `mossaic-art --draw` and an interactive
+  `mossaic-glyphs` now ask the terminal as the chart does, and the editor
+  drops a reply that arrives late rather than painting its digits.
+  `draw::palette_over` and `term::LateReplies` are new for library users.
 
 - **`mossaic-art --write` into an existing repository deleted its files and
   moved its branch** (#124). It started a new root and ran `git reset --hard

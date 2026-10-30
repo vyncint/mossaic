@@ -125,12 +125,20 @@ cells      kitty
 ```
 
 - **`cells text`** means the terminal draws neither protocol. kitty, Ghostty,
-  WezTerm, foot, Konsole, iTerm2, mlterm, Windows Terminal and
-  `xterm -ti vt340` all draw one of them; GNOME Terminal and Ptyxis draw
-  neither, because VTE ships sixel switched off. Nothing is lost but the
-  pixels — the chart still draws in block sextants.
+  WezTerm, foot, Konsole, iTerm2, mlterm and `xterm -ti vt340` all draw one
+  of them; GNOME Terminal and Ptyxis draw neither, because VTE ships sixel
+  switched off. Nothing is lost but the pixels — the chart still draws in
+  block sextants.
+- **On native Windows nothing is asked at all** — the probe reads the
+  terminal's replies in a way only unix offers — so the answers are all `no`.
+  Windows Terminal draws sixel when told to: `mossaic --graphics sixel --cell
+  WxH`, measuring the cell yourself, and `--theme light` on a light background.
 - **A window under 112 columns** falls back too, and the chart says so under the
-  legend, naming the number it wants.
+  legend, naming the number it wants. Forced with `d`, pixel cells draw the weeks
+  that fit.
+- **`cell unknown`** with `kitty yes` or `sixel yes` means the terminal can draw
+  but did not say how big a character cell is, and an image cannot be lined up
+  without it. The chart says so too; measure it and pass `--cell WxH`.
 - Either way, `mossaic --png chart.png` renders the same image to a file from
   any terminal at all.
 
@@ -203,6 +211,7 @@ mossaic --png chart.png          # the chart as an image, from any terminal
 mossaic --demo --png - > c.png   # `-` is stdout; the status line goes to stderr
 mossaic --graphics sixel         # force a protocol, or `text` for no pixels
 mossaic --cell 10x20             # when the terminal will not say how big a cell is
+mossaic --cells squares          # start in a cell style, instead of the best that fits
 mossaic --today 2027-06-30       # read the year as of a day — its year, its season
 mossaic --theme light            # instead of following the terminal's background
 mossaic --palette winter         # GitHub's own seasonal colours (a --png is
@@ -409,7 +418,7 @@ kitty protocol.
 | `Home` / `End` | first / last day in range |
 | `?` | keys, mouse, and what this terminal can draw |
 | `u` | type a different username (`Enter` load, `Esc` cancel) |
-| `d` | cycle cell style — auto / pixel / rounded / snug / squares / grid / spaced / blocks / slim / compact. The legend names it, and says `auto:` while the chart is still choosing |
+| `d` | cycle cell style — auto / pixel / rounded / snug / squares / grid / spaced / blocks / slim / compact. The legend names it, and says `auto:` while the chart is still choosing. From a style that does not fit, it goes to the best one that does. `--cells NAME` starts in one |
 | `m` | mouse reporting on or off — off gives the terminal its own selection back |
 | `r` | reload |
 | `q` | quit — `Esc` cancels the username prompt and closes the help overlay, and does nothing else |
@@ -459,7 +468,8 @@ act on:
 - **Which colours.** Every value is a Primer token read out of the stylesheets
   github.com serves, not transcribed. Light or dark follows the terminal's own
   background over `OSC 11`, the way a browser follows the OS; `--theme`
-  overrides it. GitHub swaps the greens for a few days a year and so does
+  overrides it. A terminal that does not say gets its own colour for the text
+  and GitHub's only for the cells, which read on either background. GitHub swaps the greens for a few days a year and so does
   mossaic, on the same dates — `--palette` asks for them out of season.
 - **How a day is sized.** A day is two character columns wide and one row tall,
   and the square inside it keeps github.com's ratios — an 11px cell on a 14px
@@ -483,8 +493,9 @@ palette is degraded on purpose, and what the capability probe actually sends.
 - **Motion reporting is not universal.** Terminals that report clicks but not motion
   (Terminal.app among them) get click-to-select-a-day and no hover.
 - **Sixel has no alpha.** Anti-aliased edges are composited against the background
-  colour the terminal reported; where it reports none, GitHub's own canvas colour
-  stands in, and on a terminal with a background image the corners will show a faint
+  colour the terminal reported; where it reports none, the canvas of the `--theme`
+  asked for stands in, and with neither the edges are cut rather than blended into
+  a guess. On a terminal with a background image the corners will show a faint
   halo. Kitty, which takes an alpha channel, does not have the problem.
 - **The tooltip sits above the grid, not over the day** — the one placement both
   protocols can live with.
@@ -494,7 +505,10 @@ palette is degraded on purpose, and what the capability probe actually sends.
 - **A 53-week year needs a 112×19 window** for pixel or square cells, 165 columns
   for rounded corners, 166×27 for the bordered grid. Below that `Auto` drops to a
   borderless style, where a future day and a day off the end of the year both look
-  blank; `d` still forces the others if you would rather they clipped.
+  blank; `d` still forces the others if you would rather they clipped. A shorter
+  window gives up the statistics line first, then the legend and the spacing,
+  and keeps the keys; below 59×14 there is no room for a chart and the way out
+  together, and the chart says so instead.
 - Private contributions appear only if the authenticated user can see them.
 
 ## Install

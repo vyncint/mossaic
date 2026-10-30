@@ -523,6 +523,43 @@ fn a_written_png_reports_success_even_when_the_reader_has_gone() {
     let _ = std::fs::remove_file(&png);
 }
 
+/// `--cells` takes the names the legend uses, and a name it does not know is
+/// refused with the list rather than ignored (#142).
+#[test]
+fn an_unknown_cell_style_is_refused_with_the_names() {
+    let out = chart(&["--demo", "--cells", "hexagons"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    let text = stderr(&out);
+    for name in ["auto", "pixel", "rounded", "squares", "compact"] {
+        assert!(text.contains(name), "{name} is missing from:\n{text}");
+    }
+}
+
+/// The glyph checker is the diagnostic for terminals without truecolour —
+/// Terminal.app among them — and it sent them 24-bit escapes the chart never
+/// does there, so it showed different colours from the chart it was checking
+/// for (#143).
+#[test]
+fn the_glyph_checker_follows_colorterm_like_the_chart() {
+    let glyphs = |truecolor: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mossaic-glyphs"));
+        command.args(["--color", "always"]).env_remove("COLORTERM");
+        if truecolor {
+            command.env("COLORTERM", "truecolor");
+        }
+        let out = command.output().expect("the glyph checker runs");
+        assert!(out.status.success(), "{}", stderr(&out));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let ramp = glyphs(false);
+    assert!(
+        ramp.contains("\x1b[38;5;236m") && !ramp.contains("\x1b[38;2;"),
+        "without COLORTERM the levels come from the 256-colour ramp:\n{ramp:?}"
+    );
+    // Primer's dark level 0, #151b23, where the terminal says it can.
+    assert!(glyphs(true).contains("\x1b[38;2;21;27;35m"));
+}
+
 /// The bug template asks for two things this binary prints, and it described
 /// both wrongly (#147): the version was what "`mossaic --help` prints", which
 /// it does not, and `--capabilities` was "four lines" when it is six — seven

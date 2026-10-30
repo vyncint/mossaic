@@ -873,6 +873,89 @@ fn the_advice_line_names_the_window_size_not_the_drawable_area() -> termlens::Re
     Ok(())
 }
 
+/// A terminal whose answers miss the probe: the ssh link to the other side of
+/// the world. termlens is told not to answer, and then the answers a dark kitty
+/// gives are delivered after the first frame, which is where a late reply lands.
+/// crossterm reads `ESC ]` as Alt+`]` and the colour that follows as keys, so
+/// the `r` and the two `d`s in `rgb:0d0d/…` reloaded and moved the chart from
+/// rounded to snug cells (#140).
+#[test]
+fn a_reply_that_misses_the_probe_is_not_read_as_keys() -> termlens::Result<()> {
+    let mut t = spawn(&PREVIEW, SIZE, |b| b.answer_queries(false))?;
+    let before = t.wait_frame(loaded)?;
+    assert_eq!(style(&before), "rounded cells", "{before}");
+
+    t.send_str(concat!(
+        "\x1b_Gi=7379;OK\x1b\\",
+        "\x1b]11;rgb:0d0d/1111/1717\x1b\\",
+        "\x1b[6;19;9t",
+        "\x1b[4;646;1584t",
+        "\x1b[?62;4;22c",
+    ))?;
+    // A key with something to show for it, after the reply: once the frame
+    // carries it, every key before it has been handled.
+    t.send(Key::Home)?;
+    let after = t.wait_frame(|s| loaded(s) && s.contains("Fri, Jan 1 2027"))?;
+    assert_eq!(
+        style(&after),
+        "rounded cells",
+        "the reply was read as keys:\n{after}"
+    );
+    assert!(is_auto(&after), "the style is still Auto's:\n{after}");
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success());
+    Ok(())
+}
+
+/// The sizes #139 measured: at 80x18 the note showed and the footer did not, at
+/// 60x14 neither did, and at 40x10 nothing said the window was the problem.
+#[test]
+fn a_short_window_gives_up_the_statistics_before_the_way_out() -> termlens::Result<()> {
+    for size in [(80u16, 18u16), (60, 14)] {
+        let mut t = spawn(&PREVIEW, size, |b| b)?;
+        let screen = t.wait_frame(|s| s.contains("contributions in") && s.contains("needs"))?;
+        assert!(
+            screen.contains("q quit") && screen.contains("the chart needs 19 rows"),
+            "at {size:?} the note or the footer is missing:\n{screen}"
+        );
+        t.send(Key::Char('q'))?;
+        assert!(t.wait_exit()?.success());
+    }
+
+    // The demo's label trimmed `q quit` away before itself at 56 columns.
+    let mut t = spawn(&["--demo"], (56, 24), |b| b)?;
+    let screen = t.wait_frame(|s| s.contains("contributions in") && s.contains("? help"))?;
+    assert!(screen.contains("q quit"), "{screen}");
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success());
+
+    let mut t = spawn(&PREVIEW, (40, 10), |b| b)?;
+    let screen = t.wait_frame(|s| s.contains("terminal too small"))?;
+    assert!(
+        screen.contains("59×14"),
+        "it names the size it needs:\n{screen}"
+    );
+    t.send(Key::Char('q'))?;
+    assert!(t.wait_exit()?.success(), "and q is still the way out");
+    Ok(())
+}
+
+/// `--cells` names the style to start in. Auto takes rounded at this width, and
+/// a font with no block sextants meant pressing `d` on every launch (#142).
+#[test]
+fn the_cell_style_can_be_named_on_the_command_line() -> termlens::Result<()> {
+    for (name, shown) in [("squares", "squares cells"), ("compact", "compact cells")] {
+        let args = [&PREVIEW[..], &["--cells", name]].concat();
+        let mut t = chart(&args)?;
+        let screen = t.wait_frame(loaded)?;
+        assert_eq!(style(&screen), shown, "{screen}");
+        assert!(!is_auto(&screen), "named, so not Auto's:\n{screen}");
+        t.send(Key::Char('q'))?;
+        let _ = t.wait_exit()?;
+    }
+    Ok(())
+}
+
 /// A fresh, empty directory of this test's own.
 #[cfg(unix)]
 fn scratch(name: &str) -> std::path::PathBuf {

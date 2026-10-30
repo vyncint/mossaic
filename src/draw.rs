@@ -21,7 +21,7 @@ use ratatui::Frame;
 
 use crate::art::{self, Canvas, Grid, CANVAS_ROWS};
 use crate::plural;
-use crate::primer::{Appearance, Legibility, Palette, Season};
+use crate::primer::{Appearance, Legibility, Palette, Rgb, Season};
 use crate::thousands;
 
 /// How deep the undo stack goes.
@@ -503,11 +503,13 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
         )];
         for week in 0..editor.canvas.width() {
             let level = editor.canvas.at(week, row);
-            let rgb = palette.levels[usize::from(level).min(4)];
             let outside = editor.date_at(week, row).is_none();
             let here = editor.cursor == (week, row);
             let glyph = if outside { '·' } else { '█' };
-            let mut style = Style::default().fg(Color::Rgb(rgb.0, rgb.1, rgb.2));
+            // Through the palette, which falls back to its chosen 256-colour
+            // ramp where the terminal takes no truecolour — the same cells the
+            // chart draws there, rather than escapes it cannot show (#143).
+            let mut style = Style::default().fg(palette.level(level));
             if outside {
                 style = Style::default().fg(Color::DarkGray);
             }
@@ -539,7 +541,6 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
     stats.push(Line::from(""));
     for level in (0..=4u8).rev() {
         let count = histogram[usize::from(level)];
-        let rgb = palette.levels[usize::from(level)];
         let total: usize = histogram.iter().sum();
         let bar = "█".repeat(count * 30 / total.max(1));
         stats.push(Line::from(vec![
@@ -547,7 +548,7 @@ pub fn render(frame: &mut Frame<'_>, editor: &Editor, palette: &Palette) {
                 "  level {level}  {count:>4} {:<6}  ",
                 plural(count, "day", "days")
             )),
-            Span::styled(bar, Style::default().fg(Color::Rgb(rgb.0, rgb.1, rgb.2))),
+            Span::styled(bar, Style::default().fg(palette.level(level))),
             Span::raw(if level == 0 {
                 "  (must stay dark)".to_string()
             } else {
@@ -648,10 +649,25 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
     );
 }
 
-/// The palette the editor paints with.
+/// The palette the editor paints with, on a terminal that has not said what
+/// its background is: the dark theme, in whatever colour depth `COLORTERM`
+/// claims.
 #[must_use]
 pub fn palette() -> Palette {
-    Palette::new(Appearance::Dark, Season::Default, true)
+    palette_over(None)
+}
+
+/// The palette the editor paints with, over the background the terminal
+/// reported — the theme the chart would pick for it, so a drawing looks the
+/// same in both. It used to be the dark theme in truecolour whatever the
+/// terminal was, unlike the chart beside it (#143).
+#[must_use]
+pub fn palette_over(background: Option<Rgb>) -> Palette {
+    Palette::new(
+        background.map_or(Appearance::Dark, Appearance::from_background),
+        Season::Default,
+        Palette::truecolor_env(),
+    )
 }
 
 /// Where a drawing goes when nobody says.

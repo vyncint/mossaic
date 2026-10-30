@@ -215,6 +215,34 @@ fn auto_picks_the_most_faithful_style_that_fits() {
     }
 }
 
+#[test]
+fn a_cell_style_is_named_the_way_the_legend_names_it() {
+    use crate::app::{CellStyle, Options};
+    use crate::ui::resolve;
+    // `--cells` takes the word the legend prints, so what a reader sees is what
+    // they type (#142). Pixels resolve to "pixel" only where they can be drawn.
+    for (name, style) in CellStyle::NAMES {
+        assert_eq!(CellStyle::parse(name), Some(style), "{name}");
+        if style != CellStyle::Auto {
+            assert_eq!(resolve(style, 53, 300, 60, true).name(), name, "{name}");
+        }
+    }
+    assert_eq!(CellStyle::parse("pixels"), Some(CellStyle::Pixels));
+    assert_eq!(CellStyle::parse("Squares"), Some(CellStyle::Squares));
+    assert_eq!(CellStyle::parse("hexagons"), None);
+
+    // And the chart starts in it.
+    let mut app = ready(synthetic(2025, "octocat"));
+    app.configure(
+        crate::term::Caps::default(),
+        Options {
+            cells: CellStyle::Squares,
+            ..Options::default()
+        },
+    );
+    assert!(render(&mut app, 200, 30).contains("   ·   squares cells"));
+}
+
 /// Column of each drawn cell on every weekday row, measured from the frame.
 fn cell_columns(frame: &str, glyph: char) -> Vec<Vec<usize>> {
     frame
@@ -1042,6 +1070,167 @@ fn a_sixel_is_the_image_the_rasteriser_drew() {
 }
 
 #[test]
+fn a_sixel_over_an_unknown_background_is_cut_not_blended() {
+    use crate::graphics;
+    use crate::primer::{Appearance, Palette, Season};
+
+    // Blending the edges into GitHub's dark canvas, when the terminal had not
+    // said it was dark, put a dark halo round every cell on a light one (#141).
+    // With nothing to blend into, a pixel is its own colour or it is left alone.
+    let palette = Palette::new(Appearance::Dark, Season::Default, true);
+    let image = graphics::grid(&levels_of(&synthetic(2025, "octocat")), &palette, (9, 19));
+    let (width, height, pixels) = decode_sixel(&graphics::sixel_hard_edged(&image));
+    assert_eq!((width, height), (image.width, image.height));
+    let mut edges = 0;
+    for y in 0..height {
+        for x in 0..width {
+            let [r, g, b, a] = image.rgba_at(x, y);
+            match pixels[y * width + x] {
+                None => assert!(a < 128, "a mostly covered pixel at {x},{y} went unpainted"),
+                Some(got) => {
+                    assert!(a >= 128, "a mostly empty pixel at {x},{y} was painted");
+                    edges += usize::from(a < 255);
+                    for (got, want) in got.iter().zip([r, g, b]) {
+                        assert!(got.abs_diff(want) <= 2, "at {x},{y}: {got} vs {want}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        edges > 0,
+        "no edge pixels were drawn, so the cut was not tested"
+    );
+
+    // And the painter takes that path only when the terminal did not say.
+    use crate::app::Options;
+    use crate::primer::Rgb;
+    use crate::term::Caps;
+    let caps = Caps {
+        sixel: true,
+        cell: Some((9, 19)),
+        answered: true,
+        ..Caps::default()
+    };
+    // What the painter put on the wire, and the year as each encoding writes it.
+    let sent = |caps: Caps| {
+        let mut app = ready(synthetic(2025, "octocat"));
+        app.configure(caps, Options::default());
+        let _ = render(&mut app, 176, 34);
+        let mut out = Vec::new();
+        app.paint(&mut out).unwrap();
+        let year = graphics::grid(
+            &levels_of(&synthetic(2025, "octocat")),
+            &app.palette,
+            (9, 19),
+        );
+        (String::from_utf8(out).unwrap(), year, app.palette.canvas)
+    };
+    let (wire, year, _) = sent(caps);
+    assert!(
+        wire.contains(&graphics::sixel_hard_edged(&year)),
+        "an unknown background should get hard edges"
+    );
+    let reported = Rgb::hex(0xffffff);
+    let (wire, year, _) = sent(Caps {
+        background: Some(reported),
+        ..caps
+    });
+    assert!(
+        wire.contains(&graphics::sixel(&year, reported)),
+        "a reported background is still blended into"
+    );
+}
+
+#[test]
+fn an_unknown_background_leaves_the_text_to_the_terminal() {
+    use crate::app::Options;
+    use crate::primer::{Appearance, Rgb};
+    use crate::term::Caps;
+    use ratatui::buffer::Buffer;
+    use ratatui::style::{Color, Modifier, Style};
+
+    let draw = |background: Option<Rgb>, theme: Option<Appearance>, help: bool| -> Buffer {
+        let mut app = ready(synthetic(2025, "octocat"));
+        app.configure(
+            Caps {
+                background,
+                ..Caps::default()
+            },
+            Options {
+                appearance: theme,
+                ..Options::default()
+            },
+        );
+        app.help = help;
+        let mut terminal = Terminal::new(TestBackend::new(176, 34)).unwrap();
+        terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        terminal.backend().buffer().clone()
+    };
+    // The style of the first cell of the first occurrence of `needle`.
+    let style_of = |buffer: &Buffer, needle: &str| -> Style {
+        let area = buffer.area;
+        for y in 0..area.height {
+            let row: String = (0..area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if let Some(at) = row.find(needle) {
+                let x = row[..at].chars().count() as u16;
+                return buffer[(x, y)].style();
+            }
+        }
+        panic!("{needle:?} is not on screen");
+    };
+
+    // Nothing reported and nothing asked for: the dark theme's #f0f6fc on a
+    // white terminal is 1.07:1, so the text goes to the terminal's own colour.
+    let unknown = draw(None, None, false);
+    for text in ["octocat", "Jan", "Mon"] {
+        assert_eq!(style_of(&unknown, text).fg, Some(Color::Reset), "{text}");
+    }
+    let less = style_of(&unknown, "Less");
+    assert_eq!(less.fg, Some(Color::Reset));
+    assert!(
+        less.add_modifier.contains(Modifier::DIM),
+        "muted text stays a step down"
+    );
+    // The cells keep their colours: they carry them on either background.
+    // Truecolour or the 256-colour ramp, by `COLORTERM` — either is a colour
+    // of the cell's own, which is the point.
+    assert!(matches!(
+        style_of(&unknown, "\u{1FB2B}").fg,
+        Some(Color::Rgb(..) | Color::Indexed(..))
+    ));
+    // And the overlay says what to do about it.
+    let help = draw(None, None, true);
+    let text: String = help.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(
+        text.contains("--theme light"),
+        "the overlay should offer --theme light"
+    );
+
+    // Reported, or asked for, and the theme's own colours are back — in the
+    // form this terminal takes them, truecolour or the 256-colour ramp.
+    let truecolor = crate::primer::Palette::truecolor_env();
+    let light = draw(Some(Rgb::hex(0xffffff)), None, false);
+    assert_eq!(
+        style_of(&light, "octocat").fg,
+        Some(Rgb::hex(0x1f2328).ansi(truecolor))
+    );
+    let dark = draw(None, Some(Appearance::Dark), false);
+    assert_eq!(
+        style_of(&dark, "octocat").fg,
+        Some(Rgb::hex(0xf0f6fc).ansi(truecolor))
+    );
+    let help = draw(Some(Rgb::hex(0xffffff)), None, true);
+    let text: String = help.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(
+        !text.contains("--theme light"),
+        "nothing to suggest when it is known"
+    );
+}
+
+#[test]
 fn a_kitty_transmission_carries_the_image_back() {
     use crate::graphics;
     use crate::primer::{Appearance, Palette, Season};
@@ -1553,6 +1742,127 @@ fn hovering_a_day_reads_it_out_the_way_github_does() {
     assert_eq!(app.hover, None);
     let frame = render(&mut app, 170, 24);
     assert!(!frame.contains("▼"), "the tooltip should be gone:\n{frame}");
+}
+
+#[test]
+fn the_tooltip_marker_keeps_off_the_month_labels() {
+    use crate::app::CellStyle;
+    // `▼` shares its row with the month labels, and drawn over one it read
+    // `J▼n` (#139). Squares put a week every two columns, so "Jan" covers the
+    // whole of week 0 and half of week 1.
+    let mut app = ready(synthetic(2025, "octocat"));
+    app.cells = CellStyle::Squares;
+    render(&mut app, 176, 24);
+    let layout = app.layout.unwrap();
+    let months_row = (layout.y - 1) as usize;
+    let Load::Ready(calendar) = &app.load else {
+        unreachable!()
+    };
+    let (first, later) = (
+        calendar.weeks[0].days[3].unwrap().date,
+        calendar.weeks[10].days[3].unwrap().date,
+    );
+
+    app.hover = Some(first);
+    let lines = rows(&render(&mut app, 176, 24));
+    assert!(
+        lines[months_row].contains("Jan"),
+        "the label was written over: {:?}",
+        lines[months_row]
+    );
+    assert!(
+        lines[months_row - 1].contains("on January"),
+        "the tooltip still names the day"
+    );
+
+    // Clear of a label, the marker points at the week as before.
+    app.hover = Some(later);
+    let lines = rows(&render(&mut app, 176, 24));
+    let marker = lines[months_row].chars().position(|c| c == '▼');
+    let column = (layout.x + 10 * 2) as usize;
+    assert!(
+        marker.is_some_and(|at| (column..column + 2).contains(&at)),
+        "the marker should sit over week 10: {:?}",
+        lines[months_row]
+    );
+}
+
+#[test]
+fn a_small_window_keeps_the_way_out_on_screen() {
+    use crate::app::{CellStyle, Source};
+
+    // The demo's source label sat after `q quit` in the trim order, so at 56
+    // columns the footer read only `? help · demo — …` (#139).
+    let mut demo = ready(synthetic(2025, "demo"));
+    demo.source = Source::Demo;
+    let frame = render(&mut demo, 56, 24);
+    assert!(
+        frame.contains("q quit") && frame.contains("? help"),
+        "{frame}"
+    );
+
+    // At 80x18 the note showed and the footer under it did not; the statistics
+    // are worth less than either.
+    let mut app = ready(synthetic(2025, "octocat"));
+    let frame = render(&mut app, 80, 18);
+    assert!(frame.contains("q quit"), "{frame}");
+    assert!(frame.contains("the chart needs 19 rows"), "{frame}");
+    assert!(
+        !frame.contains("active days"),
+        "the summary goes first:\n{frame}"
+    );
+    assert!(
+        frame.contains("Less"),
+        "the legend need not go yet:\n{frame}"
+    );
+
+    // At 60x14 there was neither the footer nor anything saying why: it is
+    // the smallest window that holds the grid, the note and the way out.
+    let frame = render(&mut app, 60, 14);
+    assert!(frame.contains("q quit") && frame.contains("Mon"), "{frame}");
+    assert!(frame.contains("the chart needs 19 rows"), "{frame}");
+    assert!(app.layout.is_some());
+
+    // One row less, and a chart would have to give up the way out to fit, so it
+    // says how big a window it needs instead — in the units a terminal reports.
+    let frame = render(&mut app, 60, 13);
+    assert!(
+        frame.contains("terminal too small (needs 59×14) — q quits"),
+        "{frame}"
+    );
+    assert!(app.layout.is_none(), "nothing for the mouse or the painter");
+    let frame = render(&mut app, 40, 10);
+    assert!(
+        frame.contains("terminal too small") && frame.contains("quits"),
+        "wrapped, not cut off:\n{frame}"
+    );
+
+    // A style asked for and taller than the window gives up its bottom rows,
+    // not the footer — and the rows it gave up are not days to the mouse.
+    app.cells = CellStyle::Grid;
+    let frame = render(&mut app, 176, 20);
+    assert!(frame.contains("q quit"), "{frame}");
+    let layout = app.layout.unwrap();
+    assert!(layout.bottom < 19, "the grid was not cut: {layout:?}");
+    assert_eq!(layout.hit(layout.x, layout.bottom), None);
+    assert!(layout.hit(layout.x, layout.bottom - 1).is_some());
+}
+
+#[test]
+fn the_failure_screen_offers_only_keys_that_work() {
+    use crate::app::Source;
+    // `u` is ignored for a file and the demo, and a missing file is the
+    // commonest failure there is (#139).
+    let mut file = App::new("preview".into(), 2027, Source::File("nope.json".into()));
+    file.load = Load::Failed("could not read nope.json".into());
+    let frame = render(&mut file, 80, 12);
+    assert!(frame.contains("r retry"), "{frame}");
+    assert!(!frame.contains("u change user"), "{frame}");
+
+    let mut account = App::new("octocat".into(), 2027, Source::GitHub);
+    account.load = Load::Failed("Could not resolve to a User".into());
+    let frame = render(&mut account, 80, 12);
+    assert!(frame.contains("u change user"), "{frame}");
 }
 
 #[test]
@@ -4034,6 +4344,88 @@ fn the_probe_reads_a_reply_that_shares_its_buffer() {
     );
     // And nonsense is still nothing.
     assert_eq!(term::parse("\x1b]11;#12345\x07").background, None);
+}
+
+#[test]
+fn a_slow_terminal_gets_time_to_finish_and_a_mute_one_does_not() {
+    use crate::term::keep_waiting;
+    use std::time::Duration as Wait;
+    let timeout = Wait::from_millis(500);
+    let at = Wait::from_millis;
+    // Inside the first window, whatever has been heard.
+    assert!(keep_waiting(at(10), timeout, false));
+    assert!(keep_waiting(at(499), timeout, true));
+    // Past it, silence is a terminal that will never answer: the deadline and
+    // nothing more.
+    assert!(!keep_waiting(at(500), timeout, false));
+    // But a terminal that has started answering is slow, not mute, and what it
+    // has not said yet would otherwise arrive as keystrokes (#140).
+    assert!(keep_waiting(at(500), timeout, true));
+    assert!(keep_waiting(at(999), timeout, true));
+    // Bounded all the same.
+    assert!(!keep_waiting(at(1000), timeout, true));
+}
+
+#[test]
+fn a_terminal_reply_that_arrives_late_is_not_read_as_keys() {
+    use crate::app::{CellStyle, Source};
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+    /// What crossterm makes of bytes it has no parser for: `ESC` and a
+    /// character is Alt and that character, BEL is Ctrl+G, and a capital
+    /// carries Shift. The `CSI` replies never get here — crossterm drops a
+    /// sequence it cannot parse — so these are the ones that matter.
+    fn type_out(app: &mut App, bytes: &str) {
+        let mut chars = bytes.chars();
+        while let Some(c) = chars.next() {
+            let (c, mut mods) = match c {
+                '\x1b' => (chars.next().expect("ESC is followed"), KeyModifiers::ALT),
+                '\x07' => ('g', KeyModifiers::CONTROL),
+                c => (c, KeyModifiers::NONE),
+            };
+            if c.is_uppercase() {
+                mods |= KeyModifiers::SHIFT;
+            }
+            app.on_key(KeyCode::Char(c), mods);
+        }
+    }
+    // The demo, so that a reload would be visible and would not touch the network.
+    let fresh = || {
+        let mut app = ready(synthetic(2025, "octocat"));
+        app.source = Source::Demo;
+        app
+    };
+
+    // A dark kitty's ordinary answers, in both terminators. Before #140 the
+    // `r` reloaded and the two `d`s moved the chart to snug cells.
+    let mut app = fresh();
+    let cursor = app.cursor;
+    type_out(
+        &mut app,
+        "\x1b_Gi=7379;OK\x1b\\\x1b]11;rgb:0d0d/1111/1717\x1b\\\x1b]11;rgb:ffff/ffff/ffff\x07",
+    );
+    assert_eq!(
+        app.cells,
+        CellStyle::Auto,
+        "the reply changed the cell style"
+    );
+    assert!(matches!(app.load, Load::Ready(_)), "the reply reloaded");
+    assert_eq!(app.cursor, cursor, "the reply moved the cursor");
+    assert!(!app.quit && !app.help);
+
+    // And the keyboard is back the moment the reply ends.
+    app.on_key(KeyCode::Char('d'), KeyModifiers::NONE);
+    assert_eq!(app.cells, CellStyle::Rounded, "d after the reply");
+
+    // Alt is never a binding: Alt+`d` is not `d`.
+    let mut app = fresh();
+    app.on_key(KeyCode::Char('d'), KeyModifiers::ALT);
+    app.on_key(KeyCode::Char('h'), KeyModifiers::ALT);
+    assert_eq!(app.cells, CellStyle::Auto);
+    assert_eq!(app.cursor, cursor);
+    // Ctrl+C still quits, Alt or not.
+    app.on_key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(app.quit);
 }
 
 #[test]

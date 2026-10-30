@@ -13,8 +13,8 @@ use crate::calendar::Calendar;
 use crate::github;
 use crate::graphics::{Mark, Painter, Protocol, Ring, Scene, COLUMNS_PER_DAY};
 use crate::primer::{Appearance, Palette, Season};
-use crate::term::{self, Caps};
-use crate::ui::{Cells, Layout};
+use crate::term::{self, Caps, LateReplies};
+use crate::ui::{self, Cells, Layout};
 
 /// Where the calendar comes from.
 #[derive(Debug, Clone)]
@@ -70,6 +70,9 @@ pub struct Options {
     /// Which day to read the year as of. `None` is the clock — and, for a saved
     /// calendar, means every day in it counts as elapsed.
     pub today: Option<NaiveDate>,
+    /// The cell style to start in, which `--cells` names. A font with no block
+    /// sextants meant pressing `d` on every launch to get away from them.
+    pub cells: CellStyle,
 }
 
 impl Default for Options {
@@ -81,6 +84,7 @@ impl Default for Options {
             mouse: true,
             cell: None,
             today: None,
+            cells: CellStyle::Auto,
         }
     }
 }
@@ -116,6 +120,32 @@ pub enum CellStyle {
 }
 
 impl CellStyle {
+    /// Every style by the name the legend gives it, in the order `d` visits
+    /// them — which is what `--cells` accepts and `--help` lists.
+    pub const NAMES: [(&'static str, CellStyle); 10] = [
+        ("auto", Self::Auto),
+        ("pixel", Self::Pixels),
+        ("rounded", Self::Rounded),
+        ("snug", Self::Snug),
+        ("squares", Self::Squares),
+        ("grid", Self::Grid),
+        ("spaced", Self::Spaced),
+        ("blocks", Self::Blocks),
+        ("slim", Self::Slim),
+        ("compact", Self::Compact),
+    ];
+
+    /// The style a name means, as the legend writes it. `pixels` is accepted
+    /// too, being what the README calls them.
+    pub fn parse(name: &str) -> Option<Self> {
+        let name = name.trim().to_ascii_lowercase();
+        let name = if name == "pixels" { "pixel" } else { &name };
+        Self::NAMES
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, style)| *style)
+    }
+
     /// The next style in the cycle. Pixels are skipped where the terminal cannot
     /// draw them, since asking for them there resolves to rounded and pressing `d`
     /// would look like it had done nothing.
@@ -198,6 +228,9 @@ pub struct App {
     /// Columns the footer may use, set by the renderer each frame so it can drop
     /// what will not fit rather than being cut mid-word.
     pub footer_width: u16,
+    /// The area the chart was laid out in last frame, columns by rows, so `d`
+    /// can tell a style that fits from one that does not.
+    pub(crate) area: (u16, u16),
     /// Whether mouse reporting is on; `m` toggles it.
     pub mouse: bool,
     /// Whether the help overlay is up. `?` opens it, any key closes it.
@@ -219,6 +252,12 @@ pub struct App {
     /// `--cell`, which outranks anything the terminal reports and survives a
     /// re-measure.
     cell_override: Option<(u16, u16)>,
+    /// Whether the theme is known — asked for with `--theme`, or read off the
+    /// background the terminal reported — rather than assumed.
+    appearance_known: bool,
+    /// Keys that are a late terminal reply rather than a person. See
+    /// [`App::on_key`].
+    replies: LateReplies,
     seq: u64,
     tx: Sender<Fetched>,
     rx: Receiver<Fetched>,
@@ -253,6 +292,7 @@ impl App {
             gfx: None,
             layout: None,
             footer_width: 0,
+            area: (0, 0),
             mouse: false,
             help: false,
             redraw: false,
@@ -262,6 +302,8 @@ impl App {
             today: None,
             wanted: Graphics::Auto,
             cell_override: None,
+            appearance_known: false,
+            replies: LateReplies::default(),
             seq: 0,
             tx,
             rx,
@@ -279,10 +321,14 @@ impl App {
         self.today = options.today;
         self.wanted = options.graphics;
         self.cell_override = options.cell;
-        let appearance = options
+        self.cells = options.cells;
+        let known = options
             .appearance
-            .or_else(|| caps.background.map(Appearance::from_background))
-            .unwrap_or(Appearance::Dark);
+            .or_else(|| caps.background.map(Appearance::from_background));
+        self.appearance_known = known.is_some();
+        // Dark for the cells, which carry their own colours and read on either
+        // background. The chrome does not: see `appearance_known`.
+        let appearance = known.unwrap_or(Appearance::Dark);
         // `--today`'s season, not the clock's: a chart read as of a day in
         // June came out orange whenever it was run in the last week of October.
         let season = options.season.unwrap_or_else(|| Season::on(self.today()));
@@ -304,9 +350,37 @@ impl App {
         self.today
     }
 
+    /// Whether the theme was asked for or read off the terminal, rather than
+    /// assumed. When it was assumed, the renderer draws its text in the
+    /// terminal's own foreground: the dark theme's `#f0f6fc` on a white
+    /// terminal is 1.07:1, and the header and month labels vanished — on every
+    /// native Windows run, under mosh, and behind multiplexers that do not
+    /// forward `OSC 11` (#141).
+    pub fn appearance_known(&self) -> bool {
+        self.appearance_known
+    }
+
     /// Whether this terminal can draw pixel cells.
     pub fn pixels_available(&self) -> bool {
         self.gfx.is_some()
+    }
+
+    /// The protocol the terminal speaks, or was told to, when it could not be
+    /// used because nobody said how big a character cell is — which is the only
+    /// reason a protocol goes unused. A terminal that answered the kitty query
+    /// and not the size got text cells silently, and a help overlay suggesting
+    /// it try another terminal (#142).
+    pub fn cell_size_missing(&self) -> Option<&'static str> {
+        if self.gfx.is_some() {
+            return None;
+        }
+        match self.wanted {
+            Graphics::Kitty => Some("kitty"),
+            Graphics::Sixel => Some("sixel"),
+            Graphics::Auto if self.caps.kitty => Some("kitty"),
+            Graphics::Auto if self.caps.sixel => Some("sixel"),
+            Graphics::Auto | Graphics::Text => None,
+        }
     }
 
     /// Whether a protocol was asked for and could not be used. The chart says so
@@ -446,14 +520,25 @@ impl App {
     }
 
     /// Handle a key press.
+    ///
+    /// Not every key press is one: a terminal reply that arrives after the
+    /// probe stopped listening comes in on the keyboard's input, and its
+    /// `OSC 11` reached here as Alt+`]` — "next year" — and then an `r` and two
+    /// `d`s (#140). [`LateReplies`] drops those.
     pub fn on_key(&mut self, code: KeyCode, mods: KeyModifiers) {
+        if self.replies.swallow(code, mods) {
+            return;
+        }
         if mods.contains(KeyModifiers::CONTROL) && matches!(code, KeyCode::Char('c' | 'd')) {
             self.quit = true;
             return;
         }
         if matches!(self.mode, Mode::Input(_)) {
             self.on_key_input(code);
-        } else {
+        } else if !mods.contains(KeyModifiers::ALT) {
+            // No binding here uses Alt, and `on_key_normal` reads only the key
+            // code — so Alt+`]` was `]`, and any escape sequence crossterm does
+            // not know arrived as a binding.
             self.on_key_normal(code);
         }
     }
@@ -494,7 +579,7 @@ impl App {
             // A style change moves or removes the image, so the screen has to go
             // with it: pixels the text layer never wrote are pixels it cannot clear.
             KeyCode::Char('d') => {
-                self.cells = self.cells.next(self.pixels_available());
+                self.cells = self.next_cells();
                 self.redraw = true;
             }
             KeyCode::Char('?') | KeyCode::F(1) => {
@@ -512,6 +597,41 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Where `d` goes from here. Round the cycle — except from a style that
+    /// does not fit, where the next one in the cycle was as likely to be wider
+    /// as narrower and "press d for a smaller style" walked through bigger ones
+    /// (#142). From there it goes to the best style that does fit, in Auto's
+    /// order of preference.
+    fn next_cells(&self) -> CellStyle {
+        let pixels = self.pixels_available();
+        let next = self.cells.next(pixels);
+        let Load::Ready(calendar) = &self.load else {
+            return next;
+        };
+        let weeks = calendar.weeks.len();
+        let (width, height) = (usize::from(self.area.0), usize::from(self.area.1));
+        let fits = |style: CellStyle| {
+            ui::resolve(style, weeks, width, height, pixels).fits(weeks, width, height)
+        };
+        if fits(self.cells) {
+            return next;
+        }
+        [
+            CellStyle::Pixels,
+            CellStyle::Rounded,
+            CellStyle::Squares,
+            CellStyle::Grid,
+            CellStyle::Spaced,
+            CellStyle::Blocks,
+            CellStyle::Slim,
+            CellStyle::Compact,
+        ]
+        .into_iter()
+        .filter(|style| *style != CellStyle::Pixels || pixels)
+        .find(|style| fits(*style))
+        .unwrap_or(next)
     }
 
     fn on_key_input(&mut self, code: KeyCode) {
@@ -707,11 +827,15 @@ fn painter(caps: &Caps, options: &Options, palette: &Palette) -> Option<Painter>
         .cell
         .or_else(|| term::cell_size(caps))
         .filter(|(w, h)| *w >= 2 && *h >= 2)?;
-    Some(Painter::new(
-        protocol,
-        cell,
-        caps.background.unwrap_or(palette.canvas),
-    ))
+    // `--theme` names a palette, not the terminal's background, so it is only a
+    // stand-in for one: the canvas of the theme asked for is the best guess
+    // there is. With neither, a guess is what put dark halos round every sixel
+    // cell on a light terminal (#141), so the edges are cut instead.
+    Some(match (caps.background, options.appearance) {
+        (Some(background), _) => Painter::new(protocol, cell, background),
+        (None, Some(_)) => Painter::new(protocol, cell, palette.canvas),
+        (None, None) => Painter::over_unknown(protocol, cell),
+    })
 }
 
 /// What the painter should be showing, given what the renderer laid out.
@@ -733,9 +857,12 @@ fn scene<'a>(
         return None;
     };
 
+    // The weeks the layout found room for, which is the whole year unless the
+    // style was forced into a window too narrow for it.
     let levels: Vec<[Option<u8>; 7]> = calendar
         .weeks
         .iter()
+        .take(usize::from(layout.weeks))
         .map(|week| {
             let mut column = [None; 7];
             for (weekday, day) in week.days.iter().enumerate() {
@@ -750,6 +877,10 @@ fn scene<'a>(
     let mark = |date: Option<NaiveDate>, ring: Ring| -> Option<Mark> {
         let date = date?;
         let (week, weekday) = calendar.position(date)?;
+        // A ring on a week that was not drawn would land past the edge.
+        if week >= usize::from(layout.weeks) {
+            return None;
+        }
         Some(Mark {
             week: week as u16,
             weekday: weekday as u16,

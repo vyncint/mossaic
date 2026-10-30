@@ -167,14 +167,25 @@ doubles as the "everything that is coming has come" marker. The read is from
 timeout and nothing else — no thread left blocked holding the keyboard, which
 is what a naive blocking read would do to the next keypress.
 
+A reply that misses the deadline is not lost, which is the trouble with it: it
+arrives on the keyboard's input, and crossterm, which has no parser for `OSC` or
+`APC`, reads `ESC ] 11 ; rgb:0d0d/…` as Alt+`]` and then an `r` and two `d`s —
+next year, reload, and a different cell style. So a terminal that has started
+answering by the deadline gets a second window to reach the sentinel; a silent
+one still costs only the first. Whatever arrives later still is swallowed by
+the key handler: an Alt+`]`, Alt+`_` or Alt+`P` opens a reply, the keys after
+it are dropped up to its terminator (bounded in count and in time), and no
+binding in the chart answers to Alt at all.
+
 Only `OK` counts for kitty. A terminal that knows the protocol but not that
 transmission medium answers `ENOTSUPPORTED`, and would then be sent images it
 cannot draw.
 
 **Without a cell size there are no pixels.** An image that cannot be lined up
 with the labels around it is worse than no image, so a terminal that will not say
-gets text cells — and the chart says so under the legend rather than leaving a
-`--graphics kitty` looking ignored. There are three places the size can come
+gets text cells — and the chart says so under the legend, naming `--cell WxH`,
+whether the protocol was forced with `--graphics` or only answered for: text
+cells from a terminal that said yes to kitty look like a terminal that said no. There are three places the size can come
 from, in order: `TIOCGWINSZ`, the `CSI 16 t` reply, and the window size from
 `CSI 14 t` divided by the grid. Or you measure it yourself and pass
 `--cell 10x20`, which outranks all three. A resize re-asks, because that is also
@@ -192,7 +203,9 @@ repairing it means re-emitting a slice of the image on a frame boundary that
 does not exist. One placement that works everywhere beat two that did not.
 
 What is kept: the wording is github.com's exactly, ordinals included, and a `▼`
-points at the hovered week's column so the association is unambiguous.
+points at the hovered week's column so the association is unambiguous — from a
+column of that week clear of the month labels it shares a row with, or not at
+all, since a `▼` drawn over one turned `Jan` into `J▼n`.
 
 ## 8. Two pointers, not one
 

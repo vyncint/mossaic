@@ -15,7 +15,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use ratatui::DefaultTerminal;
 
-use mossaic::app::{App, Graphics, Load, Options, Source};
+use mossaic::app::{App, CellStyle, Graphics, Load, Options, Source};
 use mossaic::cli::Args;
 use mossaic::github::NoUser;
 use mossaic::primer::{Appearance, Palette, Season};
@@ -46,6 +46,9 @@ options:
   -g, --graphics M  auto | kitty | sixel | text  (default: ask the terminal)
       --cell WxH    size of one character cell in pixels, when the terminal
                     will not say (e.g. --cell 10x20)
+      --cells STYLE the cell style to start in: auto | pixel | rounded | snug |
+                    squares | grid | spaced | blocks | slim | compact
+                    (default: auto, the most faithful that fits; d cycles)
       --today DATE  what \"today\" means, as YYYY-MM-DD (default: the clock). It
                     decides the default year, the season's palette, and which
                     days count as still to come — and, with --file or --demo,
@@ -82,9 +85,8 @@ const VERSION: &str = concat!("mossaic ", env!("CARGO_PKG_VERSION"));
 
 /// Redraw cadence. Also bounds how long a finished fetch waits to appear.
 const TICK: Duration = Duration::from_millis(80);
-/// How long to wait for a terminal to say what it can do. A terminal that answers
-/// takes a millisecond or two; this is the budget for one that never will.
-const PROBE: Duration = Duration::from_millis(250);
+/// How long to wait for a terminal to say what it can do.
+const PROBE: Duration = term::TIMEOUT;
 
 /// Everything the command line settles before a terminal is involved.
 struct Invocation {
@@ -389,6 +391,16 @@ fn parse_args() -> Option<Invocation> {
             }
             "--no-mouse" => options.mouse = false,
             "--cell" => options.cell = Some(parse_cell(&args.value("--cell"))),
+            "--cells" => {
+                let raw = args.value("--cells");
+                options.cells = CellStyle::parse(&raw).unwrap_or_else(|| {
+                    let names: Vec<&str> = CellStyle::NAMES.iter().map(|(name, _)| *name).collect();
+                    fail(&format!(
+                        "unknown cell style {raw:?} — {}",
+                        names.join(", ")
+                    ))
+                });
+            }
             "--png" => png = Some(args.value("--png")),
             "--capabilities" => capabilities = true,
             // The same hole, in the same shared parser: `mossaic -- -weirdlogin`

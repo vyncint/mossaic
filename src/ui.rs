@@ -6,15 +6,14 @@
 
 use chrono::{Datelike, Local, NaiveDate};
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{App, CellStyle, Load, Mode};
 use crate::calendar::{Calendar, Day};
 use crate::graphics::COLUMNS_PER_DAY;
-use crate::primer::Palette;
 use crate::thousands;
 
 /// Width of the weekday label column, e.g. "Mon ".
@@ -58,6 +57,18 @@ pub(crate) const CHROME_ROWS: usize = 10;
 /// 17-row window that it "has 15", so resizing to the 17 it asked for still did
 /// not fit. The number a reader can act on is the one their terminal reports.
 pub(crate) const BORDER: usize = 2;
+
+/// Rows the chart keeps however short the window: the header and the blank
+/// under it, the month labels, the note and the footer. Everything else under
+/// the grid is given up first, the statistics before anything — at 80×18 the
+/// footer used to be the line that fell off, and at 60×14 the note with it,
+/// leaving no way out on screen (#139). Below this plus the narrowest grid, the
+/// chart is replaced by one line saying how big a window it needs.
+pub(crate) const KEPT_ROWS: usize = 5;
+
+/// The style the chart falls back to when nothing else fits, and so the one the
+/// smallest usable window is measured against.
+const SMALLEST: Cells = Cells::Solid { fill: 1, gap: 0 };
 
 /// A concrete cell layout, resolved from a [`CellStyle`] and the space available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,7 +185,8 @@ impl Cells {
         }
     }
 
-    const fn fits(&self, weeks: usize, width: usize, height: usize) -> bool {
+    /// Whether the whole chart fits `width` by `height` in these cells.
+    pub(crate) const fn fits(&self, weeks: usize, width: usize, height: usize) -> bool {
         self.width(weeks) <= width && self.height() + CHROME_ROWS <= height
     }
 }
@@ -187,7 +199,8 @@ pub struct Layout {
     pub x: u16,
     /// Row of the first cell row.
     pub y: u16,
-    /// Columns in the grid.
+    /// Columns in the grid that are on screen: all of them, except where pixel
+    /// cells were asked for in a window too narrow for the year.
     pub weeks: u16,
     /// The style the chart resolved to.
     pub cells: Cells,
@@ -218,6 +231,10 @@ impl Layout {
     /// gap beside a cell, or on a grid rule, snaps to the day it borders rather than
     /// falling through, because a two-column target is small enough already.
     pub fn hit(&self, column: u16, row: u16) -> Option<(usize, usize)> {
+        // A grid cut short for the footer's sake has no days under the cut.
+        if row >= self.bottom {
+            return None;
+        }
         let dx = usize::from(column.checked_sub(self.x)?);
         let dy = usize::from(row.checked_sub(self.y)?);
         let week = dx / self.cells.stride();
@@ -290,8 +307,16 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     frame.render_widget(block, area);
 
     app.footer_width = inner.width;
-    let (lines, layout) = body(app, inner);
-    frame.render_widget(Paragraph::new(lines), inner);
+    app.area = (inner.width, inner.height);
+    let (lines, layout, wrap) = body(app, inner);
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(
+        match wrap {
+            true => paragraph.wrap(Wrap { trim: true }),
+            false => paragraph,
+        },
+        inner,
+    );
     app.layout = layout;
 
     if let Some(layout) = layout {
@@ -306,9 +331,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
 /// program can answer: what this terminal turned out to be able to draw.
 fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
     let palette = &app.palette;
-    let key = Style::new().fg(palette.ansi(palette.fg)).bold();
-    let text = Style::new().fg(palette.ansi(palette.fg));
-    let muted = Style::new().fg(palette.ansi(palette.muted));
+    let key = text(app).bold();
+    let (text, muted) = (text(app), muted(app));
 
     let cells = app.layout.map_or("—", |layout| layout.cells.name());
     let yes_no = |flag: bool| if flag { "yes" } else { "no" };
@@ -383,7 +407,29 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
             },
         ),
     ];
-    if !app.pixels_available() && app.caps.answered {
+    if !app.appearance_known() {
+        // The one guess left on screen, and the one a light terminal pays for.
+        lines.push(fact(
+            FACT,
+            "background",
+            "not reported — try --theme light".to_string(),
+        ));
+    }
+    if let Some(protocol) = app.cell_size_missing() {
+        // Not "try another terminal": this one can draw, and one flag says how.
+        lines.push(blank());
+        lines.push((
+            DECISION,
+            Line::styled(
+                format!("  {protocol} is here, but the cell size is not reported:"),
+                muted,
+            ),
+        ));
+        lines.push((
+            DECISION,
+            Line::styled("  pass --cell WxH, measured in pixels.", muted),
+        ));
+    } else if !app.pixels_available() && app.caps.answered {
         lines.push(blank());
         lines.push((
             HINT,
@@ -429,47 +475,67 @@ fn help(frame: &mut Frame<'_>, app: &App, inner: Rect) {
     let block = Block::bordered()
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::new().fg(palette.ansi(palette.rule)))
-        .style(Style::new().bg(palette.ansi(palette.canvas)))
+        .style(match app.appearance_known() {
+            true => Style::new().bg(palette.ansi(palette.canvas)),
+            // The terminal's own background under the terminal's own text: the
+            // dark canvas under default text was the one pairing guaranteed
+            // unreadable on a light terminal.
+            false => Style::new().bg(Color::Reset),
+        })
         .title(Line::styled(" help ", key));
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-fn body(app: &App, inner: Rect) -> (Vec<Line<'static>>, Option<Layout>) {
+/// The lines to draw, where the grid landed, and whether the lines should wrap —
+/// which only the one-line "too small" message wants.
+fn body(app: &App, inner: Rect) -> (Vec<Line<'static>>, Option<Layout>, bool) {
     let mut lines = vec![header(app), Line::raw("")];
-    let mut layout = None;
     match &app.load {
         Load::Loading => lines.push(loading(app)),
         Load::Failed(message) => lines.extend(failure(app, message, inner.width)),
-        Load::Ready(calendar) => {
+        Load::Ready(calendar) if !calendar.weeks.is_empty() => {
             // The chart starts two lines down, which is what turns a line index into
             // a screen row.
             let origin = (inner.x, inner.y + lines.len() as u16);
-            let (chart, resolved) = chart(app, calendar, inner, origin);
+            // What is left between those two lines and the footer.
+            let room = usize::from(inner.height).saturating_sub(lines.len() + 1);
+            let Some((chart, layout)) = chart(app, calendar, inner, origin, room) else {
+                return (vec![too_small(app, calendar.weeks.len())], None, true);
+            };
             lines.extend(chart);
-            layout = resolved;
+            lines.push(footer(app));
+            return (lines, Some(layout), false);
         }
+        Load::Ready(calendar) => lines.extend(empty(app, calendar)),
     }
     lines.push(Line::raw(""));
     lines.push(footer(app));
-    (lines, layout)
+    (lines, None, false)
+}
+
+/// Instead of a chart with no room for the way out. Measured against the
+/// narrowest style and the rows [`KEPT_ROWS`] keeps, in the units a terminal
+/// reports, so resizing to the number it names is enough.
+fn too_small(app: &App, weeks: usize) -> Line<'static> {
+    let (width, height) = (
+        SMALLEST.width(weeks) + BORDER,
+        SMALLEST.height() + KEPT_ROWS + BORDER,
+    );
+    Line::styled(
+        format!("terminal too small (needs {width}×{height}) — q quits"),
+        text(app),
+    )
 }
 
 fn header(app: &App) -> Line<'static> {
-    let palette = &app.palette;
     let mut spans = vec![
-        Span::styled(
-            app.login.clone(),
-            Style::new().fg(palette.ansi(palette.fg)).bold(),
-        ),
-        separator(palette),
-        Span::styled(
-            app.year.to_string(),
-            Style::new().fg(palette.ansi(palette.fg)),
-        ),
+        Span::styled(app.login.clone(), text(app).bold()),
+        separator(app),
+        Span::styled(app.year.to_string(), text(app)),
     ];
     if let Load::Ready(calendar) = &app.load {
-        spans.push(separator(palette));
+        spans.push(separator(app));
         // github.com's own wording, under its own chart — and github.com
         // counts what has *happened*, because it has no future data to count.
         //
@@ -499,63 +565,133 @@ fn header(app: &App) -> Line<'static> {
         };
         spans.push(Span::styled(
             format!("{} contributions in {}", thousands(counted), app.year),
-            Style::new().fg(palette.ansi(palette.fg)),
+            text(app),
         ));
     }
     Line::from(spans)
 }
 
-fn separator(palette: &Palette) -> Span<'static> {
-    Span::styled("  ·  ", Style::new().fg(palette.ansi(palette.muted)))
+fn separator(app: &App) -> Span<'static> {
+    Span::styled("  ·  ", muted(app))
 }
 
+/// Chrome text — labels, the header, the footer — in the theme's foreground, or
+/// in the terminal's own when the theme is a guess (#141). Only the cells keep
+/// their colours then: they carry them on any background, and text does not.
+fn text(app: &App) -> Style {
+    match app.appearance_known() {
+        true => Style::new().fg(app.palette.ansi(app.palette.fg)),
+        false => Style::new().fg(Color::Reset),
+    }
+}
+
+/// The quieter chrome: the theme's muted grey, or the terminal's own foreground
+/// dimmed, which stays a step below [`text`] on a light terminal and a dark one.
+fn muted(app: &App) -> Style {
+    match app.appearance_known() {
+        true => Style::new().fg(app.palette.ansi(app.palette.muted)),
+        false => Style::new().fg(Color::Reset).add_modifier(Modifier::DIM),
+    }
+}
+
+/// The month labels, the grid and everything under it, in `room` rows — or
+/// `None` when even the narrowest grid and the rows [`KEPT_ROWS`] keeps do not
+/// fit, and the window is too small for a chart at all.
 fn chart(
     app: &App,
     calendar: &Calendar,
     inner: Rect,
     origin: (u16, u16),
-) -> (Vec<Line<'static>>, Option<Layout>) {
-    if calendar.weeks.is_empty() {
-        return (empty(app, calendar), None);
-    }
-
+    room: usize,
+) -> Option<(Vec<Line<'static>>, Layout)> {
     let weeks = calendar.weeks.len();
     let (width, height) = (inner.width as usize, inner.height as usize);
     let cells = resolve(app.cells, weeks, width, height, app.pixels_available());
+    let note = note(app, &cells, weeks, width, height);
 
-    let mut lines = Vec::with_capacity(cells.height() + 5);
-    lines.push(months(app, calendar, &cells));
-    let grid_row = origin.1 + lines.len() as u16;
-    match cells {
+    // The month labels and the note go nowhere; the grid needs its seven rows
+    // in the narrowest style, which `d` can always reach.
+    let kept = 1 + usize::from(note.is_some());
+    if kept + SMALLEST.height() > room {
+        return None;
+    }
+
+    let mut grid = match cells {
         // Nothing but the gutter: the seven rows below belong to the painter, and
         // staying blank is what keeps ratatui's diff from writing over the image.
-        Cells::Pixels => lines.extend((0..7).map(|row| Line::from(weekday(app, row)))),
-        Cells::Rounded { gap } => lines.extend(filled_rows(app, calendar, ROUND, gap)),
-        Cells::Squares => lines.extend(filled_rows(app, calendar, SQUARE, 1)),
-        Cells::Grid { fill } => lines.extend(grid_rows(app, calendar, fill)),
-        Cells::Solid { fill, gap } => lines.extend(solid_rows(app, calendar, fill, gap)),
-    }
-    lines.push(Line::raw(""));
-    lines.push(detail(app, calendar));
+        Cells::Pixels => (0..7).map(|row| Line::from(weekday(app, row))).collect(),
+        Cells::Rounded { gap } => filled_rows(app, calendar, ROUND, gap),
+        Cells::Squares => filled_rows(app, calendar, SQUARE, 1),
+        Cells::Grid { fill } => grid_rows(app, calendar, fill),
+        Cells::Solid { fill, gap } => solid_rows(app, calendar, fill, gap),
+    };
+    // Only a style asked for can be taller than the window — Auto takes one
+    // that fits — and it loses its bottom rows rather than the footer.
+    let cut = grid.len() > room - kept;
+    grid.truncate(room - kept);
 
-    let legend_row = origin.1 + lines.len() as u16;
-    let (legend, legend_at) = legend(app, calendar, &cells, inner.x, legend_row);
-    lines.push(legend);
-    lines.push(summary(app, calendar));
-    if let Some(note) = note(app, &cells, weeks, width, height) {
-        lines.push(note);
+    // Under the grid, each line with what it is worth; the cheapest goes first
+    // until the rest fit. `KEEP` never goes.
+    const KEEP: u8 = u8::MAX;
+    let (legend, legend_x) = legend(app, calendar, &cells, inner.x);
+    let mut under: Vec<(u8, Line<'static>)> = vec![
+        (3, Line::raw("")),
+        (4, detail(app, calendar)),
+        (5, legend),
+        (1, summary(app, calendar)),
+    ];
+    if let Some(note) = note {
+        under.push((KEEP, note));
+    }
+    under.push((2, Line::raw("")));
+    while 1 + grid.len() + under.len() > room {
+        let Some(cheapest) = under
+            .iter()
+            .enumerate()
+            .filter(|(_, (rank, _))| *rank != KEEP)
+            .min_by_key(|(_, (rank, _))| *rank)
+            .map(|(index, _)| index)
+        else {
+            break;
+        };
+        under.remove(cheapest);
     }
 
+    let grid_row = origin.1 + 1;
+    let x = origin.0 + (GUTTER + cells.offset()) as u16;
+    // Pixel cells forced into a window too narrow for them drew nothing at all:
+    // the image would not fit, so none was sent, and the reserved rows stayed
+    // blank while their days still answered the mouse (#142). Text clips at the
+    // right edge, and so do they now — the weeks that fit are drawn, and only
+    // those are days to the mouse and the painter.
+    let shown = match cells {
+        Cells::Pixels => weeks.min(usize::from(
+            inner.right().saturating_sub(x) / COLUMNS_PER_DAY,
+        )),
+        _ => weeks,
+    };
+    let legend_at = under
+        .iter()
+        .position(|(rank, _)| *rank == 5)
+        .and_then(|index| Some((legend_x?, grid_row + (grid.len() + index) as u16)));
     let layout = Layout {
-        x: origin.0 + (GUTTER + cells.offset()) as u16,
+        x,
         y: grid_row,
-        weeks: weeks as u16,
+        weeks: shown as u16,
         cells,
         legend: legend_at,
-        bottom: inner.bottom(),
+        bottom: match cut {
+            true => grid_row + grid.len() as u16,
+            false => inner.bottom(),
+        },
         right: inner.right(),
     };
-    (lines, Some(layout))
+
+    let mut lines = Vec::with_capacity(1 + grid.len() + under.len());
+    lines.push(months(app, calendar, &cells));
+    lines.extend(grid);
+    lines.extend(under.into_iter().map(|(_, line)| line));
+    Some((lines, layout))
 }
 
 /// The line under the chart that explains why it does not look its best.
@@ -566,12 +702,20 @@ fn note(
     width: usize,
     height: usize,
 ) -> Option<Line<'static>> {
-    let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
+    let muted = muted(app);
     // Asking for a protocol and getting characters is the one outcome
     // `--capabilities` explained and the chart did not.
     if let Some(protocol) = app.graphics_refused() {
         return Some(Line::styled(
             format!("({protocol} was asked for, but no cell size is known — pass --cell WxH)"),
+            muted,
+        ));
+    }
+    // And the same when nobody asked: a terminal that speaks a protocol but
+    // will not say how big a cell is got text, silently (#142).
+    if let Some(protocol) = app.cell_size_missing() {
+        return Some(Line::styled(
+            format!("(this terminal speaks {protocol}, but not its cell size — pass --cell WxH)"),
             muted,
         ));
     }
@@ -625,16 +769,22 @@ fn note(
 /// a real year always yields its days, future ones included.
 fn empty(app: &App, calendar: &Calendar) -> Vec<Line<'static>> {
     let year = calendar.year;
-    let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
+    let muted = muted(app);
     let reason = if calendar.starts_after(Local::now().date_naive()) {
         format!("{year} hasn't started yet — nothing to draw until Jan 1 {year}")
     } else {
         format!("no contribution data for {year}")
     };
+    // A file or the demo has one year and one user, so neither key does
+    // anything there; offering them is how a reader learns to distrust the rest.
+    let keys = match app.previewing() {
+        true => "r reload",
+        false => "[ previous year  ·  u change user",
+    };
     vec![
         Line::styled(reason, muted),
         Line::raw(""),
-        Line::styled("[ previous year  ·  u change user", muted),
+        Line::styled(keys, muted),
     ]
 }
 
@@ -650,7 +800,7 @@ fn months(app: &App, calendar: &Calendar, cells: &Cells) -> Line<'static> {
         label.push_str(&" ".repeat(column - label.len()));
         label.push_str(name);
     }
-    Line::styled(label, Style::new().fg(app.palette.ansi(app.palette.fg)))
+    Line::styled(label, text(app))
 }
 
 /// Box-bordered cells. Neighbours share a border, so each week costs two columns
@@ -765,7 +915,7 @@ fn solid_rows(app: &App, calendar: &Calendar, fill: usize, gap: usize) -> Vec<Li
 fn weekday(app: &App, row: usize) -> Span<'static> {
     Span::styled(
         format!("{:<width$}", WEEKDAYS[row], width = GUTTER),
-        Style::new().fg(app.palette.ansi(app.palette.fg)),
+        text(app),
     )
 }
 
@@ -775,7 +925,7 @@ fn mark(app: &App, date: NaiveDate) -> Option<ratatui::style::Color> {
     if app.hover == Some(date) {
         return Some(app.palette.ansi(app.palette.accent));
     }
-    (app.cursor == date).then(|| app.palette.ansi(app.palette.fg))
+    (app.cursor == date).then(|| text(app).fg.unwrap_or(Color::Reset))
 }
 
 /// One day. Days outside the year and days still to come both draw blank, so the
@@ -804,41 +954,31 @@ fn cell(app: &App, day: Option<Day>, fill: usize) -> Span<'static> {
 }
 
 fn detail(app: &App, calendar: &Calendar) -> Line<'static> {
-    let palette = &app.palette;
     let Some(day) = calendar.day(app.cursor) else {
         return Line::raw("");
     };
     let date = Span::styled(
         app.cursor.format("%a, %b %-d %Y").to_string(),
-        Style::new().fg(palette.ansi(palette.fg)).bold(),
+        text(app).bold(),
     );
     if day.future {
         return Line::from(vec![
             date,
-            separator(palette),
-            Span::styled(
-                "still to come",
-                Style::new().fg(palette.ansi(palette.muted)),
-            ),
+            separator(app),
+            Span::styled("still to come", muted(app)),
         ]);
     }
     Line::from(vec![
         date,
-        separator(palette),
-        Span::styled(count(day.count), Style::new().fg(palette.ansi(palette.fg))),
+        separator(app),
+        Span::styled(count(day.count), text(app)),
     ])
 }
 
-/// Returns the line and, in pixel mode, where the swatch image goes.
-fn legend(
-    app: &App,
-    calendar: &Calendar,
-    cells: &Cells,
-    x: u16,
-    row: u16,
-) -> (Line<'static>, Option<(u16, u16)>) {
+/// Returns the line and, in pixel mode, the column the swatch image goes in.
+fn legend(app: &App, calendar: &Calendar, cells: &Cells, x: u16) -> (Line<'static>, Option<u16>) {
     let palette = &app.palette;
-    let muted = Style::new().fg(palette.ansi(palette.muted));
+    let muted = muted(app);
     let lead = "Less ";
     let mut spans = vec![Span::styled(lead, muted)];
     for level in 0..5u8 {
@@ -879,12 +1019,12 @@ fn legend(
         },
         muted,
     ));
-    let at = matches!(cells, Cells::Pixels).then(|| (x + lead.len() as u16, row));
+    let at = matches!(cells, Cells::Pixels).then(|| x + lead.len() as u16);
     (Line::from(spans), at)
 }
 
 fn summary(app: &App, calendar: &Calendar) -> Line<'static> {
-    let muted = Style::new().fg(app.palette.ansi(app.palette.muted));
+    let muted = muted(app);
     if !calendar.has_elapsed_days() {
         return Line::styled(format!("{} hasn't started yet", calendar.year), muted);
     }
@@ -960,15 +1100,27 @@ fn tooltip(frame: &mut Frame<'_>, app: &App, layout: &Layout, inner: Rect) {
         Span::styled("▌", Style::new().fg(background)),
     ]);
     frame.render_widget(Paragraph::new(pill), Rect::new(x, text_row, width, 1));
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled("▼", Style::new().fg(background)))),
-        Rect::new(
-            point.min(inner.right().saturating_sub(1)),
-            text_row + 1,
-            1,
-            1,
-        ),
-    );
+
+    // The marker shares its row with the month labels, and drawn over one it
+    // turned `Jan` into `J▼n` (#139). So it takes a column of the day's cell
+    // that is clear of them — the middle first — and is left out where there is
+    // none: the pill above it still names the day.
+    let cell = layout.x + week as u16 * layout.cells.stride() as u16;
+    let marker = std::iter::once(point)
+        .chain(cell..cell + layout.cells.stride() as u16)
+        .filter(|column| *column < inner.right())
+        .find(|column| {
+            frame
+                .buffer_mut()
+                .cell((*column, text_row + 1))
+                .is_some_and(|under| under.symbol() == " ")
+        });
+    if let Some(column) = marker {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("▼", Style::new().fg(background)))),
+            Rect::new(column, text_row + 1, 1, 1),
+        );
+    }
 }
 
 /// "No contributions" / "1 contribution" / "97 contributions", as github.com writes it.
@@ -995,10 +1147,7 @@ fn loading(app: &App) -> Line<'static> {
     let frame = SPINNER[(app.tick / 2) as usize % SPINNER.len()];
     Line::from(vec![
         Span::styled(frame, Style::new().fg(app.palette.level(4))),
-        Span::styled(
-            format!(" loading {} {}…", app.login, app.year),
-            Style::new().fg(app.palette.ansi(app.palette.muted)),
-        ),
+        Span::styled(format!(" loading {} {}…", app.login, app.year), muted(app)),
     ])
 }
 
@@ -1006,8 +1155,6 @@ fn loading(app: &App) -> Line<'static> {
 /// errors are long: the cause was cut off at the border, mid-address —
 /// `… proxyconnect tcp: dial tcp 127.0.0.1:`.
 fn failure(app: &App, message: &str, width: u16) -> Vec<Line<'static>> {
-    let palette = &app.palette;
-    let text = Style::new().fg(palette.ansi(palette.fg));
     // Two columns for the `! ` the first line opens with, which the rest are
     // indented to match.
     let mut lines: Vec<Line<'static>> = wrap(message, usize::from(width.saturating_sub(2)).max(1))
@@ -1019,13 +1166,18 @@ fn failure(app: &App, message: &str, width: u16) -> Vec<Line<'static>> {
             } else {
                 Span::raw("  ")
             };
-            Line::from(vec![lead, Span::styled(row, text)])
+            Line::from(vec![lead, Span::styled(row, text(app))])
         })
         .collect();
     lines.push(Line::raw(""));
+    // `u` does nothing for a file or the demo, which is where a failure
+    // most often happens: a path that does not exist yet (#139).
     lines.push(Line::styled(
-        "r retry  ·  u change user",
-        Style::new().fg(palette.ansi(palette.muted)),
+        match app.previewing() {
+            true => "r retry",
+            false => "r retry  ·  u change user",
+        },
+        muted(app),
     ));
     lines
 }
@@ -1057,16 +1209,12 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 fn footer(app: &App) -> Line<'static> {
-    let palette = &app.palette;
-    let muted = Style::new().fg(palette.ansi(palette.muted));
+    let muted = muted(app);
     match &app.mode {
         Mode::Input(buffer) => Line::from(vec![
             Span::styled("user ", muted),
-            Span::styled(
-                buffer.clone(),
-                Style::new().fg(palette.ansi(palette.fg)).bold(),
-            ),
-            Span::styled("▏", Style::new().fg(palette.ansi(palette.fg))),
+            Span::styled(buffer.clone(), text(app).bold()),
+            Span::styled("▏", text(app)),
             Span::styled("   enter load  ·  esc cancel", muted),
         ]),
         Mode::Normal => {
@@ -1092,7 +1240,8 @@ fn footer(app: &App) -> Line<'static> {
             keys.push("r reload");
             keys.push("q quit");
             keys.push("? help");
-            if let Some(label) = app.source_label() {
+            let label = app.source_label();
+            if let Some(label) = label {
                 keys.push(label);
             }
 
@@ -1107,10 +1256,16 @@ fn footer(app: &App) -> Line<'static> {
                     <= width
             };
             // Dropped from the front, where the movement hints are — those are the
-            // guessable ones — and never past the last two, which are `q quit`
-            // and `? help`.
-            while !fits(&keys) && keys.len() > 2 {
+            // guessable ones — then the source label, and never `q quit` or
+            // `? help`. The label sits after them on the line but goes before
+            // them: trimming from the front alone took `q quit` first, so a
+            // 56-column demo said only `? help · demo — …` (#139).
+            let floor = 2 + usize::from(label.is_some());
+            while !fits(&keys) && keys.len() > floor {
                 keys.remove(0);
+            }
+            if !fits(&keys) && label.is_some() {
+                keys.pop();
             }
             Line::styled(keys.join(JOIN), muted)
         }
