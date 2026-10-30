@@ -121,7 +121,7 @@ inputs:
     default: "true"
   version:
     description: >-
-      Which mossaic release runs the tracking, e.g. "0.8.1" — a leading `v`,
+      Which mossaic release runs the tracking, e.g. "0.9.0" — a leading `v`,
       as in the `uses:` ref, is accepted. The default,
       `latest`, installs the newest release on crates.io each run — fine for
       tracking, since the report format is versioned with the crate. Pin a
@@ -251,7 +251,7 @@ runs:
         # a fresh install per run costs a minute or two and can never be
         # stale, poisoned, or the wrong version.
         args=(mossaic --locked --bin mossaic-art --root "$ROOT")
-        # `v0.8.1` is what sits beside this input in `uses: …/action@v0.8.1`,
+        # `v0.9.0` is what sits beside this input in `uses: …/action@v0.9.0`,
         # and cargo rejects it as "not a valid SemVer requirement".
         version="${INPUT_VERSION#v}"
         if [ -n "${version}" ] && [ "${version}" != "latest" ]; then

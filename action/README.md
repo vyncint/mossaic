@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: art
-        uses: vyncint/mossaic/action@v0.8.1
+        uses: vyncint/mossaic/action@v0.9.0
         with:
           text: VYNCINT
           year: "2027"
@@ -80,13 +80,13 @@ drawn. The rest are the same either way.
 | `token` | `github.token` | see *Private contributions* below |
 | `fail-on` | `never` | `never`, `behind` (a *letter* day is short), or `holed` |
 | `summary` | `true` | write the report to the job summary |
-| `version` | `latest` | which mossaic release runs the tracking — pin a number (`0.8.1`, or `v0.8.1` like the `uses:` ref) to change only when you say so |
+| `version` | `latest` | which mossaic release runs the tracking — pin a number (`0.9.0`, or `v0.9.0` like the `uses:` ref) to change only when you say so |
 
 ### Tracking a picture
 
 ```yaml
       - id: art
-        uses: vyncint/mossaic/action@v0.8.1
+        uses: vyncint/mossaic/action@v0.9.0
         with:
           template: dragon
           year: "2027"
@@ -256,7 +256,7 @@ on 290 days of the year is a job nobody reads.
 
 ## Notes
 
-- **Two knobs, two jobs.** The ref you pin (`@v0.8.1`, `@main`) chooses the
+- **Two knobs, two jobs.** The ref you pin (`@v0.9.0`, `@main`) chooses the
   *action's steps* — the glue that runs the tracker and shapes the outputs.
   The `version` input chooses the *tracker itself*, straight from crates.io.
   The default, `latest`, is fine for a daily report; pin a number when you
