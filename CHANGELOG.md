@@ -9,63 +9,28 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
-### Fixed
-
-- **`mossaic-art --write` into an existing repository deleted its files and
-  moved its branch** (#124). It started a new root and ran `git reset --hard
-  main` on whatever was checked out, so uncommitted work was lost and the
-  previous history survived only in the reflog; a second write into the
-  same repository then failed. It now appends to `main`, refuses a work tree
-  with uncommitted changes or a branch other than `main` (saying what to
-  run), and moves the files forward as a fast-forward that never overwrites
-  anything.
-- **`--background` with `--commits` under 4 promised shades the year would
-  not have** (#126). Below a busiest day of 4 the background lands a level
-  or more brighter than asked, so it is now refused, naming 4. Over
-  `--merge` the background is priced against the peak the drawing will
-  really have, and when the letters would not clear it the refusal names a
-  count that does.
-- **A picture's `--commits N` priced the brightest day at `⌊3N/4⌋ + 1`, not
-  `N`** (#126). The level-4 days now get `N`, so the year's peak is the one
-  every darker shade was priced against. The default of 4 is unchanged.
-- **A picture drawn over `--merge` ignored the calendar** (#129). It is now
-  topped up to its shades against the year's real peak, and the preview says
-  what it draws over, the peak after the merge, and how many days already
-  lit cannot be put right.
-- **A picture's `--backfill` disagreed with `--track` and with text** (#130).
-  It committed today as well as the days past, gave no warning before
-  writing into a year that cannot be drawn cleanly, and without `--repo`
-  did not refuse. Pictures and text now share one backfill.
-- **`--image` drew nothing for a light shape on transparency, and a solid
-  block with `--invert`** (#128). A transparent pixel is now no ink either
-  way, and an image that comes out empty is refused with a hint to try
-  `--invert`. A PNG whose header claims more pixels than its data holds is
-  refused before anything is allocated; a 67-byte file claiming
-  60000×60000 used to abort the process.
-- **Hand-edited `.art` files and template names** (#131): a `# comment`
-  after a shade row, a leading byte-order mark, and an all-dark row
-  stripped to an empty line are read rather than refused (or the error names
-  the empty lines); `--template Dragon` finds `dragon`; text such as
-  `STRAßE` is drawn the way it is saved; `--track WORD` says it took the word
-  as the user; and a saved picture plan refuses `--top` and `--background`
-  as a named picture does.
-- **docs/ART.md** (#132): the `♥` example, the eight-character note, the
-  tracking prices and header now match what the tool prints, and the page
-  carries the exact `gh api graphql` query that saves a `--merge` file, with
-  the fields it needs. The user template directories are documented.
-
 ### Added
 
 - **`mossaic-art --future`** (#125). `--write` now refuses to date commits
   after today without it, explains why, and points at `--save` and
   `--track`; docs/ART.md's first example takes that route.
+
 - **`--track` names a ceiling for today** (#127): "4 to go, and no more than
   4, or every other letter day costs more" — and the same on a day outside
   the text when no background is drawn.
+
 - `mossaic::github::QUERY` and `mossaic::art::{writable, price_picture,
   picture_commits, Priced}` are public.
 
 ### Changed
+
+- **`mossaic` exits 1 when something fails, and 2 only for a wrong command
+  line** (#138). Network errors, an unknown user, an unreadable `--file` and
+  a PNG that could not be written all used to exit 2, the same as a typo.
+
+- **`github::whoami` returns `Result<String, NoUser>`** instead of an
+  `Option` (#133), so a caller can tell a missing `gh` from a signed-out one.
+  `calendar::demo_as_of` and `png::encode` are new.
 
 - **termlens 0.11** for the PTY suite, and the vendored skill with it. 0.11
   is termlens's stability candidate: from it no promised item changes
@@ -79,6 +44,142 @@ listed under a **Changed** or **Removed** heading.
   when the retained shapes match *and* nothing overflowed the bound. The
   `Vec<String>` helper that existed to make the comparison possible is
   gone.
+
+### Fixed
+
+- **`mossaic-art --write` into an existing repository deleted its files and
+  moved its branch** (#124). It started a new root and ran `git reset --hard
+  main` on whatever was checked out, so uncommitted work was lost and the
+  previous history survived only in the reflog; a second write into the
+  same repository then failed. It now appends to `main`, refuses a work tree
+  with uncommitted changes or a branch other than `main` (saying what to
+  run), and moves the files forward as a fast-forward that never overwrites
+  anything.
+
+- **`--background` with `--commits` under 4 promised shades the year would
+  not have** (#126). Below a busiest day of 4 the background lands a level
+  or more brighter than asked, so it is now refused, naming 4. Over
+  `--merge` the background is priced against the peak the drawing will
+  really have, and when the letters would not clear it the refusal names a
+  count that does.
+
+- **A picture's `--commits N` priced the brightest day at `⌊3N/4⌋ + 1`, not
+  `N`** (#126). The level-4 days now get `N`, so the year's peak is the one
+  every darker shade was priced against. The default of 4 is unchanged.
+
+- **A picture drawn over `--merge` ignored the calendar** (#129). It is now
+  topped up to its shades against the year's real peak, and the preview says
+  what it draws over, the peak after the merge, and how many days already
+  lit cannot be put right.
+
+- **A picture's `--backfill` disagreed with `--track` and with text** (#130).
+  It committed today as well as the days past, gave no warning before
+  writing into a year that cannot be drawn cleanly, and without `--repo`
+  did not refuse. Pictures and text now share one backfill.
+
+- **`--image` drew nothing for a light shape on transparency, and a solid
+  block with `--invert`** (#128). A transparent pixel is now no ink either
+  way, and an image that comes out empty is refused with a hint to try
+  `--invert`. A PNG whose header claims more pixels than its data holds is
+  refused before anything is allocated; a 67-byte file claiming
+  60000×60000 used to abort the process.
+
+- **Hand-edited `.art` files and template names** (#131): a `# comment`
+  after a shade row, a leading byte-order mark, and an all-dark row
+  stripped to an empty line are read rather than refused (or the error names
+  the empty lines); `--template Dragon` finds `dragon`; text such as
+  `STRAßE` is drawn the way it is saved; `--track WORD` says it took the word
+  as the user; and a saved picture plan refuses `--top` and `--background`
+  as a named picture does.
+
+- **docs/ART.md** (#132): the `♥` example, the eight-character note, the
+  tracking prices and header now match what the tool prints, and the page
+  carries the exact `gh api graphql` query that saves a `--merge` file, with
+  the fields it needs. The user template directories are documented.
+
+- **A bare `mossaic` blamed sign-in for every way `gh` can fail** (#133).
+  Without `gh` installed it now says so, and how to install it; only when
+  `gh` says nobody is signed in does it suggest `gh auth login`; anything
+  else — offline, a proxy — passes `gh`'s own message through. It says
+  `asking gh who you are…` on stderr before the call, which behind a proxy
+  that never answers can take half a minute. `gh`'s multi-line errors no
+  longer run together (`…gh auth loginAlternatively…`): line breaks become
+  spaces. A failure in the chart wraps instead of being cut off at the edge.
+
+- **`--png -` wrote a file called `-`** (#134). It now writes the PNG to
+  stdout, and the `wrote …` status line always goes to stderr, so
+  `--png /dev/stdout > chart.png` is a PNG rather than a PNG with a sentence
+  in it. The `-` file that had been committed at the repository root since
+  0.7.0, and shipped in the crate, is gone.
+
+- **An option that takes a value swallowed the next flag** (#135).
+  `mossaic --png --demo` fetched your real calendar into a file named
+  `--demo`; it is now `--png needs a value; "--demo" looks like an option`.
+  A value that really starts with a dash can be glued on (`--png=-x.png`);
+  a lone `-` and a negative number are still values. This applies to
+  `mossaic-art` and `mossaic-glyphs` too. A second login
+  (`mossaic alice bob`) is refused rather than silently charting `bob`.
+
+- **`--today` did not decide the year or the palette** (#136). The default
+  year is now `--today`'s, so `mossaic octocat --today 2025-03-01` shows
+  2025; the seasonal palette follows `--today` rather than the wall clock;
+  and `--demo --today` shows `--today`'s year with the days after it still
+  to come, instead of drawing and counting all of them. `--png` uses the
+  default palette unless `--palette` is given, so an image no longer comes
+  out orange in the last week of October — README's own hero command
+  reproduces `art/pixel-cells.png` byte for byte again.
+
+- **Every scroll-wheel step fetched a year from GitHub** (#137). A trackpad
+  flick of six steps sent six GraphQL requests; the wheel now waits 150 ms
+  after its last step before fetching, and a year already fetched this
+  session is shown from memory. `r` still fetches again.
+
+- **`mossaic > out.bin` drew into the file** (#138), leaving a blank terminal
+  and kilobytes of escape codes. A stdout that is not a terminal is now
+  refused, pointing at `--png FILE`. `kill -QUIT` restores the terminal as
+  `INT`, `TERM` and `HUP` already did. `--help`'s key list gains `u`,
+  `Home` and `End`.
+
+- **The Action's example workflow could not run** (#145).
+  `action/track.example.yml` — the file action/README.md says to copy — put
+  `permissions:` on a step, which GitHub refuses outright. It is on the job
+  now, with the `issues: write` the issue-comment step needs. CI runs
+  actionlint over it and the workflows, since zizmor never checks the schema.
+
+- **The Action's `version` input takes `v0.8.1`** (#145), the spelling of the
+  `uses:` ref beside it, instead of failing in `cargo install` as "not a
+  valid SemVer requirement".
+
+- **The Action's email recipe** (#145) converts the Markdown report to HTML
+  rather than sending it as one run-on paragraph, gives `from:` an address,
+  and is pinned by commit in the README as in the example. The README's
+  examples pass outputs through `env:`, as its own advice says to, and the
+  `text` input's description lists the whole font rather than five
+  characters of it.
+
+- **The release's semver check had never run** (#144). crates.io refuses a
+  request without a User-Agent with 403, and the probe sent none and read
+  every answer but 200 as "not published yet" — so every release from 0.1.1
+  to 0.8.1 skipped it and went green. It sends one now, skips only on a 404,
+  and fails on anything else.
+
+- **The download instructions work on macOS** (#146). The Quickstart's
+  one-liner used GNU tar's `--wildcards`, which macOS's tar does not have,
+  and left the binaries in the current directory; it now works with both and
+  puts them on `PATH`. The checksum step uses `shasum -a 256 -c`, which
+  macOS has, and the README no longer says Windows ships for arm64.
+
+- **Docs that had drifted from what they describe** (#147).
+  docs/RELEASING.md covers every job a tag runs, both tokens a release needs
+  to finish (`HOMEBREW_TAP_TOKEN`, `TESTING_REPO_DISPATCH_TOKEN`), recovery
+  by dispatching `binaries.yml`, and a check after the run. The README's
+  `--track` sample is the report the `--background 1` plan above it prints,
+  `--backfill` without `--write` is captioned as the dry run it is, and the
+  sextant fallback's width is three columns a week, not two. The bug
+  template points at `--version` and counts `--capabilities` right;
+  CONTRIBUTING and AGENTS.md say what `-- --ignored` runs; CONTRIBUTING's
+  dragon is quoted from the file. install.yml no longer claims a weekly run
+  its disabled schedule does not make.
 
 ## [0.8.1] - 2026-09-08
 

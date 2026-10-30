@@ -12,10 +12,10 @@ on:
   # So you can run it now instead of waiting for tomorrow.
   workflow_dispatch:
 
-# Read-only at the workflow level. `issues: write` is granted to the one
-# step that needs it, further down — a token every step can write issues
-# with, in a workflow that runs unattended on a cron and calls a third
-# party's action, is more scope than any of this needs.
+# Read-only at the workflow level, and widened on the one job below.
+# GitHub grants permissions per job, not per step: a `permissions:` key on a
+# step is a schema error, and GitHub refuses to run the workflow at all.
+# Delete `issues: write` if you delete the issue-comment step.
 permissions:
   contents: read
 
@@ -27,6 +27,9 @@ jobs:
   track:
     name: track
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the issue-comment step; nothing else here writes
     steps:
       - id: art
         uses: vyncint/mossaic/action@v0.8.1
@@ -54,10 +57,6 @@ jobs:
       # and put its number here.
       - name: Comment on the tracking issue
         if: steps.art.outputs.today-short != '0'
-        # The only step that writes anything back to this repository.
-        permissions:
-          contents: read
-          issues: write
         env:
           GH_TOKEN: ${{ github.token }}
           BODY: ${{ steps.art.outputs.markdown }}
@@ -99,7 +98,13 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          from: contribution art
+          # A name and an address; a bare name is not a sender.
+          from: Contribution art <${{ secrets.MAIL_USERNAME }}>
           to: ${{ secrets.MAIL_TO }}
           subject: ${{ steps.art.outputs.headline }}
+          # The report is Markdown. Sent as HTML unconverted, it arrives as one
+          # run-on paragraph; `body` is the plain-text part for clients that
+          # do not render HTML.
+          body: ${{ steps.art.outputs.markdown }}
           html_body: ${{ steps.art.outputs.markdown }}
+          convert_markdown: true

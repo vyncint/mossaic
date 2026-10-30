@@ -2,9 +2,9 @@
 //! terminal setup and the event loop. Everything it draws with lives in the
 //! library beside it.
 
-use std::io;
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{Datelike, Local, NaiveDate};
 use ratatui::backend::Backend;
@@ -17,6 +17,7 @@ use ratatui::DefaultTerminal;
 
 use mossaic::app::{App, Graphics, Load, Options, Source};
 use mossaic::cli::Args;
+use mossaic::github::NoUser;
 use mossaic::primer::{Appearance, Palette, Season};
 use mossaic::{github, graphics, png, term, ui};
 
@@ -35,17 +36,20 @@ examples:
 
 options:
   -y, --year YEAR   calendar year to show (default: this year)
-      --demo        a sample year, for trying it without `gh`
+      --demo        a sample year, for trying it without `gh` (default: last
+                    year, or --today's year read as of that day)
   -f, --file PATH   render a saved calendar instead of calling gh
                     (the `mossaic-art` binary writes them)
       --png PATH    write the chart to a PNG and exit — the same pixels the
-                    graphics protocols would draw, from any terminal
+                    graphics protocols would draw, from any terminal. `-` is
+                    stdout. In the default palette unless --palette says otherwise
   -g, --graphics M  auto | kitty | sixel | text  (default: ask the terminal)
       --cell WxH    size of one character cell in pixels, when the terminal
                     will not say (e.g. --cell 10x20)
       --today DATE  what \"today\" means, as YYYY-MM-DD (default: the clock). It
-                    decides which days count as still to come — and, with --file,
-                    makes a saved year show them at all
+                    decides the default year, the season's palette, and which
+                    days count as still to come — and, with --file or --demo,
+                    makes a year show them at all
       --theme M     auto | dark | light | dimmed (default: ask the terminal)
       --palette P   auto | default | winter | halloween — GitHub's own seasonal
                     colours; auto follows the calendar, as github.com does
@@ -57,17 +61,22 @@ options:
 in the chart:
   ?                 keys, mouse, and what this terminal can draw
   arrows / h j k l  move a day or a week
+  Home End          first / last day        t  today
   [ ] · PgUp PgDn   previous / next year
   hover a day       its tooltip; click moves the cursor; wheel changes year
   d                 cycle cell style        m  mouse reporting off/on
-  t  today          r  reload               q  quit
+  u                 another user            r  reload
+  q                 quit
 
 also installed:
   mossaic-art      write text into a contribution graph, and track the plan
   mossaic-glyphs   what this terminal makes of the fallback cells
 
 Needs the GitHub CLI (https://cli.github.com) for a real account; run
-`gh auth login` once. `--demo`, `--file` and `--png` need nothing.";
+`gh auth login` once. `--demo`, `--file` and `--png` need nothing.
+
+Exits 0 on success, 1 when something failed (gh, the network, a file), and
+2 when the command line itself was wrong.";
 
 const VERSION: &str = concat!("mossaic ", env!("CARGO_PKG_VERSION"));
 
@@ -85,6 +94,9 @@ struct Invocation {
     options: Options,
     /// Render to a file and exit, instead of running the chart.
     png: Option<String>,
+    /// Whether `--palette` was given. An image is in the default palette
+    /// unless it was: a file should not change colour with the calendar.
+    palette_typed: bool,
 }
 
 fn main() {
@@ -108,22 +120,8 @@ fn main() {
     // try_init rather than init/run so a non-tty (a pipe, CI) gets a readable
     // message instead of a panic. It still installs the terminal-restoring hook.
     let mut terminal = ratatui::try_init().unwrap_or_else(|error| {
-        // With a terminal, a `--file` that cannot be read is shown *in* the
-        // chart, with `r` to retry — better than exiting, because the fix is
-        // usually to write the file in another pane. Without one there is no
-        // chart to show it in, and reporting only the missing terminal names
-        // the wrong problem: a typo'd path in a script used to come back as
-        // "needs an interactive terminal", which is true and useless.
-        if let Source::File(path) = &source {
-            if !Path::new(path).is_file() {
-                fail(&format!(
-                    "no calendar file at {path}\n\n  \
-                     mossaic-art TEXT --snapshot FILE   write one\n  \
-                     mossaic --demo                     a sample year instead"
-                ));
-            }
-        }
-        fail(&format!("needs an interactive terminal ({error})"))
+        name_a_missing_file(&source);
+        die(&format!("needs an interactive terminal ({error})"))
     });
 
     // Ask now: raw mode is on, so the replies come back unbuffered and unechoed,
@@ -203,7 +201,13 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
             dirty = false;
         }
 
-        if event::poll(TICK)? {
+        // The wheel waits to settle before it fetches, and the wait is
+        // measured from here: polling a whole tick past it would add up to
+        // 80 ms to every year the wheel lands on.
+        let wait = app.deadline().map_or(TICK, |at| {
+            at.saturating_duration_since(Instant::now()).min(TICK)
+        });
+        if event::poll(wait)? {
             // Drain the queue rather than taking one event per frame: motion
             // reports arrive in floods, and answering them one frame at a time
             // leaves the tooltip trailing several cells behind the pointer.
@@ -397,7 +401,14 @@ fn parse_args() -> Option<Invocation> {
                 };
                 fail(&format!("unknown option {other:?}{hint}"))
             }
-            other => login = Some(other.to_string()),
+            // One chart, one login. `mossaic --file nope.json alice bob` charted
+            // bob and said nothing about alice.
+            other => match &login {
+                Some(first) => fail(&format!(
+                    "one login at a time — got {first:?} and {other:?}"
+                )),
+                None => login = Some(other.to_string()),
+            },
         }
     }
 
@@ -413,14 +424,36 @@ fn parse_args() -> Option<Invocation> {
         fail("--demo makes a year up and --file reads one — pick one");
     }
 
+    // Before anything slow: a chart written into a file is escape codes in the
+    // file and a blank terminal, and asking `gh` first only delays saying so.
+    if png.is_none() && !io::stdout().is_terminal() {
+        name_a_missing_file(&file.clone().map_or(Source::GitHub, Source::File));
+        die("stdout is not a terminal — use --png FILE for an image");
+    }
+
+    // `--today` is what "this year" means, as it is for everything else. The
+    // clock's year made `mossaic octocat --today 2025-03-01` show 2026 as a year
+    // that had not started.
+    let this_year = options
+        .today
+        .unwrap_or_else(|| Local::now().date_naive())
+        .year();
+    let palette_typed = args.was_typed("--palette");
+
     // The demo makes its own year up, so it needs no account and no network.
+    // Last year by default, because a year still running is half empty — but
+    // `--today` asks for a year read as of a day, so that is the year it gets.
     if demo {
         return Some(Invocation {
             login: login.unwrap_or_else(|| "demo".to_string()),
-            year: year.unwrap_or_else(|| Local::now().year() - 1),
+            year: year.unwrap_or_else(|| match options.today {
+                Some(today) => today.year(),
+                None => this_year - 1,
+            }),
             source: Source::Demo,
             options,
             png,
+            palette_typed,
         });
     }
 
@@ -428,54 +461,94 @@ fn parse_args() -> Option<Invocation> {
     if let Some(path) = file {
         return Some(Invocation {
             login: login.unwrap_or_else(|| "preview".to_string()),
-            year: year.unwrap_or_else(|| Local::now().year()),
+            year: year.unwrap_or(this_year),
             source: Source::File(path),
             options,
             png,
+            palette_typed,
         });
     }
 
-    let login = login.or_else(github::whoami).unwrap_or_else(|| {
-        fail(
-            "could not detect a GitHub user.\n\n  \
-             mossaic <username>  chart someone by name\n  \
-             mossaic --demo      see what it looks like first\n  \
-             gh auth login       authenticate, then just `mossaic`",
-        )
-    });
+    let login = login.unwrap_or_else(signed_in_user);
     Some(Invocation {
         login,
-        year: year.unwrap_or_else(|| Local::now().year()),
+        year: year.unwrap_or(this_year),
         source: Source::GitHub,
         options,
         png,
+        palette_typed,
     })
+}
+
+/// Whoever `gh` is signed in as, or an exit that says why there is nobody —
+/// and only then suggests `gh auth login`.
+fn signed_in_user() -> String {
+    // `gh` can take half a minute to give up behind a proxy that never
+    // answers, and nothing said what was being waited for.
+    eprintln!("mossaic: asking gh who you are…");
+    github::whoami().unwrap_or_else(|why| {
+        let next = match why {
+            // NO_GH already says to install it and sign in.
+            NoUser::NoGh => "",
+            NoUser::SignedOut(_) => "\n  gh auth login       sign in, then just `mossaic`",
+            // A token that may not read the user can still read a calendar —
+            // `GITHUB_TOKEN` in Actions is exactly that.
+            NoUser::Failed(_) => "\n  mossaic <username>  chart someone by name",
+        };
+        die(&format!(
+            "could not detect a GitHub user: {why}\n{next}\n  \
+             mossaic --demo      see what it looks like first"
+        ))
+    })
+}
+
+/// With a terminal, a `--file` that cannot be read is shown *in* the chart,
+/// with `r` to retry — better than exiting, because the fix is usually to
+/// write the file in another pane. Without one there is no chart to show it
+/// in, and reporting only the missing terminal names the wrong problem: a
+/// typo'd path in a script used to come back as "needs an interactive
+/// terminal", which is true and useless. So the file is named first.
+fn name_a_missing_file(source: &Source) {
+    if let Source::File(path) = source {
+        if !Path::new(path).is_file() {
+            die(&format!(
+                "no calendar file at {path}\n\n  \
+                 mossaic-art TEXT --snapshot FILE   write one\n  \
+                 mossaic --demo                     a sample year instead"
+            ));
+        }
+    }
 }
 
 /// The chart as a file, for a terminal that draws no pixels — and for a README.
 /// The rasteriser is the same one the protocols feed from, so this is what they
 /// would have drawn, not an approximation of it.
 fn write_png(invocation: &Invocation, path: &str) {
+    let today = invocation.options.today;
     let calendar = match &invocation.source {
         Source::GitHub => github::fetch(
             &invocation.login,
             invocation.year,
-            invocation
-                .options
-                .today
-                .unwrap_or_else(|| Local::now().date_naive()),
+            today.unwrap_or_else(|| Local::now().date_naive()),
         ),
-        Source::File(file) => github::from_file(file, invocation.options.today),
-        Source::Demo => Ok(mossaic::calendar::demo(invocation.year)),
+        Source::File(file) => github::from_file(file, today),
+        Source::Demo => Ok(mossaic::calendar::demo_as_of(invocation.year, today)),
     }
-    .unwrap_or_else(|error| fail(&error));
+    .unwrap_or_else(|error| die(&error));
 
+    // An image is a file, and a file should not change colour with the date it
+    // was made on: README's own hero command came out orange in the last week
+    // of October. `--palette auto` still asks for the season, `--today`'s.
+    let season = match invocation.options.season {
+        Some(season) => season,
+        None if invocation.palette_typed => {
+            Season::on(today.unwrap_or_else(|| Local::now().date_naive()))
+        }
+        None => Season::Default,
+    };
     let palette = Palette::new(
         invocation.options.appearance.unwrap_or(Appearance::Dark),
-        invocation
-            .options
-            .season
-            .unwrap_or_else(|| Season::on(Local::now().date_naive())),
+        season,
         true,
     );
     // No terminal to ask, so a readable default: a cell about twice as tall as
@@ -497,17 +570,32 @@ fn write_png(invocation: &Invocation, path: &str) {
     // — it wrote one anyway and called it success, so no viewer could open it. The
     // chart says this in words rather than drawing nothing; so does this.
     if calendar.weeks.is_empty() {
-        fail(&format!(
+        die(&format!(
             "no contribution data for {} — nothing to draw",
             calendar.year
         ));
     }
 
     let image = graphics::grid(&levels, &palette, cell);
-    png::write(std::path::Path::new(path), &image, palette.canvas)
-        .unwrap_or_else(|error| fail(&format!("could not write {path}: {error}")));
-    println!(
-        "wrote {path} — {}x{} px, {} {} at {}x{} per cell",
+    let bytes = png::encode(&image, palette.canvas);
+    // `-` is stdout, as it is to every other tool: it used to write a file
+    // called `-`. The status line goes to stderr either way, so that
+    // `--png /dev/stdout > chart.png` is not a PNG with a sentence in it.
+    let wrote = if path == "-" {
+        let mut out = io::stdout().lock();
+        match out.write_all(&bytes).and_then(|()| out.flush()) {
+            Ok(()) => "the PNG to stdout".to_string(),
+            // The reader took what it wanted and hung up, as `| head` does.
+            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => std::process::exit(0),
+            Err(error) => die(&format!("could not write the PNG to stdout: {error}")),
+        }
+    } else {
+        std::fs::write(path, &bytes)
+            .unwrap_or_else(|error| die(&format!("could not write {path}: {error}")));
+        path.to_string()
+    };
+    eprintln!(
+        "wrote {wrote} — {}x{} px, {} {} at {}x{} per cell",
         image.width, image.height, calendar.login, calendar.year, cell.0, cell.1
     );
 }
@@ -530,7 +618,15 @@ fn parse_cell(raw: &str) -> (u16, u16) {
         })
 }
 
+/// The command line was wrong: exit 2, as a shell expects for misuse.
 fn fail(message: &str) -> ! {
     eprintln!("mossaic: {message}");
     std::process::exit(2);
+}
+
+/// Something failed while doing what was asked — `gh`, the network, a file:
+/// exit 1. Both used to be 2, so a script could not tell a typo from an outage.
+fn die(message: &str) -> ! {
+    eprintln!("mossaic: {message}");
+    std::process::exit(1);
 }

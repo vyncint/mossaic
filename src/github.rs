@@ -62,16 +62,62 @@ pub fn from_file(path: &str, now: Option<NaiveDate>) -> Result<Calendar, String>
 }
 
 /// The authenticated user, used as the default when no username is given.
-pub fn whoami() -> Option<String> {
+///
+/// # Errors
+///
+/// Why `gh` could not say. This used to be an `Option`, and the one message a
+/// bare `mossaic` could then print told everyone to `gh auth login` — someone
+/// without `gh` installed was sent to "command not found", and someone behind
+/// a broken proxy to an account that was signed in all along.
+pub fn whoami() -> Result<String, NoUser> {
     let out = Command::new("gh")
         .args(["api", "user", "--jq", ".login"])
         .output()
-        .ok()?;
+        .map_err(|e| match e.kind() {
+            ErrorKind::NotFound => NoUser::NoGh,
+            _ => NoUser::Failed(format!("could not run gh: {e}")),
+        })?;
+    let stderr = crate::printable(String::from_utf8_lossy(&out.stderr).trim());
     if !out.status.success() {
-        return None;
+        // 4 is gh's documented "authentication required" (`gh help
+        // exit-codes`); the wording is the fallback for a gh old enough to
+        // exit 1 instead.
+        if out.status.code() == Some(4) || stderr.contains("gh auth login") {
+            return Err(NoUser::SignedOut(stderr));
+        }
+        return Err(NoUser::Failed(if stderr.is_empty() {
+            format!("gh exited with {} and no output", out.status)
+        } else {
+            stderr
+        }));
     }
-    let login = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!login.is_empty()).then_some(login)
+    let login = crate::printable(String::from_utf8_lossy(&out.stdout).trim());
+    if login.is_empty() {
+        return Err(NoUser::Failed("gh answered with no login".to_string()));
+    }
+    Ok(login)
+}
+
+/// Why [`whoami`] has no answer — each one wants a different next step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoUser {
+    /// `gh` is not on `PATH`.
+    NoGh,
+    /// `gh` ran and says nobody is signed in, in its own words.
+    SignedOut(String),
+    /// Anything else — offline, a proxy, a token that may not read the user —
+    /// in `gh`'s own words.
+    Failed(String),
+}
+
+impl std::fmt::Display for NoUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoGh => f.write_str(NO_GH),
+            Self::SignedOut(message) if message.is_empty() => f.write_str("gh is not signed in"),
+            Self::SignedOut(message) | Self::Failed(message) => f.write_str(message),
+        }
+    }
 }
 
 fn run_query(vars: &[(&str, &str)]) -> Result<String, String> {

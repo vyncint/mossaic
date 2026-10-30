@@ -673,7 +673,7 @@ fn stats_match_the_underlying_days() {
 fn live() {
     let year = chrono::Local::now().year();
     let today = chrono::Local::now().date_naive();
-    let login = crate::github::whoami().expect("gh is not authenticated");
+    let login = crate::github::whoami().expect("gh knows who is signed in");
     let calendar = crate::github::fetch(&login, year, today).expect("fetch failed");
 
     let days: Vec<_> = calendar.days().collect();
@@ -2463,6 +2463,11 @@ fn control_characters_never_leave_the_parser() {
 
     assert_eq!(crate::printable("a\u{1b}[31mb\u{7}c"), "a[31mbc");
     assert_eq!(crate::printable("héllo ✓"), "héllo ✓", "text is left alone");
+    // A line break is a space, not nothing: gh's two-line errors ran together.
+    assert_eq!(
+        crate::printable("please run:  gh auth login\nAlternatively,\tthis\r"),
+        "please run:  gh auth login Alternatively, this"
+    );
 }
 
 /// The header counts what happened, not what the year will hold.
@@ -4831,4 +4836,81 @@ fn a_cleaner_placement_beats_a_later_one() {
         "even though that means a column that has already begun — \
          fewer holes beats sooner, got week {week}"
     );
+}
+
+/// `gh`'s errors are long, and the failure was one line: the cause was cut at
+/// the border, mid-address (#133). Every word of it has to be on screen.
+#[test]
+fn a_long_failure_wraps_instead_of_running_off_the_edge() {
+    let mut app = App::new("octocat".into(), 2025, crate::app::Source::GitHub);
+    let message = "Post \"https://api.github.com/graphql\": proxyconnect tcp: dial tcp \
+                   127.0.0.1:3128: connect: connection refused";
+    app.load = Load::Failed(message.into());
+    let screen = render(&mut app, 60, 14);
+    let text: String = screen
+        .lines()
+        .map(|line| line.trim_matches(|c: char| c == '"' || c == '│' || c == ' '))
+        .collect::<Vec<_>>()
+        .join(" ");
+    for word in message.split(' ') {
+        assert!(text.contains(word), "{word:?} is missing:\n{screen}");
+    }
+    assert!(
+        screen.contains("r retry"),
+        "and the way out is still there:\n{screen}"
+    );
+}
+
+/// `--demo --today 2025-06-01` drew and counted every day after June 1st
+/// (#136). The days before are the same days, shaded the same way: moving
+/// `--today` uncovers the sample year rather than inventing another.
+#[test]
+fn the_demo_read_as_of_a_day_leaves_the_rest_to_come() {
+    let today = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+    let whole = crate::calendar::demo(2025);
+    let part = crate::calendar::demo_as_of(2025, Some(today));
+
+    for (all, some) in whole.days().zip(part.days()) {
+        assert_eq!(all.date, some.date);
+        if all.date <= today {
+            assert_eq!((all.count, all.level), (some.count, some.level));
+            assert!(!some.future, "{} has happened", some.date);
+        } else {
+            assert!(some.future, "{} is still to come", some.date);
+            assert_eq!((some.count, some.level), (0, 0));
+        }
+    }
+    assert_eq!(
+        part.total,
+        part.days().map(|day| day.count).sum::<u32>(),
+        "the total counts only what has happened"
+    );
+    assert!(part.total < whole.total);
+    let stats = part.stats(today);
+    assert!(stats.best.is_some_and(|(date, _)| date <= today));
+}
+
+/// `--today` decides the season as well as the year (#136). The palette came
+/// from the wall clock, so a chart read as of June came out orange whenever it
+/// was run in the last week of October.
+#[test]
+fn the_season_follows_today_not_the_clock() {
+    use crate::app::Options;
+    use crate::primer::Season;
+
+    for (today, season) in [
+        ((2026, 6, 1), Season::Default),
+        ((2026, 10, 28), Season::Halloween),
+        ((2026, 12, 21), Season::Winter),
+    ] {
+        let mut app = App::new("octocat".into(), 2026, crate::app::Source::Demo);
+        app.configure(
+            crate::term::Caps::default(),
+            Options {
+                today: NaiveDate::from_ymd_opt(today.0, today.1, today.2),
+                ..Options::default()
+            },
+        );
+        assert_eq!(app.palette.season, season, "as of {today:?}");
+    }
 }
