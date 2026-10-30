@@ -192,11 +192,13 @@ mossaic --file saved.json        # a saved calendar, no network
 ```sh
 mossaic --capabilities           # what your terminal can draw
 mossaic --png chart.png          # the chart as an image, from any terminal
+mossaic --demo --png - > c.png   # `-` is stdout; the status line goes to stderr
 mossaic --graphics sixel         # force a protocol, or `text` for no pixels
 mossaic --cell 10x20             # when the terminal will not say how big a cell is
-mossaic --today 2027-06-30       # read the year as of a day, not the clock
+mossaic --today 2027-06-30       # read the year as of a day — its year, its season
 mossaic --theme light            # instead of following the terminal's background
-mossaic --palette winter         # GitHub's own seasonal colours
+mossaic --palette winter         # GitHub's own seasonal colours (a --png is
+                                 # in the default ones unless you name one)
 mossaic --no-mouse               # leave mouse reporting alone
 ```
 
@@ -212,6 +214,10 @@ mossaic-glyphs                                   # this terminal's fallback cell
 
 From a checkout, `cargo run -- …` and `cargo run --bin mossaic-art -- …` are
 the same commands.
+
+`mossaic` exits 0 when it worked, 1 when something failed along the way — `gh`,
+the network, a file, a stdout that is not a terminal — and 2 when the command
+line itself was wrong.
 
 ## What you can draw
 

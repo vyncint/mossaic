@@ -153,8 +153,19 @@ impl Colour {
 /// control characters when it fills a cell, but the paths that print straight
 /// to stdout (`--png`, `--track`, error messages) do not, so untrusted text is
 /// cleaned where it enters rather than at each of them.
+///
+/// Line breaks and tabs become spaces rather than vanishing: `gh` writes its
+/// errors over several lines, and dropping the break ran them together into
+/// `…please run:  gh auth loginAlternatively, populate…`. A space is as inert
+/// as nothing at all, so the filter loses none of its point.
 pub fn printable(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
+    text.chars()
+        .filter_map(|c| match c {
+            '\n' | '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
 }
 
 /// A count with thousands separators, the way github.com writes one.

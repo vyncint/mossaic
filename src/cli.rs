@@ -22,7 +22,9 @@ pub const YEARS: RangeInclusive<i32> = 2000..=2100;
 #[derive(Debug)]
 pub struct Args {
     program: &'static str,
-    rest: VecDeque<String>,
+    /// Each argument still to read, and whether it arrived glued to its option
+    /// as `--key=value` — which makes it a value whatever it looks like.
+    rest: VecDeque<(String, bool)>,
     /// Long options that were actually typed, so a saved plan or a config can
     /// fill in the rest without overriding them.
     typed: Vec<String>,
@@ -45,9 +47,9 @@ impl Args {
                 // Only long options split, so a path or a name containing `=`
                 // is left alone.
                 Some((key, value)) if key.starts_with("--") => {
-                    vec![key.to_string(), value.to_string()]
+                    vec![(key.to_string(), false), (value.to_string(), true)]
                 }
-                _ => vec![arg],
+                _ => vec![(arg, false)],
             })
             .collect();
         Self {
@@ -65,10 +67,10 @@ impl Args {
     /// end-of-options: after it, [`Args::is_positional`] is true of
     /// everything, so an argument that looks like a flag is text.
     pub fn next_arg(&mut self) -> Option<String> {
-        let arg = self.rest.pop_front()?;
-        if arg == "--" && !self.end_of_options {
+        let (arg, attached) = self.rest.pop_front()?;
+        if arg == "--" && !attached && !self.end_of_options {
             self.end_of_options = true;
-            return self.rest.pop_front();
+            return self.rest.pop_front().map(|(arg, _)| arg);
         }
         Some(arg)
     }
@@ -104,15 +106,38 @@ impl Args {
     pub fn peek_value(&self) -> bool {
         self.rest
             .front()
-            .is_some_and(|next| self.end_of_options || !next.starts_with('-'))
+            .is_some_and(|(next, _)| self.end_of_options || !next.starts_with('-'))
     }
 
     /// The value belonging to `flag`, or a readable exit.
+    ///
+    /// An argument that looks like an option is refused rather than taken:
+    /// `mossaic --png --demo` used to fetch the signed-in user's real calendar
+    /// and write it to a file called `--demo`, and `--file --demo` reported
+    /// "no calendar file at --demo" — each a typo turned into something that
+    /// ran. A value that really does start with a dash can still be given as
+    /// `--png=-x.png`, or after a bare `--`. A lone `-` is not an option (it is
+    /// stdout, or a glyph), and neither is a negative number, which the bounded
+    /// readers below turn into a better message than this one.
     pub fn value(&mut self, flag: &str) -> String {
         self.remember(flag);
-        self.rest
-            .pop_front()
-            .unwrap_or_else(|| self.fail(&format!("{flag} needs a value")))
+        let Some((mut value, mut attached)) = self.rest.pop_front() else {
+            self.fail(&format!("{flag} needs a value"))
+        };
+        if value == "--" && !attached && !self.end_of_options {
+            self.end_of_options = true;
+            (value, attached) = self
+                .rest
+                .pop_front()
+                .unwrap_or_else(|| self.fail(&format!("{flag} needs a value")));
+        }
+        if !attached && !self.end_of_options && looks_like_option(&value) {
+            self.fail(&format!(
+                "{flag} needs a value; {value:?} looks like an option \
+                 (write {flag}={value} if that is the value)"
+            ));
+        }
+        value
     }
 
     /// The same, as a number.
@@ -185,6 +210,12 @@ impl Args {
     }
 }
 
+/// Whether an argument read where a value was expected is really the next
+/// option. A lone `-` and a negative number are values.
+fn looks_like_option(arg: &str) -> bool {
+    arg.starts_with('-') && arg != "-" && arg.parse::<f64>().is_err()
+}
+
 #[cfg(test)]
 mod tests {
     use super::Args;
@@ -216,6 +247,36 @@ mod tests {
         let mut bare = args(&["--track", "--year", "2027"]);
         bare.next_arg();
         assert!(!bare.peek_value(), "a flag is not a value");
+    }
+
+    /// The refusal itself exits, so it is asserted from outside
+    /// (`tests/chart_cli.rs`); this is the other half — what is still a value.
+    #[test]
+    fn a_value_may_be_a_dash_a_negative_number_or_glued_on() {
+        let mut parsed = args(&["--png", "-", "--top", "-1", "--png=-x.png"]);
+        parsed.next_arg();
+        assert_eq!(parsed.value("--png"), "-", "a lone dash is stdout");
+        parsed.next_arg();
+        assert_eq!(parsed.value("--top"), "-1", "for the range check to refuse");
+        parsed.next_arg();
+        assert_eq!(parsed.value("--png"), "-x.png", "`=` says it is the value");
+
+        // And `--` hands over whatever follows, as it does everywhere else.
+        let mut escaped = args(&["--png", "--", "--demo"]);
+        escaped.next_arg();
+        assert_eq!(escaped.value("--png"), "--demo");
+        assert!(escaped.past_end_of_options());
+
+        // A glued-on `--` is a value, not the end of options.
+        let mut glued = args(&["--name=--", "x"]);
+        glued.next_arg();
+        assert_eq!(glued.value("--name"), "--");
+        assert!(!glued.past_end_of_options());
+
+        assert!(super::looks_like_option("--demo"));
+        assert!(super::looks_like_option("-y"));
+        assert!(!super::looks_like_option("-"));
+        assert!(!super::looks_like_option("-5"));
     }
 
     #[test]

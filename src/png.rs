@@ -14,6 +14,13 @@ use crate::primer::Rgb;
 /// Write `image` composited over `background`, since a chart on a transparent
 /// canvas looks like a checkerboard in most viewers.
 pub fn write(path: &Path, image: &Image, background: Rgb) -> io::Result<()> {
+    std::fs::write(path, encode(image, background))
+}
+
+/// The PNG [`write()`] writes, as bytes — for stdout, or anywhere else that is
+/// not a path.
+#[must_use]
+pub fn encode(image: &Image, background: Rgb) -> Vec<u8> {
     let (width, height) = (image.width, image.height);
     let mut raw = Vec::with_capacity(height * (1 + width * 3));
     for y in 0..height {
@@ -42,7 +49,7 @@ pub fn write(path: &Path, image: &Image, background: Rgb) -> io::Result<()> {
         &miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6),
     );
     chunk(&mut out, b"IEND", &[]);
-    std::fs::write(path, out)
+    out
 }
 
 fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {

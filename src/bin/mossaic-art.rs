@@ -1068,7 +1068,7 @@ fn observed(options: &Options, grid: &Grid) -> (String, BTreeMap<NaiveDate, u32>
             let who = options
                 .tracking
                 .clone()
-                .or_else(github::whoami)
+                .or_else(|| github::whoami().ok())
                 .map(|who| mossaic::printable(&who))
                 .unwrap_or_else(|| {
                     fail("could not tell whose contributions to track — pass `--track USER`, or run `gh auth login`")

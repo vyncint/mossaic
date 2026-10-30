@@ -230,6 +230,18 @@ impl Calendar {
 /// way real ones do, because a demo of a contribution chart that looks nothing
 /// like a contribution chart demonstrates the wrong thing.
 pub fn demo(year: i32) -> Calendar {
+    demo_as_of(year, None)
+}
+
+/// The same sample year, read as of `today`: the days after it are still to
+/// come, drawn empty and left out of the total, the way a real year is.
+/// `None` is every day elapsed — the demo's default year is last year, which
+/// has finished.
+///
+/// The days before `today` are the same days [`demo`] draws. Shading is still
+/// measured against the whole year, so moving `--today` uncovers a picture
+/// rather than reshading one.
+pub fn demo_as_of(year: i32, today: Option<NaiveDate>) -> Calendar {
     // A year no calendar can hold gets an empty one rather than a panic. Not
     // reachable from either CLI — `cli::year` bounds it — but this is a public
     // constructor, and the others in this module stopped panicking on their
@@ -268,20 +280,26 @@ pub fn demo(year: i32) -> Calendar {
         .max()
         .unwrap_or(1)
         .max(1);
+    let future = |date: NaiveDate| today.is_some_and(|today| date > today);
     let total = counts
         .iter()
+        .filter(|(date, _)| !future(*date))
         .fold(0u32, |sum, (_, count)| sum.saturating_add(*count));
     let days = counts
         .into_iter()
         .map(|(date, count)| Day {
             date,
-            count,
+            count: if future(date) { 0 } else { count },
             // GitHub's own shading, from the one place that implements it. A
             // second copy here would be a second thing to change when GitHub
             // restyles the graph, in a crate whose whole point is agreeing
             // with github.com.
-            level: crate::art::level(count, peak),
-            future: false,
+            level: if future(date) {
+                0
+            } else {
+                crate::art::level(count, peak)
+            },
+            future: future(date),
         })
         .collect();
     Calendar::build("demo".to_string(), year, total, vec![year], days)

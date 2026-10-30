@@ -2479,7 +2479,8 @@ fn a_file_the_user_named_is_not_blamed_on_gh() {
             .output()
             .expect("the chart binary runs");
         let text = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(out.status.code(), Some(2), "{label}: {text}");
+        // 1: the command line was fine, the file was not (#138).
+        assert_eq!(out.status.code(), Some(1), "{label}: {text}");
         assert!(text.contains(named), "{label}: the path is named\n{text}");
         assert!(
             !text.contains("gh"),

@@ -9,7 +9,54 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bare `mossaic` blamed sign-in for every way `gh` can fail** (#133).
+  Without `gh` installed it now says so, and how to install it; only when
+  `gh` says nobody is signed in does it suggest `gh auth login`; anything
+  else — offline, a proxy — passes `gh`'s own message through. It says
+  `asking gh who you are…` on stderr before the call, which behind a proxy
+  that never answers can take half a minute. `gh`'s multi-line errors no
+  longer run together (`…gh auth loginAlternatively…`): line breaks become
+  spaces. A failure in the chart wraps instead of being cut off at the edge.
+- **`--png -` wrote a file called `-`** (#134). It now writes the PNG to
+  stdout, and the `wrote …` status line always goes to stderr, so
+  `--png /dev/stdout > chart.png` is a PNG rather than a PNG with a sentence
+  in it. The `-` file that had been committed at the repository root since
+  0.7.0, and shipped in the crate, is gone.
+- **An option that takes a value swallowed the next flag** (#135).
+  `mossaic --png --demo` fetched your real calendar into a file named
+  `--demo`; it is now `--png needs a value; "--demo" looks like an option`.
+  A value that really starts with a dash can be glued on (`--png=-x.png`);
+  a lone `-` and a negative number are still values. This applies to
+  `mossaic-art` and `mossaic-glyphs` too. A second login
+  (`mossaic alice bob`) is refused rather than silently charting `bob`.
+- **`--today` did not decide the year or the palette** (#136). The default
+  year is now `--today`'s, so `mossaic octocat --today 2025-03-01` shows
+  2025; the seasonal palette follows `--today` rather than the wall clock;
+  and `--demo --today` shows `--today`'s year with the days after it still
+  to come, instead of drawing and counting all of them. `--png` uses the
+  default palette unless `--palette` is given, so an image no longer comes
+  out orange in the last week of October — README's own hero command
+  reproduces `art/pixel-cells.png` byte for byte again.
+- **Every scroll-wheel step fetched a year from GitHub** (#137). A trackpad
+  flick of six steps sent six GraphQL requests; the wheel now waits 150 ms
+  after its last step before fetching, and a year already fetched this
+  session is shown from memory. `r` still fetches again.
+- **`mossaic > out.bin` drew into the file** (#138), leaving a blank terminal
+  and kilobytes of escape codes. A stdout that is not a terminal is now
+  refused, pointing at `--png FILE`. `kill -QUIT` restores the terminal as
+  `INT`, `TERM` and `HUP` already did. `--help`'s key list gains `u`,
+  `Home` and `End`.
+
 ### Changed
+
+- **`mossaic` exits 1 when something fails, and 2 only for a wrong command
+  line** (#138). Network errors, an unknown user, an unreadable `--file` and
+  a PNG that could not be written all used to exit 2, the same as a typo.
+- **`github::whoami` returns `Result<String, NoUser>`** instead of an
+  `Option` (#133), so a caller can tell a missing `gh` from a signed-out one.
+  `calendar::demo_as_of` and `png::encode` are new.
 
 - **termlens 0.11** for the PTY suite, and the vendored skill with it. 0.11
   is termlens's stability candidate: from it no promised item changes

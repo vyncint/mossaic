@@ -38,7 +38,7 @@ miniz_oxide = "0.9"
 # O_NONBLOCK, to read the terminal's capability replies without blocking on a
 # terminal that never answers. One constant, no unsafe.
 libc = "0.2"
-# Restoring the terminal on SIGINT/SIGTERM/SIGHUP without an unsafe
+# Restoring the terminal on SIGINT/SIGTERM/SIGHUP/SIGQUIT without an unsafe
 # `sigaction`. Unix-only by nature — Windows has no POSIX signals — and
 # already in the tree at this version, since crossterm pulls it through
 # ratatui for its event stream.
