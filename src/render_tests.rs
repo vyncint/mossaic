@@ -1195,9 +1195,11 @@ fn an_unknown_background_leaves_the_text_to_the_terminal() {
         "muted text stays a step down"
     );
     // The cells keep their colours: they carry them on either background.
+    // Truecolour or the 256-colour ramp, by `COLORTERM` — either is a colour
+    // of the cell's own, which is the point.
     assert!(matches!(
         style_of(&unknown, "\u{1FB2B}").fg,
-        Some(Color::Rgb(..))
+        Some(Color::Rgb(..) | Color::Indexed(..))
     ));
     // And the overlay says what to do about it.
     let help = draw(None, None, true);
@@ -1207,16 +1209,18 @@ fn an_unknown_background_leaves_the_text_to_the_terminal() {
         "the overlay should offer --theme light"
     );
 
-    // Reported, or asked for, and the theme's own colours are back.
+    // Reported, or asked for, and the theme's own colours are back — in the
+    // form this terminal takes them, truecolour or the 256-colour ramp.
+    let truecolor = crate::primer::Palette::truecolor_env();
     let light = draw(Some(Rgb::hex(0xffffff)), None, false);
     assert_eq!(
         style_of(&light, "octocat").fg,
-        Some(Color::Rgb(0x1f, 0x23, 0x28))
+        Some(Rgb::hex(0x1f2328).ansi(truecolor))
     );
     let dark = draw(None, Some(Appearance::Dark), false);
     assert_eq!(
         style_of(&dark, "octocat").fg,
-        Some(Color::Rgb(0xf0, 0xf6, 0xfc))
+        Some(Rgb::hex(0xf0f6fc).ansi(truecolor))
     );
     let help = draw(Some(Rgb::hex(0xffffff)), None, true);
     let text: String = help.content().iter().map(|cell| cell.symbol()).collect();
