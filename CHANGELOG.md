@@ -9,6 +9,8 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-30
+
 ### Added
 
 - **`--cells STYLE`** (#142): start the chart in a cell style — `auto`,
@@ -1405,7 +1407,8 @@ there was none.
 
 [termlens]: https://github.com/vyncint/termlens
 
-[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/vyncint/mossaic/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/vyncint/mossaic/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/vyncint/mossaic/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/vyncint/mossaic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/vyncint/mossaic/compare/v0.6.3...v0.7.0
