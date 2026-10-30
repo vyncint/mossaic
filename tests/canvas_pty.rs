@@ -491,3 +491,108 @@ fn sigint_gives_the_terminal_back() -> termlens::Result<()> {
 fn sighup_gives_the_terminal_back() -> termlens::Result<()> {
     a_signal_gives_the_terminal_back(termlens::Signal::Hup, "Hangup")
 }
+
+// ------------------------------------------------------- colour
+
+/// The colour of the first cell on screen holding `glyph`.
+fn colour_of(screen: &Screen, glyph: char) -> Option<termlens::Color> {
+    let (row, col) = screen.find_by(|cell| cell.contents().contains(glyph))?;
+    Some(screen.cell(row, col)?.style().fg)
+}
+
+/// The editor and the glyph checker drew the dark theme in truecolour
+/// whatever the terminal was, while the chart beside them followed both
+/// `COLORTERM` and the background (#143).
+#[test]
+fn the_editor_paints_in_the_colours_the_chart_would_use() -> termlens::Result<()> {
+    let editor = |truecolor: bool, background: (u8, u8, u8)| {
+        let mut builder = Terminal::builder()
+            .size(SIZE.0, SIZE.1)
+            .env_clear()
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .timeout(Duration::from_secs(20))
+            .background_rgb(background.0, background.1, background.2)
+            .args(["--draw", "--year", "2027", "--plan", "/dev/null"]);
+        if truecolor {
+            builder = builder.env("COLORTERM", "truecolor");
+        }
+        builder.spawn(env!("CARGO_BIN_EXE_mossaic-art"))
+    };
+
+    // No COLORTERM: the chart's 256-colour ramp, empty day first.
+    let mut t = editor(false, (0, 0, 0))?;
+    let screen = t.wait_frame(ready)?;
+    assert_eq!(
+        colour_of(&screen, '█'),
+        Some(termlens::Color::Indexed(236)),
+        "{screen}"
+    );
+
+    // A white terminal: Primer's light theme, whose empty day is #eff2f5.
+    let mut t = editor(true, (0xff, 0xff, 0xff))?;
+    let screen = t.wait_frame(ready)?;
+    assert_eq!(
+        colour_of(&screen, '█'),
+        Some(termlens::Color::Rgb(0xef, 0xf2, 0xf5)),
+        "{screen}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_glyph_checker_shows_the_cells_the_chart_would_draw() -> termlens::Result<()> {
+    let glyphs = |truecolor: bool, background: (u8, u8, u8)| -> termlens::Result<Screen> {
+        let mut builder = Terminal::builder()
+            .size(SIZE.0, SIZE.1)
+            .env_clear()
+            .timeout(Duration::from_secs(20))
+            .background_rgb(background.0, background.1, background.2);
+        if truecolor {
+            builder = builder.env("COLORTERM", "truecolor");
+        }
+        let mut t = builder.spawn(env!("CARGO_BIN_EXE_mossaic-glyphs"))?;
+        assert!(t.wait_exit()?.success());
+        Ok(t.screen())
+    };
+    let rounded = '\u{1FB2B}';
+    assert_eq!(
+        colour_of(&glyphs(false, (0, 0, 0))?, rounded),
+        Some(termlens::Color::Indexed(236))
+    );
+    assert_eq!(
+        colour_of(&glyphs(true, (0xff, 0xff, 0xff))?, rounded),
+        Some(termlens::Color::Rgb(0xef, 0xf2, 0xf5)),
+        "a light terminal gets the light theme's empty day"
+    );
+    Ok(())
+}
+
+/// The editor asks the terminal what it is now, so it inherits the chart's
+/// problem with an answer that misses the probe: `11;rgb:0d0d/1111/1717`
+/// arrives as keys, and here digits paint (#140, #143).
+#[test]
+fn a_late_reply_does_not_paint_the_canvas() -> termlens::Result<()> {
+    let mut t = Terminal::builder()
+        .size(SIZE.0, SIZE.1)
+        .env_clear()
+        .env("COLORTERM", "truecolor")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .timeout(Duration::from_secs(20))
+        .answer_queries(false)
+        .args(["--draw", "--year", "2027", "--plan", "/dev/null"])
+        .spawn(env!("CARGO_BIN_EXE_mossaic-art"))?;
+    t.wait_frame(ready)?;
+    // Onto a day the year holds, so a paint would be counted.
+    t.send(Key::Char('l'))?;
+    t.send(Key::Char('l'))?;
+    t.wait_frame(|s| s.contains("Sun 10 Jan 2027"))?;
+
+    t.send_str("\x1b_Gi=7379;OK\x1b\\\x1b]11;rgb:0d0d/1111/1717\x1b\\")?;
+    t.send(Key::Char('j'))?;
+    let screen = t.wait_frame(|s| s.contains("Mon 11 Jan 2027"))?;
+    assert!(
+        screen.contains("brush 4") && !screen.contains("level 1     1 day"),
+        "the reply painted:\n{screen}"
+    );
+    Ok(())
+}

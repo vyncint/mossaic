@@ -61,6 +61,16 @@ listed under a **Changed** or **Removed** heading.
   pass `--cell WxH` — under the legend and in the help overlay — where before
   the hint appeared only for a forced `--graphics`, and the overlay suggested
   another terminal.
+- **The art editor and `mossaic-glyphs` always sent truecolour on a dark
+  theme** (#143). `env -u COLORTERM mossaic-glyphs --color always` wrote
+  `\e[38;2;21;27;35m`, so the checker for terminals without truecolour —
+  Terminal.app among them — showed colours the chart never draws there. Both
+  now take the chart's palette: the 256-colour ramp unless `COLORTERM` says
+  otherwise, and the light theme on a terminal that reports a light
+  background. To know that, `mossaic-art --draw` and an interactive
+  `mossaic-glyphs` now ask the terminal as the chart does, and the editor
+  drops a reply that arrives late rather than painting its digits.
+  `draw::palette_over` and `term::LateReplies` are new for library users.
 
 ### Changed
 

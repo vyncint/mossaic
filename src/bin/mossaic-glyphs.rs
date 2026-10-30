@@ -13,9 +13,12 @@
 //! None of this applies when the terminal draws pixels: `mossaic
 //! --capabilities` says whether yours does.
 
+use std::io::IsTerminal;
+
 use mossaic::cli::Args;
 use mossaic::primer::{Appearance, Palette, Rgb, Season};
 use mossaic::Colour;
+use ratatui::style::Color;
 
 const STYLES: [(&str, &str, &str); 3] = [
     (
@@ -71,28 +74,31 @@ fn main() {
         }
     }
 
+    // The colours the chart would use on this terminal, since this is the check
+    // for the terminals that differ: truecolour only where `COLORTERM` says so,
+    // the 256-colour ramp otherwise, and the theme of the background the
+    // terminal reports. It was always the dark theme in truecolour, so on
+    // Terminal.app it showed colours the chart never draws there (#143).
     let colourful = colour.enabled();
-    let palette = Palette::new(Appearance::Dark, Season::Default, true);
-    let paint = |glyph: &str, colour: Rgb| {
+    let background = colourful.then(background).flatten();
+    let palette = Palette::new(
+        background.map_or(Appearance::Dark, Appearance::from_background),
+        Season::Default,
+        Palette::truecolor_env(),
+    );
+    let paint = |glyph: &str, level: u8| {
         if !colourful {
             return glyph.to_string();
         }
-        format!(
-            "\x1b[38;2;{};{};{}m{glyph}\x1b[0m",
-            colour.0, colour.1, colour.2
-        )
+        format!("\x1b[{}m{glyph}\x1b[0m", foreground(palette.level(level)))
     };
 
     println!("Show the glyphs mossaic falls back to, to check what this terminal renders.\n");
     for (name, glyph, note) in STYLES {
-        let legend: Vec<String> = palette
-            .levels
-            .iter()
-            .map(|colour| paint(glyph, *colour))
-            .collect();
+        let legend: Vec<String> = (0..5).map(|level| paint(glyph, level)).collect();
         // A short stretch of cells, the way the chart draws them.
-        let run: Vec<String> = (0..12)
-            .map(|index| paint(glyph, palette.levels[(index * 7) % 5]))
+        let run: Vec<String> = (0..12u8)
+            .map(|index| paint(glyph, (index * 7) % 5))
             .collect();
         println!("  {name}  {}   {}", legend.join(" "), run.join(" "));
         println!("           {note}");
@@ -106,4 +112,29 @@ fn main() {
     println!("  If rounded looks wrong, everything else still works:");
     println!("    mossaic --cells squares    start in squares, or any row above");
     println!("    mossaic                    then press d to cycle styles");
+}
+
+/// The background the terminal reports, when there is a terminal on both ends
+/// to ask — never into a pipe, where the question would be written into
+/// somebody's file and nothing would answer it — and on unix, the only place
+/// the probe asks at all.
+fn background() -> Option<Rgb> {
+    use ratatui::crossterm::terminal;
+    if !cfg!(unix) || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return None;
+    }
+    // Raw mode, or the replies come back echoed and line-buffered.
+    terminal::enable_raw_mode().ok()?;
+    let caps = mossaic::term::probe(mossaic::term::TIMEOUT);
+    let _ = terminal::disable_raw_mode();
+    caps.background
+}
+
+/// The SGR parameters for a foreground colour, as [`Palette::level`] gives one.
+fn foreground(colour: Color) -> String {
+    match colour {
+        Color::Rgb(r, g, b) => format!("38;2;{r};{g};{b}"),
+        Color::Indexed(index) => format!("38;5;{index}"),
+        _ => "39".to_string(),
+    }
 }

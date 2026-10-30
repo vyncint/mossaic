@@ -445,9 +445,14 @@ fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
     // until 0.7.0 had neither a panic hook nor a signal handler — so both of
     // the exits nobody writes code for left the terminal borrowed.
     mossaic::restore::guard_terminal();
+    // Asked, as the chart asks, so the drawing is in the colours the chart
+    // would show it in on this terminal (#143). Raw mode is on, so the replies
+    // come back unechoed; one that misses the deadline is dropped below.
+    let caps = mossaic::term::probe(mossaic::term::TIMEOUT);
+    let palette = mossaic::draw::palette_over(caps.background);
+    let mut replies = mossaic::term::LateReplies::default();
     let mut out = std::io::stdout();
     let _ = execute!(out, EnableMouseCapture);
-    let palette = mossaic::draw::palette();
 
     let outcome = (|| -> std::io::Result<()> {
         loop {
@@ -473,6 +478,11 @@ fn run_editor(options: &Options, grid: &Grid, name: &str, canvas: art::Canvas) {
             let origin = mossaic::draw::grid_origin(body);
 
             match event::read()? {
+                // A late reply's `rgb:0d0d/…` would paint level 0 here; and no
+                // key the editor binds uses Alt, so Alt+`0` is not `0`.
+                Event::Key(key)
+                    if replies.swallow(key.code, key.modifiers)
+                        || key.modifiers.contains(KeyModifiers::ALT) => {}
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                     match editor.on_key(key.code, ctrl) {

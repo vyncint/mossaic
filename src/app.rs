@@ -3,7 +3,6 @@
 use std::io::{self, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::Instant;
 
 use chrono::{Duration, Local, NaiveDate};
 use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -12,7 +11,7 @@ use crate::calendar::Calendar;
 use crate::github;
 use crate::graphics::{Mark, Painter, Protocol, Ring, Scene, COLUMNS_PER_DAY};
 use crate::primer::{Appearance, Palette, Season};
-use crate::term::{self, Caps};
+use crate::term::{self, Caps, LateReplies};
 use crate::ui::{self, Cells, Layout};
 
 /// Where the calendar comes from.
@@ -245,9 +244,9 @@ pub struct App {
     /// Whether the theme is known — asked for with `--theme`, or read off the
     /// background the terminal reported — rather than assumed.
     appearance_known: bool,
-    /// When a late terminal reply began arriving as keys, and how many of its
-    /// keys have been swallowed since. See [`App::on_key`].
-    reply: Option<(Instant, usize)>,
+    /// Keys that are a late terminal reply rather than a person. See
+    /// [`App::on_key`].
+    replies: LateReplies,
     seq: u64,
     tx: Sender<Fetched>,
     rx: Receiver<Fetched>,
@@ -286,7 +285,7 @@ impl App {
             wanted: Graphics::Auto,
             cell_override: None,
             appearance_known: false,
-            reply: None,
+            replies: LateReplies::default(),
             seq: 0,
             tx,
             rx,
@@ -464,15 +463,12 @@ impl App {
 
     /// Handle a key press.
     ///
-    /// Not every key press is one. A terminal reply that arrives after the
-    /// probe stopped listening comes in on the keyboard's input, and crossterm
-    /// has no parser for `OSC` or `APC`: `ESC ] 11 ; rgb:0d0d/1111/1717 ESC \`
-    /// reaches here as Alt+`]` — "next year" — and then an `r` and two `d`s
-    /// (#140). So an Alt+`]`, Alt+`_` or Alt+`P` opens a reply, and what follows
-    /// it is swallowed up to its terminator, bounded in keys and in time so a
-    /// person who really typed Alt+`]` gets the keyboard back at once.
+    /// Not every key press is one: a terminal reply that arrives after the
+    /// probe stopped listening comes in on the keyboard's input, and its
+    /// `OSC 11` reached here as Alt+`]` — "next year" — and then an `r` and two
+    /// `d`s (#140). [`LateReplies`] drops those.
     pub fn on_key(&mut self, code: KeyCode, mods: KeyModifiers) {
-        if self.late_reply(code, mods) {
+        if self.replies.swallow(code, mods) {
             return;
         }
         if mods.contains(KeyModifiers::CONTROL) && matches!(code, KeyCode::Char('c' | 'd')) {
@@ -487,34 +483,6 @@ impl App {
             // not know arrived as a binding.
             self.on_key_normal(code);
         }
-    }
-
-    /// Whether this key belongs to a terminal reply rather than to a person.
-    fn late_reply(&mut self, code: KeyCode, mods: KeyModifiers) -> bool {
-        /// A reply is one write, so its keys arrive together; this is slack for
-        /// one split across packets on a slow link, and short enough that a
-        /// person never notices the keyboard was not listening.
-        const WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
-        /// The longest reply asked for is a kitty error message, well under this.
-        const KEYS: usize = 128;
-
-        let alt = mods.contains(KeyModifiers::ALT);
-        if let Some((since, keys)) = self.reply {
-            if since.elapsed() < WINDOW && keys < KEYS {
-                // `ESC \` (ST) or BEL, which crossterm reports as Ctrl+G.
-                let end = (alt && code == KeyCode::Char('\\'))
-                    || (mods.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('g'));
-                self.reply = (!end).then_some((since, keys + 1));
-                return true;
-            }
-            self.reply = None;
-        }
-        // `ESC ]` opens an OSC, `ESC _` an APC, `ESC P` a DCS.
-        if alt && matches!(code, KeyCode::Char(']' | '_' | 'P')) {
-            self.reply = Some((Instant::now(), 0));
-            return true;
-        }
-        false
     }
 
     fn on_key_normal(&mut self, code: KeyCode) {
