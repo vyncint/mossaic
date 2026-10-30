@@ -23,7 +23,9 @@ jobs:
           year: "2027"
           start-week: "6" # keep this fixed: the plan is these inputs
           timezone: Asia/Ho_Chi_Minh
-      - run: echo "${{ steps.art.outputs.headline }}"
+      - env:
+          HEADLINE: ${{ steps.art.outputs.headline }}
+        run: echo "$HEADLINE"
 ```
 
 No `actions/checkout` needed — the action queries the API, it does not read
@@ -78,7 +80,7 @@ drawn. The rest are the same either way.
 | `token` | `github.token` | see *Private contributions* below |
 | `fail-on` | `never` | `never`, `behind` (a *letter* day is short), or `holed` |
 | `summary` | `true` | write the report to the job summary |
-| `version` | `latest` | which mossaic release runs the tracking — pin a number to change only when you say so |
+| `version` | `latest` | which mossaic release runs the tracking — pin a number (`0.8.1`, or `v0.8.1` like the `uses:` ref) to change only when you say so |
 
 ### Tracking a picture
 
@@ -143,7 +145,9 @@ cleanly.
         if: >-
           steps.art.outputs.verdict == 'holed' &&
           steps.art.outputs.suggested-holes == '0'
-        run: echo "move it to week ${{ steps.art.outputs.suggested-start-week }}"
+        env:
+          WEEK: ${{ steps.art.outputs.suggested-start-week }}
+        run: echo "move it to week $WEEK"
 ```
 
 `today-short` counts a background day too, so a daily "what do I owe today"
@@ -168,6 +172,14 @@ shell through `env:`, never interpolated into `run:` — a report is data, and
 data does not belong in a command line.
 
 **An issue comment.** No secrets, nothing to sign up for; good first choice.
+The job needs `issues: write` — on the job, beside `runs-on:`, because GitHub
+grants permissions per job and refuses a workflow that puts them on a step:
+
+```yaml
+    permissions:
+      contents: read
+      issues: write
+```
 
 ```yaml
       - name: Comment on the tracking issue
@@ -207,18 +219,26 @@ data does not belong in a command line.
 
 ```yaml
       - name: Email
-        uses: dawidd6/action-send-mail@v18
+        uses: dawidd6/action-send-mail@94de994a9f6fffee200243214e17002e2920bb59 # v18
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          from: contribution art
+          from: Contribution art <${{ secrets.MAIL_USERNAME }}>
           to: ${{ secrets.MAIL_TO }}
           subject: ${{ steps.art.outputs.headline }}
+          body: ${{ steps.art.outputs.markdown }}
           html_body: ${{ steps.art.outputs.markdown }}
+          convert_markdown: true
 ```
+
+`from:` is an address, optionally after a name — a bare name is not a sender.
+The report is Markdown, so `convert_markdown: true` is what turns it into
+HTML; without it the message arrives as one run-on paragraph. The action is
+pinned to a commit, as in [`track.example.yml`](track.example.yml): a tag on
+somebody else's repository can be moved under a workflow that runs unattended.
 
 **Only when something needs doing**, which is the setting most people end up
 wanting — a daily message that says "nothing to do" gets muted within a week:

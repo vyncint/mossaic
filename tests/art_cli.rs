@@ -2561,6 +2561,32 @@ fn the_documented_reports_still_read_the_way_the_docs_print_them() {
             ],
             vec!["290 background days, 1 each"],
         ),
+        // The Quickstart's `--track` sample. It follows a `--background 1`
+        // plan, and showed the no-background report — a format that plan
+        // never prints (#147).
+        (
+            vec![
+                "VYNCINT",
+                "--year",
+                "2027",
+                "--background",
+                "1",
+                "--track",
+                "--merge",
+                m27,
+                "--today",
+                "2027-08-19",
+                "--no-colour",
+                "--plan",
+                "/dev/null",
+            ],
+            vec![
+                "letters     ████████████████████████████  75 of 75 bright",
+                "background  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  0 of 290 at level 1",
+                "owing       290 background days short, 290 contributions",
+                "VYNCINT can still be drawn cleanly — 0 for the letters, 290 for the field.",
+            ],
+        ),
         (
             vec![
                 "VYNCINT",
@@ -2637,6 +2663,27 @@ fn the_documented_reports_still_read_the_way_the_docs_print_them() {
     assert!(
         !docs.contains("day(s)") && !docs.contains("commit(s)") && !docs.contains("pixel(s)"),
         "a parenthesized plural is back in the docs"
+    );
+}
+
+/// CONTRIBUTING's template reference shows the dragon as the worked example,
+/// and its quote drifted from the file: "in all five shades", over rows of 3s
+/// and 4s, for a template whose own header says three shades and whose rows
+/// are 2s and 4s (#147). A contributor copies the example's shape, so the
+/// example is the file.
+#[test]
+fn contributing_quotes_the_dragon_as_it_ships() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dragon =
+        std::fs::read_to_string(root.join("art/templates/dragon.art")).expect("the dragon");
+    let contributing = std::fs::read_to_string(root.join("CONTRIBUTING.md")).expect("CONTRIBUTING");
+
+    // The header and the first two rows, which is what the guide quotes before
+    // its `...`.
+    let quoted = dragon.lines().take(6).collect::<Vec<_>>().join("\n");
+    assert!(
+        contributing.contains(&quoted),
+        "CONTRIBUTING.md no longer quotes the head of art/templates/dragon.art:\n{quoted}"
     );
 }
 

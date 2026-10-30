@@ -46,20 +46,24 @@ labels around them stay text.
 
 ## Quickstart
 
-**No Rust needed.** Every release ships static binaries for Linux, macOS and
-Windows, on Intel and arm64 alike.
+**No Rust needed.** Every release ships prebuilt binaries for Linux and macOS,
+on Intel and arm64 alike, and for Windows on x86-64.
 
 ```sh
 brew install vyncint/tap/mossaic
 ```
 
-Or download one — still no toolchain:
+Or download one — still no toolchain, and the same lines work with Linux's tar
+and macOS's:
 
 ```sh
 target=x86_64-unknown-linux-musl     # or aarch64-unknown-linux-musl,
                                      # aarch64-apple-darwin, x86_64-apple-darwin
+tmp="$(mktemp -d)"
 curl -fsSL "https://github.com/vyncint/mossaic/releases/latest/download/mossaic-${target}.tar.gz" \
-  | tar xz --strip-components=1 --wildcards '*/mossaic*'
+  | tar xzf - -C "$tmp"
+mkdir -p ~/.local/bin && cp "$tmp"/mossaic-*/mossaic* ~/.local/bin/
+export PATH="$HOME/.local/bin:$PATH"   # add it to your shell profile too, if it is not there
 ```
 
 Windows: take the `.zip` from the
@@ -83,14 +87,18 @@ mossaic-art --track        # how far along, and what today owes
 ```
 
 ```
-  letters     ██████████████████░░░░░░░░░░  50 of 75 bright
-  owing       25 days short, 100 contributions between them
+  letters     ████████████████████████████  75 of 75 bright
+  background  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  0 of 290 at level 1
+  owing       290 background days short, 290 contributions
 
-  VYNCINT can still be drawn cleanly — 100 contributions to go.
+  VYNCINT can still be drawn cleanly — 0 for the letters, 290 for the field.
 ```
 
-*(A year part-way through; yours will read differently. The full report, on a
-calendar you can reproduce exactly, is in [docs/ART.md](docs/ART.md#tracking-it-day-by-day).)*
+*(An excerpt, against a saved calendar whose letters are all drawn and whose
+field has not begun — from a checkout, `mossaic-art --track --merge
+art/vyncint-2027.json --today 2027-08-19` after the `--save` above prints
+exactly this. Yours will read differently. The full report is in
+[docs/ART.md](docs/ART.md#tracking-it-day-by-day).)*
 
 **And to look at any graph**, whether or not you are drawing in it:
 
@@ -206,7 +214,8 @@ mossaic-art "I :heart: RUST" --year 2027         # shapes, among the letters
 mossaic-art --font                               # every glyph it can draw
 mossaic-art --track                              # how far along the plan is
 mossaic-art --track --today 2027-06-01           # what a day still to come will owe
-mossaic-art --backfill --repo ../art             # commit just what the plan is short
+mossaic-art --backfill --repo ../art             # what the plan is short: a dry run
+mossaic-art --backfill --repo ../art --write     # …and commit just that
 mossaic-glyphs                                   # this terminal's fallback cells
 ```
 
@@ -405,8 +414,11 @@ kitty protocol.
 
 Nothing is lost but the pixels. The chart falls back to block sextants: the same
 layout, the same Primer colours, the same tooltip with the same wording, and a
-day still two character columns wide and one row tall — so the month labels and
-the weekday gutter line up exactly as they do over the images. Drawn with
+day still one row tall. It is two character columns wide with a blank one
+after it, though, so a week takes three columns where the images take two: the
+whole year needs 165 columns rather than 112, and below that the chart drops to
+a narrower style ([Known limits](#known-limits) has the sizes). The month
+labels and the weekday gutter follow the cells either way. Drawn with
 `--background 1`, the field means every day of the year is green, which is what
 a 365-day streak looks like.
 
@@ -509,11 +521,18 @@ starts next year.
 ```sh
 # Pick your target, then:
 target=x86_64-unknown-linux-musl
-curl -fsSLO "https://github.com/vyncint/mossaic/releases/latest/download/mossaic-${target}.tar.gz"
-curl -fsSLO "https://github.com/vyncint/mossaic/releases/latest/download/mossaic-${target}.tar.gz.sha256"
-sha256sum -c "mossaic-${target}.tar.gz.sha256"     # verify before you run it
-tar xzf "mossaic-${target}.tar.gz"
+base=https://github.com/vyncint/mossaic/releases/latest/download
+curl -fsSLO "${base}/mossaic-${target}.tar.gz"
+curl -fsSLO "${base}/mossaic-${target}.tar.gz.sha256"
+shasum -a 256 -c "mossaic-${target}.tar.gz.sha256"   # verify before you run it
+tar xzf "mossaic-${target}.tar.gz"                 # a mossaic-<version>-<target>/ directory
+mkdir -p ~/.local/bin && cp mossaic-*-"${target}"/mossaic* ~/.local/bin/
+export PATH="$HOME/.local/bin:$PATH"   # add it to your shell profile too, if it is not there
 ```
+
+`shasum` is on macOS and most Linux systems; where it is missing (Alpine, a
+minimal Fedora), `sha256sum -c` reads the same file. The `tar` line is the
+same for GNU tar and macOS's bsdtar.
 
 Each archive holds the three binaries, both licences, the changelog, and a
 `templates/` directory to start your own art from.

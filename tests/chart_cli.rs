@@ -165,3 +165,61 @@ fn a_written_png_reports_success_even_when_the_reader_has_gone() {
     );
     let _ = std::fs::remove_file(&png);
 }
+
+/// The bug template asks for two things this binary prints, and it described
+/// both wrongly (#147): the version was what "`mossaic --help` prints", which
+/// it does not, and `--capabilities` was "four lines" when it is six — seven
+/// when the terminal answered nothing, which is the case a reporter is most
+/// likely to be in. The placeholder is what a reporter checks their paste
+/// against, so its keys are the ones the binary prints, in its order.
+#[test]
+fn the_bug_template_asks_for_what_the_binary_prints() {
+    let template = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".github/ISSUE_TEMPLATE/bug_report.yml"),
+    )
+    .expect("the bug template");
+
+    let version = chart(&["--version"]);
+    assert!(
+        String::from_utf8_lossy(&version.stdout).starts_with("mossaic "),
+        "`--version` is what prints the version"
+    );
+    assert!(
+        template.contains("`mossaic --version` prints it"),
+        "the template sends a reporter to the flag that prints the version"
+    );
+
+    let caps = chart(&["--capabilities"]);
+    let caps = String::from_utf8_lossy(&caps.stdout).into_owned();
+    let lines = caps.lines().count();
+    let prose = template.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        (6..=7).contains(&lines) && prose.contains("it is six or seven lines"),
+        "the template's line count is the binary's: {lines}\n{caps}"
+    );
+
+    // Keys are the unindented lines' first words; an indented line continues
+    // the one above it.
+    let keys = |text: &str| {
+        text.lines()
+            .filter(|line| !line.starts_with(' '))
+            .filter_map(|line| line.split_whitespace().next())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let placeholder = template
+        .split("placeholder: |\n")
+        .nth(1)
+        .and_then(|rest| rest.split("validations:").next())
+        .expect("the capabilities placeholder")
+        .lines()
+        .map(str::trim_start)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        keys(&placeholder),
+        keys(&caps),
+        "the placeholder is shaped like the output:\n{placeholder}\n---\n{caps}"
+    );
+}

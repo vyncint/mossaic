@@ -12,7 +12,9 @@
 #     lockfile — `--locked` is the whole point of it — and `cargo install`
 #     does not. A dependency's own release can therefore break the published
 #     crate days after it was published, with nothing changed here at all.
-#     That is why this runs weekly and not only at publish.
+#     That is the case for a schedule as well as the run at publish. The
+#     schedule is switched off for now (see `on:` below), so between
+#     releases this runs only when dispatched: `gh workflow run install.yml`.
 #   * The binaries running on a machine that has never seen this repository.
 #
 # So nothing here checks the repository out. The version, the MSRV and the
