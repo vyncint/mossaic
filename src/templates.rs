@@ -215,9 +215,26 @@ pub fn skipped() -> Vec<Skipped> {
 /// The error lists the catalogue because the alternative — "no such template" —
 /// leaves you running a second command to find out what you meant, and the
 /// catalogue is short enough to print.
+///
+/// Matched exactly first, then without regard to case against the name and
+/// then the title. `--list-templates` prints both — `dragon  Dragon` — and
+/// `--template Dragon` was refused with a list that had `dragon` in it (#131).
 pub fn find(name: &str) -> Result<Template, String> {
     let catalogue = catalogue();
-    let found = catalogue.iter().find(|template| template.name == name);
+    let found = catalogue
+        .iter()
+        .find(|template| template.name == name)
+        .or_else(|| {
+            catalogue
+                .iter()
+                .find(|template| template.name.to_lowercase() == name.to_lowercase())
+        })
+        .or_else(|| {
+            catalogue
+                .iter()
+                .find(|template| template.title().to_lowercase() == name.to_lowercase())
+        });
+    let name = found.map_or(name, |template| template.name.as_str());
     // A local file with that stem is there and did not parse.
     //
     // Reported even when a built-in of the same name exists, which is the
@@ -225,7 +242,10 @@ pub fn find(name: &str) -> Result<Template, String> {
     // on whether the user's file happened to parse, with nothing printed
     // either way. Somebody who put `templates/dragon.art` there meant it.
     if found.is_none_or(|template| template.origin == Origin::Builtin) {
-        if let Some(broken) = skipped().into_iter().find(|s| s.stem == name) {
+        if let Some(broken) = skipped()
+            .into_iter()
+            .find(|s| s.stem.to_lowercase() == name.to_lowercase())
+        {
             return Err(format!("{}: {}", broken.file, broken.why));
         }
     }

@@ -348,6 +348,8 @@ fn a_shape_reaches_the_commits_it_writes() {
         "--repo",
         &repo,
         "--write",
+        // 2027 is still to come, and a run that writes into it says so.
+        "--future",
         "--name",
         "Tester",
         "--email",
@@ -380,6 +382,262 @@ fn a_shape_reaches_the_commits_it_writes() {
     assert!(!subjects.contains(":heart:"), "{subjects}");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Run git in `dir` and hand back its stdout, failing the test if git does.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "Owner")
+        .env("GIT_AUTHOR_EMAIL", "owner@example.invalid")
+        .env("GIT_COMMITTER_NAME", "Owner")
+        .env("GIT_COMMITTER_EMAIL", "owner@example.invalid")
+        .output()
+        .expect("git runs");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// A repository with work in it already: one commit of `notes.txt` on
+/// `branch`, which is checked out.
+fn repo_with_work(name: &str, branch: &str) -> std::path::PathBuf {
+    let dir = scratch(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", branch]);
+    std::fs::write(dir.join("notes.txt"), "v1\n").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-q", "-m", "work"]);
+    dir
+}
+
+/// `mossaic-art TEXT --write` into `dir`, dated in a year already past so no
+/// confirmation is needed.
+fn write_into(dir: &Path, text: &str) -> Output {
+    art(&[
+        text,
+        "--year",
+        "2026",
+        "--today",
+        "2026-12-31",
+        "--commits",
+        "1",
+        "--repo",
+        dir.to_str().unwrap(),
+        "--write",
+        "--name",
+        "Tester",
+        "--email",
+        "tester@example.invalid",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ])
+}
+
+/// #124: `--write` into a repository that already has history appends to
+/// `main`, keeps every file, and can be run again.
+///
+/// It used to start a new root and `git reset --hard main` on whatever was
+/// checked out: `notes.txt` was deleted, the `work` commit survived only in
+/// the reflog, and a second write failed because the new root did not
+/// contain the first.
+#[test]
+fn write_appends_to_main_and_keeps_what_was_there() {
+    let dir = repo_with_work("write-existing", "main");
+    let work = git(&dir, &["rev-parse", "HEAD"]);
+
+    let first = write_into(&dir, "HI");
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("notes.txt")).unwrap(),
+        "v1\n",
+        "a file the art never touches is still there"
+    );
+    git(&dir, &["merge-base", "--is-ancestor", &work, "main"]);
+    let after_first: usize = git(&dir, &["rev-list", "--count", "main"]).parse().unwrap();
+
+    // Again, with different text — the routine `--backfill --write` is.
+    let second = write_into(&dir, "OK");
+    assert!(
+        second.status.success(),
+        "a second write into the same repository: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let after_second: usize = git(&dir, &["rev-list", "--count", "main"]).parse().unwrap();
+    assert!(
+        after_second > after_first,
+        "{after_first} then {after_second}"
+    );
+    git(&dir, &["merge-base", "--is-ancestor", &work, "main"]);
+    // One line of history, not two roots.
+    assert_eq!(git(&dir, &["rev-list", "--max-parents=0", "main"]), work);
+    // And the work tree is the commit: nothing modified, nothing staged.
+    assert_eq!(git(&dir, &["status", "--porcelain"]), "");
+    assert!(dir.join("count.txt").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #124: uncommitted work is a refusal, not a casualty.
+#[test]
+fn write_refuses_a_work_tree_with_uncommitted_changes() {
+    let dir = repo_with_work("write-dirty", "main");
+    let work = git(&dir, &["rev-parse", "HEAD"]);
+    std::fs::write(dir.join("notes.txt"), "v1\nuncommitted edit\n").unwrap();
+
+    let out = write_into(&dir, "HI");
+    assert_eq!(out.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(error.contains("uncommitted changes"), "{error}");
+    assert!(error.contains("stash"), "and how to get past it: {error}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("notes.txt")).unwrap(),
+        "v1\nuncommitted edit\n",
+        "the edit survives"
+    );
+    assert_eq!(git(&dir, &["rev-parse", "main"]), work, "main did not move");
+    assert_eq!(
+        git(&dir, &["for-each-ref", "refs/mossaic"]),
+        "",
+        "and nothing was left staged"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #124: another branch checked out is a refusal too. This is the issue's
+/// own reproduction: `master`, with an uncommitted edit on top.
+#[test]
+fn write_refuses_a_branch_that_is_not_main() {
+    let dir = repo_with_work("write-master", "master");
+    let work = git(&dir, &["rev-parse", "HEAD"]);
+
+    let out = write_into(&dir, "HI");
+    assert_eq!(out.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(error.contains("has master checked out"), "{error}");
+    assert!(error.contains("switch -c main"), "{error}");
+    assert_eq!(git(&dir, &["rev-parse", "master"]), work);
+    assert_eq!(git(&dir, &["branch", "--list", "main"]), "");
+    assert!(dir.join("notes.txt").exists());
+
+    // With main there, it says to switch rather than to create.
+    git(&dir, &["branch", "main"]);
+    let out = write_into(&dir, "HI");
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(error.contains("switch main"), "{error}");
+    assert!(!error.contains("switch -c"), "{error}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #124: a file in the way is git's to refuse, by name — and nothing moves.
+#[test]
+fn write_does_not_overwrite_an_untracked_file() {
+    let dir = repo_with_work("write-untracked", "main");
+    let work = git(&dir, &["rev-parse", "HEAD"]);
+    std::fs::write(dir.join("count.txt"), "mine\n").unwrap();
+
+    let out = write_into(&dir, "HI");
+    assert!(!out.status.success());
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(error.contains("count.txt"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("count.txt")).unwrap(),
+        "mine\n"
+    );
+    assert_eq!(git(&dir, &["rev-parse", "main"]), work);
+    assert_eq!(git(&dir, &["for-each-ref", "refs/mossaic"]), "");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #124: a directory that is not a repository yet still becomes one, on main.
+#[test]
+fn write_into_a_new_directory_makes_the_repository() {
+    let dir = scratch("write-fresh");
+    let _ = std::fs::remove_dir_all(&dir);
+    let out = write_into(&dir, "HI");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(git(&dir, &["symbolic-ref", "HEAD"]), "refs/heads/main");
+    assert_eq!(git(&dir, &["status", "--porcelain"]), "");
+    let made: usize = git(&dir, &["rev-list", "--count", "main"]).parse().unwrap();
+    assert!(made > 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #125: a `--write` that would date commits after today asks first.
+#[test]
+fn write_refuses_future_dates_without_future() {
+    let dir = scratch("write-future");
+    let _ = std::fs::remove_dir_all(&dir);
+    let repo = dir.to_str().unwrap();
+    for source in [&["HI"][..], &["--template", "invader"][..]] {
+        let mut args = source.to_vec();
+        args.extend([
+            "--year",
+            "2027",
+            "--today",
+            "2026-10-30",
+            "--repo",
+            repo,
+            "--write",
+            "--no-colour",
+            "--plan",
+            "/dev/null",
+        ]);
+        let out = art(&args);
+        assert_eq!(out.status.code(), Some(2), "{source:?}");
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(error.contains("after 2026-10-30"), "{error}");
+        assert!(error.contains("unverified"), "{error}");
+        assert!(
+            error.contains("--save") && error.contains("--track"),
+            "it points at planning instead: {error}"
+        );
+        assert!(error.contains("--future"), "{error}");
+        assert!(!dir.exists(), "{source:?} made a repository anyway");
+
+        // And with the flag, it does what it was asked.
+        args.push("--future");
+        let out = art(&args);
+        assert!(
+            out.status.success(),
+            "{source:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A year already past needs nothing.
+    let past = write_into(&dir, "HI");
+    assert!(
+        past.status.success(),
+        "{}",
+        String::from_utf8_lossy(&past.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // On its own it would do nothing, so it is refused like the others.
+    let alone = art(&["HI", "--year", "2027", "--future", "--plan", "/dev/null"]);
+    assert_eq!(alone.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&alone.stderr).contains("it needs --write"));
 }
 
 /// The Action reads `--format json`, so a shape has to come out of it as valid
@@ -953,23 +1211,162 @@ fn a_background_that_would_hide_the_letters_is_refused() {
     assert!(error.contains("between 0 and 4"), "{error}");
 
     // The subtle one: the shades are fine, but --commits is too small for the
-    // year to hold both of them, so the letters would come out the same colour
-    // as the field.
-    let cramped = art(&[
+    // year to hold five shades, so the background cannot land where it was
+    // asked. #126: 2 and 3 were drawn, with the background a level brighter
+    // than the preview said — and the advice for 1 named 2, which is one of
+    // them. Every count under 4 is refused, and the refusal names 4.
+    for (commits, background) in [("1", "1"), ("2", "1"), ("3", "2")] {
+        let cramped = art(&[
+            "VYNCINT",
+            "--year",
+            "2027",
+            "--background",
+            background,
+            "--commits",
+            commits,
+            "--plan",
+            "/dev/null",
+        ]);
+        assert_eq!(cramped.status.code(), Some(2), "--commits {commits}");
+        let error = String::from_utf8_lossy(&cramped.stderr).into_owned();
+        assert!(
+            error.contains("--background needs --commits 4 or more"),
+            "--commits {commits}: {error}"
+        );
+        assert!(!error.contains("at least 2 commits"), "{error}");
+    }
+
+    // And 4 is enough: the counts 1, 2, 3, 4 land on levels 1 to 4.
+    let enough = art(&[
         "VYNCINT",
         "--year",
         "2027",
         "--background",
         "1",
         "--commits",
-        "1",
+        "4",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
     ]);
-    assert!(!cramped.status.success());
-    let error = String::from_utf8_lossy(&cramped.stderr).into_owned();
-    assert!(error.contains("would not show"), "{error}");
     assert!(
-        error.contains("at least 2 commits"),
-        "it should quote the fix: {error}"
+        enough.status.success(),
+        "{}",
+        String::from_utf8_lossy(&enough.stderr)
+    );
+    assert!(
+        stdout(&enough).contains("background level 1 under letters at level 4"),
+        "{}",
+        stdout(&enough)
+    );
+}
+
+/// #126: the background is priced against the peak the drawing will have.
+///
+/// Over `--merge`, letters landing on a busy day sum with it, so the year's
+/// peak is higher than either input. The background used to be priced at a
+/// quarter of the inputs' peak, and the snapshot it wrote then held it at a
+/// level below the one the preview claimed.
+#[test]
+fn a_background_is_priced_against_the_peak_it_will_have() {
+    let snapshot = scratch("bg-peak.json");
+    let out = art(&[
+        "HI",
+        "--year",
+        "2027",
+        "--start-week",
+        "6",
+        "--background",
+        "2",
+        "--commits",
+        "8",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--snapshot",
+        snapshot.to_str().unwrap(),
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    let body = std::fs::read_to_string(&snapshot).expect("the snapshot was written");
+    let _ = std::fs::remove_file(&snapshot);
+
+    // Read the year back the way the chart does, and check every background
+    // day sits at the level the preview named.
+    let json: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+    let days: Vec<(u64, String)> = json["data"]["user"]["contributionsCollection"]
+        ["contributionCalendar"]["weeks"]
+        .as_array()
+        .expect("weeks")
+        .iter()
+        .flat_map(|week| week["contributionDays"].as_array().expect("days").clone())
+        .map(|day| {
+            (
+                day["contributionCount"].as_u64().expect("a count"),
+                day["contributionLevel"]
+                    .as_str()
+                    .expect("a level")
+                    .to_string(),
+            )
+        })
+        .collect();
+    let peak = days.iter().map(|(count, _)| *count).max().unwrap();
+    let (each, level) = text
+        .lines()
+        .find_map(|line| {
+            let rest = line.strip_prefix("background level ")?;
+            let level: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            let each = rest.split("days, ").nth(1)?.split(' ').next()?;
+            Some((each.replace(',', "").parse::<u64>().ok()?, level))
+        })
+        .unwrap_or_else(|| panic!("no background line in {text}"));
+    // GitHub's own formula, against the snapshot's real peak.
+    let landed = (each * 4).div_ceil(peak).min(4);
+    assert_eq!(
+        landed, level,
+        "{each} a day lands on level {landed} at a peak of {peak}, and the preview said \
+         {level}:\n{text}"
+    );
+
+    // When the letters would not clear the background, the count the refusal
+    // names is one that does — at the peak *it* makes, not today's.
+    let run = |commits: &str| {
+        art(&[
+            "HI",
+            "--year",
+            "2027",
+            "--start-week",
+            "6",
+            "--background",
+            "2",
+            "--commits",
+            commits,
+            "--merge",
+            "art/vyncint-2027.json",
+            "--no-colour",
+            "--plan",
+            "/dev/null",
+        ])
+    };
+    let refused = run("4");
+    assert_eq!(refused.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&refused.stderr).into_owned();
+    let named = error
+        .split("needs at least ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .unwrap_or_else(|| panic!("no count in {error}"));
+    let named_out = run(named);
+    assert!(
+        named_out.status.success(),
+        "--commits {named}, which the refusal named: {}",
+        String::from_utf8_lossy(&named_out.stderr)
     );
 }
 
@@ -2818,4 +3215,400 @@ fn a_picture_on_track_is_not_told_to_move() {
     );
 
     let _ = std::fs::remove_file(&path);
+}
+
+/// #127: the day a user acts on names a ceiling as well as a floor.
+#[test]
+fn today_says_how_much_is_too_much() {
+    let out = art(&[
+        "VYNCINT",
+        "--year",
+        "2026",
+        "--start-week",
+        "6",
+        "--track",
+        "--merge",
+        "art/vyncint-2026.json",
+        // A Friday letter day still owed, then a Saturday outside the text.
+        "--today",
+        "2026-08-21",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert!(
+        text.contains(
+            "a letter day — 110 needed, 0 there, 110 to go, and no more than 146, or \
+             every other letter day costs more"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "not part of the text — anything committed on it shows; no more than 146, \
+             or every other letter day costs more"
+        ),
+        "{text}"
+    );
+}
+
+/// #129: a picture over `--merge` is priced against the calendar under it.
+#[test]
+fn a_picture_over_a_calendar_says_what_it_draws_over() {
+    let snapshot = scratch("dragon-merge.json");
+    let out = art(&[
+        "--template",
+        "dragon",
+        "--year",
+        "2027",
+        "--merge",
+        "art/vyncint-2027.json",
+        "--snapshot",
+        snapshot.to_str().unwrap(),
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert!(
+        text.contains("drawing over 75 days already active (busiest 4)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("peak after merge 4  ·  33 days the picture wants dark already lit"),
+        "{text}"
+    );
+    assert!(
+        text.contains("14 days already brighter than their shade"),
+        "{text}"
+    );
+    // Topped up, not stacked: what `--track` says the same plan still owes.
+    assert!(text.contains("104 days  ·  302 commits"), "{text}");
+
+    // And the snapshot is the year the report describes: a peak of 4, not
+    // the 8 a flat count on top of the letters made.
+    let body = std::fs::read_to_string(&snapshot).expect("the snapshot");
+    let _ = std::fs::remove_file(&snapshot);
+    let json: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+    let peak = json["data"]["user"]["contributionsCollection"]["contributionCalendar"]["weeks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|week| week["contributionDays"].as_array().unwrap().clone())
+        .map(|day| day["contributionCount"].as_u64().unwrap())
+        .max()
+        .unwrap();
+    assert_eq!(peak, 4);
+}
+
+/// #130: a picture backfills the same way text does — days already past, a
+/// warning before the write, and somewhere to write it.
+#[test]
+fn a_picture_backfills_the_way_text_does() {
+    let base = [
+        "--template",
+        "dragon",
+        "--year",
+        "2027",
+        "--merge",
+        "art/vyncint-2027.json",
+        // A level-4 day of the dragon, still owed.
+        "--today",
+        "2027-08-17",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ];
+    let with = |extra: &[&'static str]| {
+        let mut args = base.to_vec();
+        args.extend_from_slice(extra);
+        art(&args)
+    };
+
+    let nowhere = with(&["--backfill"]);
+    assert_eq!(nowhere.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&nowhere.stderr).contains("--backfill needs --repo DIR"),
+        "{}",
+        String::from_utf8_lossy(&nowhere.stderr)
+    );
+
+    let dry = with(&["--backfill", "--repo", "/nonexistent-dry-run"]);
+    let text = stdout(&dry);
+    assert!(
+        dry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
+    // Today is not past: `--track` owes it today, and back-dating is not how.
+    assert!(text.contains("latest 2027-08-15"), "{text}");
+    assert!(text.contains("cannot be drawn cleanly in 2027"), "{text}");
+
+    // The same days, and the same total, `--track` calls already past.
+    let report = with(&["--track", "--format", "json"]);
+    let json: serde_json::Value = serde_json::from_slice(&report.stdout).expect("json");
+    let line = format!(
+        "{} commits across {} days",
+        json["overdue_commits"], json["overdue_days"]
+    );
+    assert!(text.contains(&line), "wanted {line:?} in:\n{text}");
+}
+
+/// #131: `--template` matches what `--list-templates` shows, in any case.
+#[test]
+fn a_template_name_is_not_case_sensitive() {
+    let lower = art(&[
+        "--template",
+        "dragon",
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    for name in ["Dragon", "DRAGON"] {
+        let out = art(&[
+            "--template",
+            name,
+            "--year",
+            "2027",
+            "--no-colour",
+            "--plan",
+            "/dev/null",
+        ]);
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(stdout(&out), stdout(&lower), "{name}");
+    }
+}
+
+/// #131: what is drawn is what is saved, and what `--track` will follow.
+#[test]
+fn text_is_drawn_the_way_it_is_saved() {
+    let out = art(&[
+        "STRAßE",
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert!(
+        text.contains("STRASSE  ·  2027  ·  41 of 53 columns"),
+        "{text}"
+    );
+}
+
+/// #131: a saved picture refuses the text-only flags a named one refuses.
+#[test]
+fn a_saved_picture_refuses_text_flags() {
+    let plan = scratch("picture-plan.json");
+    let plan = plan.to_str().unwrap();
+    let saved = art(&[
+        "--template",
+        "dragon",
+        "--year",
+        "2027",
+        "--save",
+        "--plan",
+        plan,
+        "--no-colour",
+    ]);
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    for (flag, value) in [("--top", "2"), ("--background", "1"), ("--bg", "1")] {
+        let out = art(&["--plan", plan, flag, value, "--no-colour"]);
+        assert_eq!(out.status.code(), Some(2), "{flag}");
+        let error = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(error.contains("a picture"), "{flag}: {error}");
+    }
+    let _ = std::fs::remove_file(plan);
+}
+
+/// #131: `--track WORD` takes the word as a user, and says so when that
+/// leaves nothing to draw.
+#[test]
+fn track_says_what_it_took_as_the_user() {
+    let out = art(&[
+        "--track",
+        "VYNCINT",
+        "--plan",
+        "/nonexistent/mossaic-plan.json",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        error.contains("--track took \"VYNCINT\" as the GitHub user"),
+        "{error}"
+    );
+    assert!(error.contains("mossaic-art VYNCINT --track"), "{error}");
+}
+
+/// A PNG of `width` x `height` RGBA pixels, or one whose header claims a
+/// size its data does not have.
+fn png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        // mossaic does not check CRCs, and nothing else reads these.
+        out.extend_from_slice(&[0; 4]);
+    }
+    let mut raw = Vec::new();
+    for row in rgba.chunks((width * 4) as usize) {
+        raw.push(0);
+        raw.extend_from_slice(row);
+    }
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut header = Vec::new();
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 6, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &header);
+    chunk(
+        &mut out,
+        b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6),
+    );
+    chunk(&mut out, b"IEND", &[]);
+    out
+}
+
+/// #128: a white logo on transparency is drawn with `--invert`, and without
+/// it the empty result says so rather than reporting zero days at exit 0.
+#[test]
+fn a_transparent_image_is_drawn_or_explained() {
+    let (width, height) = (14, 7);
+    let mut pixels = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            let logo = x == 3 || y == 3;
+            pixels.extend_from_slice(if logo {
+                &[255, 255, 255, 255]
+            } else {
+                &[0, 0, 0, 0]
+            });
+        }
+    }
+    let path = scratch("logo.png");
+    std::fs::write(&path, png(width, height, &pixels)).unwrap();
+    let file = path.to_str().unwrap();
+
+    let plain = art(&[
+        "--image",
+        file,
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    assert_eq!(plain.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&plain.stderr).into_owned();
+    assert!(error.contains("nothing to draw"), "{error}");
+    assert!(error.contains("try --invert"), "{error}");
+
+    let inverted = art(&[
+        "--image",
+        file,
+        "--invert",
+        "--year",
+        "2027",
+        "--no-colour",
+        "--plan",
+        "/dev/null",
+    ]);
+    assert!(
+        inverted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inverted.stderr)
+    );
+    // The plus, not the 98-day block the transparent field used to become.
+    assert!(
+        stdout(&inverted).contains("  ·  20 days  ·  "),
+        "{}",
+        stdout(&inverted)
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// #128: a 67-byte file claiming 60000x60000 is refused, not allocated.
+///
+/// Run under a memory cap, which is what made the old allocation abort the
+/// process with exit 134; with overcommit and no cap it could slip past.
+/// Unix only, since the cap is `ulimit` — and on macOS, where `ulimit -v`
+/// cannot be set, it still checks the refusal without proving the bound.
+#[cfg(unix)]
+#[test]
+fn an_image_header_cannot_size_an_allocation() {
+    let mut bomb = png(1, 1, &[0, 0, 0, 255]);
+    // The header's width and height, after the 8-byte signature and the
+    // chunk's length and kind.
+    bomb[16..20].copy_from_slice(&60_000u32.to_be_bytes());
+    bomb[20..24].copy_from_slice(&60_000u32.to_be_bytes());
+    let path = scratch("bomb.png");
+    std::fs::write(&path, &bomb).unwrap();
+
+    let out = Command::new("sh")
+        .args([
+            "-c",
+            "ulimit -v 1048576 2>/dev/null; exec \"$0\" \"$@\"",
+            env!("CARGO_BIN_EXE_mossaic-art"),
+            "--image",
+            path.to_str().unwrap(),
+            "--year",
+            "2027",
+            "--plan",
+            "/dev/null",
+        ])
+        .output()
+        .expect("sh runs");
+    let _ = std::fs::remove_file(&path);
+    let error = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(2), "{error}");
+    assert!(error.contains("60000x60000"), "{error}");
+}
+
+/// #132: the query docs/ART.md gives for making a `--merge` file is the one
+/// the tools themselves ask, so the file it saves has every field they read.
+#[test]
+fn the_documented_calendar_query_is_the_one_the_tools_use() {
+    let docs = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/ART.md"))
+        .expect("docs/ART.md");
+    assert!(
+        docs.contains(mossaic::github::QUERY),
+        "docs/ART.md no longer quotes github::QUERY verbatim:\n{}",
+        mossaic::github::QUERY
+    );
+    for field in [
+        "contributionYears",
+        "totalContributions",
+        "contributionCount",
+        "contributionLevel",
+    ] {
+        assert!(mossaic::github::QUERY.contains(field), "{field}");
+    }
 }

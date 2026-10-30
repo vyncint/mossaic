@@ -310,7 +310,10 @@ rasteriser that draws the chart, so it is what the graph will actually look
 like rather than an impression of it.
 
 Four templates ship with it — `dragon`, `wave`, `pulse` and `invader` — and
-each is a seven-line text file you can copy and edit.
+each is a seven-line text file you can copy and edit. `--template NAME` also
+finds your own `NAME.art` in `./templates/` or `~/.config/mossaic/templates/`
+(`$XDG_CONFIG_HOME/mossaic/templates/` when that is set), and a file there
+shadows a built-in of the same name.
 
 ```sh
 mossaic-art --list-templates                    # what there is, with thumbnails
@@ -338,10 +341,12 @@ Seven rows of shades, and a header that introduces the picture:
 ```
 
 Shades are `0`–`4`, or the blocks ` ░▒▓█` if you would rather read the file as
-a picture. A short row is padded with dark days, so an editor that strips
-trailing whitespace cannot corrupt one. Dropping a file into `art/templates/`
-is all it takes to add a template — `build.rs` finds it, and there is no list
-to edit. See [CONTRIBUTING §11](CONTRIBUTING.md#11-adding-a-pixel-art-template).
+a picture, and `#` starts a comment anywhere on a line. A short row is padded
+with dark days, and an all-dark row an editor has stripped to an empty line
+still counts as one when that makes seven rows — so trailing whitespace cannot
+corrupt a picture; where the count is ambiguous, the error says which lines.
+Dropping a file into `art/templates/` is all it takes to add a template —
+`build.rs` finds it, and there is no list to edit. See [CONTRIBUTING §11](CONTRIBUTING.md#11-adding-a-pixel-art-template).
 
 > **Draw one?** [#57](https://github.com/vyncint/mossaic/issues/57) is an open
 > invitation with the whole thing written out — the editor's keys, the format,
@@ -385,7 +390,8 @@ drawn as `·` and cost nothing, because they are not days the year has.
 quantises it to five shades. A **dark pixel becomes a busy day**, the way ink
 reads on paper; `--invert` turns that over, and `--dither` spreads the rounding
 error into neighbouring days so a gradient reads as one rather than as four
-bands. Every source pixel that lands in a cell is averaged into it, because the
+bands. A transparent pixel is an empty day either way, so a white logo on
+transparency wants `--invert` — and an image that comes out empty says so. Every source pixel that lands in a cell is averaged into it, because the
 shrink is enormous and sampling one pixel in twenty throws the picture away.
 
 PNG only, and it says so: a JPEG is named as a JPEG with the one command that

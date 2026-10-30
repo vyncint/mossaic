@@ -323,10 +323,14 @@ The file is a header and seven rows:
   picture whose last column is dark.
 - **Shades are `0` to `4`**, or the blocks ` ░▒▓█` if you would rather read the
   file as a picture. The two may be mixed; they mean the same thing.
-- **Lines starting with `#` are comments.** `name`, `author` and `description`
-  are read; anything else is ignored, so a `# note:` line is fine.
+- **`#` starts a comment**, on a line of its own or after a row. `name`,
+  `author` and `description` are read from header lines; anything else is
+  ignored, so a `# note:` line is fine.
 - **A line of length zero is skipped**, so the header can breathe. A row of
-  *spaces* is not empty — it is seven dark days, and it is kept.
+  *spaces* is not empty — it is seven dark days, and it is kept. If an editor
+  strips one down to an empty line, an empty line after the first row is read
+  as an all-dark row when that makes the count exactly seven; write dark rows
+  as `0`s and the question never comes up.
 
 The file name is what people type after `--template`, so it must be lowercase
 letters, digits and dashes.

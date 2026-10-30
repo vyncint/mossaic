@@ -9,7 +9,14 @@ use serde::Deserialize;
 
 use crate::calendar::{Calendar, Day};
 
-const QUERY: &str = "\
+/// The GraphQL query every calendar here is read with.
+///
+/// Public, and quoted in docs/ART.md, because a saved response to it is what
+/// `--merge` and `mossaic --file` read — and a hand-written query that leaves
+/// out a field the parser needs (`contributionYears`, say) fails with
+/// `missing field` and no hint of what to ask for instead (#132). A test
+/// holds the documented copy to this one.
+pub const QUERY: &str = "\
 query($login: String!, $from: DateTime!, $to: DateTime!) {
   user(login: $login) {
     login
