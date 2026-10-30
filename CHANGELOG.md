@@ -9,6 +9,62 @@ listed under a **Changed** or **Removed** heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`mossaic-art --write` into an existing repository deleted its files and
+  moved its branch** (#124). It started a new root and ran `git reset --hard
+  main` on whatever was checked out, so uncommitted work was lost and the
+  previous history survived only in the reflog; a second write into the
+  same repository then failed. It now appends to `main`, refuses a work tree
+  with uncommitted changes or a branch other than `main` (saying what to
+  run), and moves the files forward as a fast-forward that never overwrites
+  anything.
+- **`--background` with `--commits` under 4 promised shades the year would
+  not have** (#126). Below a busiest day of 4 the background lands a level
+  or more brighter than asked, so it is now refused, naming 4. Over
+  `--merge` the background is priced against the peak the drawing will
+  really have, and when the letters would not clear it the refusal names a
+  count that does.
+- **A picture's `--commits N` priced the brightest day at `⌊3N/4⌋ + 1`, not
+  `N`** (#126). The level-4 days now get `N`, so the year's peak is the one
+  every darker shade was priced against. The default of 4 is unchanged.
+- **A picture drawn over `--merge` ignored the calendar** (#129). It is now
+  topped up to its shades against the year's real peak, and the preview says
+  what it draws over, the peak after the merge, and how many days already
+  lit cannot be put right.
+- **A picture's `--backfill` disagreed with `--track` and with text** (#130).
+  It committed today as well as the days past, gave no warning before
+  writing into a year that cannot be drawn cleanly, and without `--repo`
+  did not refuse. Pictures and text now share one backfill.
+- **`--image` drew nothing for a light shape on transparency, and a solid
+  block with `--invert`** (#128). A transparent pixel is now no ink either
+  way, and an image that comes out empty is refused with a hint to try
+  `--invert`. A PNG whose header claims more pixels than its data holds is
+  refused before anything is allocated; a 67-byte file claiming
+  60000×60000 used to abort the process.
+- **Hand-edited `.art` files and template names** (#131): a `# comment`
+  after a shade row, a leading byte-order mark, and an all-dark row
+  stripped to an empty line are read rather than refused (or the error names
+  the empty lines); `--template Dragon` finds `dragon`; text such as
+  `STRAßE` is drawn the way it is saved; `--track WORD` says it took the word
+  as the user; and a saved picture plan refuses `--top` and `--background`
+  as a named picture does.
+- **docs/ART.md** (#132): the `♥` example, the eight-character note, the
+  tracking prices and header now match what the tool prints, and the page
+  carries the exact `gh api graphql` query that saves a `--merge` file, with
+  the fields it needs. The user template directories are documented.
+
+### Added
+
+- **`mossaic-art --future`** (#125). `--write` now refuses to date commits
+  after today without it, explains why, and points at `--save` and
+  `--track`; docs/ART.md's first example takes that route.
+- **`--track` names a ceiling for today** (#127): "4 to go, and no more than
+  4, or every other letter day costs more" — and the same on a day outside
+  the text when no background is drawn.
+- `mossaic::github::QUERY` and `mossaic::art::{writable, price_picture,
+  picture_commits, Priced}` are public.
+
 ### Changed
 
 - **termlens 0.11** for the PTY suite, and the vendored skill with it. 0.11

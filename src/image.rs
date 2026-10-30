@@ -17,9 +17,13 @@
 //! A dark pixel becomes a *bright* day. Contribution art is ink on an empty
 //! field: black on white in the source is the densest green on the graph, the
 //! way a drawing on paper reads. `invert` turns it over for a picture that was
-//! light on dark to begin with.
+//! light on dark to begin with. A transparent pixel is no ink either way.
 
 use crate::art::{Canvas, CANVAS_COLS, CANVAS_ROWS};
+
+/// The most pixels an image may have. Forty million is a 40-megapixel photo,
+/// far past anything worth shrinking to 53x7, and its bitmap is 160 MB.
+const MAX_PIXELS: usize = 40_000_000;
 
 /// A decoded image: 8-bit RGBA, row-major.
 #[derive(Debug, Clone)]
@@ -157,14 +161,45 @@ pub fn decode_png(bytes: &[u8]) -> Result<Bitmap, String> {
         return Err("an indexed PNG with no palette".to_string());
     }
 
-    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&idat)
-        .map_err(|error| format!("the image data would not inflate: {error:?}"))?;
-
+    // Bounded before anything is sized from the header. The header is four
+    // bytes a side that anyone can write, and the decoded bitmap was
+    // allocated from them before the data was looked at: a 67-byte file
+    // claiming 60000x60000 asked for 14.4 GB and aborted the process (#128).
+    let pixels_claimed = width.checked_mul(height).filter(|n| *n <= MAX_PIXELS);
+    let Some(pixels_claimed) = pixels_claimed else {
+        return Err(format!(
+            "the image claims to be {width}x{height} pixels, past the {} million \
+             this reads — shrink it first; it becomes 53x7 days either way",
+            MAX_PIXELS / 1_000_000
+        ));
+    };
     let sample = usize::from(depth) / 8;
     let stride = width * channels * sample;
     let step = channels * sample;
+    // One filter byte a row, then the row. Bounded by MAX_PIXELS above, so
+    // none of this arithmetic can overflow.
+    let expected = height * (stride + 1);
+
+    // Inflated no further than the header says it should go, so a small
+    // compressed stream cannot expand into a large allocation either.
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&idat, expected).map_err(
+        |error| match error.status {
+            miniz_oxide::inflate::TINFLStatus::HasMoreOutput => {
+                format!("the image data is longer than a {width}x{height} image can be")
+            }
+            status => format!("the image data would not inflate: {status:?}"),
+        },
+    )?;
+    if raw.len() < expected {
+        return Err(format!(
+            "the image data is short: {width}x{height} needs {expected} bytes, and \
+             it inflates to {}",
+            raw.len()
+        ));
+    }
+
     let mut previous = vec![0u8; stride];
-    let mut pixels = Vec::with_capacity(width * height * 4);
+    let mut pixels = Vec::with_capacity(pixels_claimed * 4);
 
     for row in 0..height {
         let line = row
@@ -301,14 +336,22 @@ fn describe_format(bytes: &[u8]) -> String {
     }
 }
 
-/// How bright a pixel is, 0.0 for black and 1.0 for white, composited over
-/// white so that a transparent background reads as empty rather than as ink.
-fn luminance(rgba: [u8; 4]) -> f32 {
+/// How much ink a pixel carries, 0.0 for none and 1.0 for full.
+///
+/// Transparency is *no ink*, in both directions. The luminance used to be
+/// composited over white, so a white logo on a transparent background was
+/// white on white — nothing at all — and with `invert` it became white
+/// everywhere, a solid block (#128). Weighting the ink by alpha instead keeps
+/// the shape either way: an opaque pixel inks by its brightness, a clear one
+/// by nothing.
+fn ink(rgba: [u8; 4], invert: bool) -> f32 {
     let alpha = f32::from(rgba[3]) / 255.0;
-    let over = |channel: u8| (f32::from(channel) * alpha + 255.0 * (1.0 - alpha)) / 255.0;
+    let channel = |value: u8| f32::from(value) / 255.0;
     // Rec. 709 luma weights, which is what "how bright does this look" means
     // for sRGB values.
-    0.2126 * over(rgba[0]) + 0.7152 * over(rgba[1]) + 0.0722 * over(rgba[2])
+    let bright = 0.2126 * channel(rgba[0]) + 0.7152 * channel(rgba[1]) + 0.0722 * channel(rgba[2]);
+    // Dark is ink, the way a drawing on paper reads; `invert` turns it over.
+    alpha * if invert { bright } else { 1.0 - bright }
 }
 
 /// Shrink `bitmap` to at most [`CANVAS_COLS`] by [`CANVAS_ROWS`], keeping its
@@ -336,13 +379,11 @@ fn ink_grid(bitmap: &Bitmap, invert: bool) -> (Vec<Vec<f32>>, usize, usize) {
             let mut count = 0.0;
             for y in y0..y1.min(bitmap.height) {
                 for x in x0..x1.min(bitmap.width) {
-                    sum += luminance(bitmap.at(x, y));
+                    sum += ink(bitmap.at(x, y), invert);
                     count += 1.0;
                 }
             }
-            let bright = if count > 0.0 { sum / count } else { 1.0 };
-            // Ink, not brightness: a dark pixel is a busy day.
-            *cell = if invert { bright } else { 1.0 - bright };
+            *cell = if count > 0.0 { sum / count } else { 0.0 };
         }
     }
     (grid, cols, rows)
@@ -417,6 +458,21 @@ pub fn load(path: &std::path::Path, options: Options) -> Result<Canvas, String> 
         .map_err(|error| format!("could not read {}: {error}", path.display()))?;
     let bitmap = decode_png(&bytes).map_err(|why| format!("{}: {why}", path.display()))?;
     let mut canvas = to_canvas(&bitmap, options)?;
+    // An empty canvas is a picture of nothing, and drawing it reported "0 days
+    // · 0 commits" at exit 0. The usual cause is the direction: a light shape
+    // on dark, or on nothing, reads as no ink until it is turned over.
+    if canvas.levels().all(|level| level == 0) {
+        return Err(format!(
+            "{}: every day came out empty, so there is nothing to draw. {}",
+            path.display(),
+            if options.invert {
+                "--invert reads bright pixels as ink; a dark shape wants it left off."
+            } else {
+                "A dark pixel is ink here — for a light shape on dark or on \
+                 transparency, try --invert."
+            }
+        ));
+    }
     let mut meta = canvas.meta().clone();
     meta.name = path
         .file_stem()
